@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "servers": {
+    "db": {
+      "command": "docker run --rm --label ws.devserver={project}/db --name {project}-db -p 127.0.0.1:{port}:27017 -v {project}-mongo:/data/db mongo:8",
+      "port": "auto",
+      "expose": false,
+      "description": "MongoDB 8 for the ERP (data kept in the {project}-mongo volume)"
+    },
+    "web": {
+      "command": "npm run build && if [ \"$SEED_DEMO\" = \"1\" ]; then npm run seed; fi && npx next start -H 127.0.0.1 -p {port}",
+      "port": "auto",
+      "expose": true,
+      "depends_on": ["db"],
+      "ready": { "http": "/sign-in" },
+      "env": {
+        "MONGODB_URI": "mongodb://127.0.0.1:{ports.db}/biios_erp",
+        "BETTER_AUTH_URL": "{url}",
+        "NEXT_DIST_DIR": ".next-review",
+        "SEED_DEMO": "1",
+        "NEXT_TELEMETRY_DISABLED": "1"
+      },
+      "description": "Biios Project Manager (production build). SEED_DEMO=1 loads demo data on first start (sign in as erp-bal@biios.in / ERPbiios#2026); remove it and reset the db volume before real use"
+    }
+  }
+}

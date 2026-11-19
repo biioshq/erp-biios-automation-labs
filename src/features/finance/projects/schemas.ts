@@ -1,0 +1,74 @@
+import { z } from "zod";
+import { PROJECT_DOCUMENT_TYPES, PROJECT_STATUSES, valuesOf } from "@/lib/constants";
+import { money, objectId, optionalDateInput, optionalMoney, optionalText, requiredText } from "@/lib/zod";
+
+/** Validation shared by the project form (client) and the project actions (server). Client-safe. */
+
+/** Accent colours offered in the project form (stored on the project, used by cards and charts). */
+export const PROJECT_COLORS = [
+  { value: "#4a82cc", label: "Blue" },
+  { value: "#ff8800", label: "Orange" },
+  { value: "#12958a", label: "Teal" },
+  { value: "#7c5cd6", label: "Violet" },
+  { value: "#d4517a", label: "Rose" },
+  { value: "#3ba776", label: "Green" },
+  { value: "#d99206", label: "Amber" },
+  { value: "#6b7a99", label: "Slate" },
+] as const;
+
+export const PROJECT_SORTS = [
+  { value: "newest", label: "Newest first" },
+  { value: "name", label: "Name (A to Z)" },
+  { value: "budget", label: "Budget (high to low)" },
+  { value: "spent", label: "Spent (high to low)" },
+  { value: "end", label: "End date (soonest)" },
+] as const;
+export type ProjectSort = (typeof PROJECT_SORTS)[number]["value"];
+
+export const PROJECT_TABS = [
+  { value: "overview", label: "Overview" },
+  { value: "budget", label: "Budget" },
+  { value: "expenses", label: "Expenses" },
+  { value: "inventory", label: "Inventory used" },
+  { value: "team", label: "Team" },
+  { value: "timeline", label: "Timeline" },
+  { value: "documents", label: "Documents" },
+] as const;
+export type ProjectTab = (typeof PROJECT_TABS)[number]["value"];
+
+export const projectFormSchema = z
+  .object({
+    name: requiredText("Project name", 160),
+    client: optionalText(160),
+    description: optionalText(4000),
+    status: z.enum(valuesOf(PROJECT_STATUSES), { error: "Pick a status" }),
+    budget: money,
+    startDate: optionalDateInput,
+    endDate: optionalDateInput,
+    color: z.string().regex(/^#[0-9a-f]{6}$/i, "Pick a colour"),
+    stageBudgets: z
+      .object({
+        research: optionalMoney,
+        design: optionalMoney,
+        prototype: optionalMoney,
+        development: optionalMoney,
+        testing: optionalMoney,
+        production: optionalMoney,
+        deployment: optionalMoney,
+      })
+      .optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.startDate && v.endDate && v.endDate < v.startDate) {
+      ctx.addIssue({ code: "custom", path: ["endDate"], message: "End date cannot be before the start date" });
+    }
+  });
+
+export type ProjectFormInput = z.input<typeof projectFormSchema>;
+export type ProjectFormValues = z.output<typeof projectFormSchema>;
+
+export const projectIdSchema = z.object({ id: objectId });
+export const projectStatusSchema = z.object({ id: objectId, status: z.enum(valuesOf(PROJECT_STATUSES)) });
+
+export const documentRefSchema = z.object({ projectId: objectId, fileId: objectId });
+export const documentTypeSchema = documentRefSchema.extend({ documentType: z.enum(valuesOf(PROJECT_DOCUMENT_TYPES)) });

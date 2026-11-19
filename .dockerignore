@@ -1,0 +1,9 @@
+node_modules
+.next
+.next-review
+storage
+.env*
+!.env.example
+.git
+.claude
+*.tsbuildinfo

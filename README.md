@@ -78,7 +78,7 @@ Upload an image (PNG, JPEG, WebP) or a PDF on the expense form. Digital PDFs are
 scanned PDFs go through Tesseract (English model bundled, no external calls). The GST parser extracts vendor, address,
 GSTIN (check digit validated), invoice number and date, taxable amount, CGST, SGST, IGST, CESS, HSN/SAC, total and
 payment method, each with a confidence score. Fields under 75% confidence are highlighted for review. Large phone
-photos are shrunk in the browser before upload. Files are stored in Cloudinary (`CLOUDINARY_URL`, as private assets),
+photos are shrunk in the browser before upload. Files are stored in Cloudinary (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, as private assets),
 an S3-compatible bucket (`S3_BUCKET`), or on local disk under `STORAGE_DIR` (default `./storage`), and are served only
 to signed-in users.
 

@@ -6,7 +6,7 @@
 | --- | --- |
 | Node.js 20.9+ (24 LTS recommended) | Or the Docker image below. |
 | MongoDB 7+ | MongoDB Atlas (M10 or larger for production) or a self-hosted replica set. A replica set turns on multi-document transactions for the inventory ledger; a standalone server also works, with compensating rollbacks. |
-| File storage | Cloudinary (`CLOUDINARY_URL`, recommended, required on Vercel), an S3-compatible bucket (`S3_BUCKET`), or a persistent disk (`STORAGE_DIR`). Back it up with the database. |
+| File storage | Cloudinary (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`; recommended, required on Vercel), an S3-compatible bucket (`S3_BUCKET`), or a persistent disk (`STORAGE_DIR`). Back it up with the database. |
 | HTTPS | Put the app behind a TLS-terminating proxy or platform. Set `BETTER_AUTH_URL` to the public `https://` URL; cookies become secure automatically. |
 
 ## Deploy to Vercel (step by step)
@@ -64,8 +64,13 @@ It should print `transactions on` and `Ready: 15 app collections, 59 indexes`. T
 
 ### 4. Set up Cloudinary for receipts and documents
 
-1. Sign in to Cloudinary. Go to **Settings > API Keys** and copy the **API environment variable**; it looks like
-   `cloudinary://<api_key>:<api_secret>@<cloud_name>`.
+1. Sign in to Cloudinary and open **Settings > API Keys**. Note three values:
+   - **Cloud name**, shown at the top of the page (for example `dx1abc2de`) → `CLOUDINARY_CLOUD_NAME`
+   - **API Key**, a number such as `123456789012345` → `CLOUDINARY_API_KEY`
+   - **API Secret**: click the eye icon first; copied while hidden it is only `*****` → `CLOUDINARY_API_SECRET`
+
+   Copy the values only, not the "API environment variable" line: in the console that line shows
+   `<your_api_key>` and `<your_api_secret>` placeholders, not your real key and secret.
 2. Go to **Settings > Security** and turn on **Allow delivery of PDF and ZIP files** (new accounts have it off). PDFs
    still work without it, but they load faster with it on.
 3. Nothing else to create: files are uploaded to the folder `biios-pm` as private (authenticated) assets that only the
@@ -82,7 +87,9 @@ It should print `transactions on` and `Ready: 15 app collections, 59 indexes`. T
    | --- | --- |
    | `MONGODB_URI` | the Atlas string from step 2 |
    | `BETTER_AUTH_SECRET` | a new random secret: `openssl rand -base64 32` |
-   | `CLOUDINARY_URL` | from step 4 |
+   | `CLOUDINARY_CLOUD_NAME` | Cloud name from step 4 |
+   | `CLOUDINARY_API_KEY` | API Key from step 4 |
+   | `CLOUDINARY_API_SECRET` | API Secret from step 4 (shown with the eye icon) |
    | `CRON_SECRET` | a new random secret: `openssl rand -hex 24` |
    | `ALLOW_OPEN_SIGNUP` | `false` |
    | `NEXT_PUBLIC_COMPANY_STATE_CODE` | `27` (Maharashtra; decides CGST+SGST vs IGST) |
@@ -97,7 +104,11 @@ It should print `transactions on` and `Ready: 15 app collections, 59 indexes`. T
 1. Open `https://<your-project>.vercel.app/api/health`. You should see
    `{"status":"ok","db":"up","storage":"cloudinary",...}`.
    - `"db":"down"`: check `MONGODB_URI` and Atlas Network Access.
-   - `"storage":"local"`: `CLOUDINARY_URL` is missing.
+   - `"storage":"local"`: the Cloudinary variables are missing.
+
+   Then, signed in as the admin, open `https://<your-project>.vercel.app/api/health?check=storage`. It uploads a
+   tiny test file to Cloudinary, reads it back and deletes it. `"ok":true` means receipts will upload; otherwise
+   `message` and `problems` say which Cloudinary value to fix.
 2. Open the app and sign in (demo: `erp-bal@biios.in` / `ERPbiios#2026`), or go to `/sign-up` to create the admin.
 3. Change the admin password: user menu at the bottom of the sidebar > **Change password**.
 4. Add an expense with a receipt photo to confirm uploads and OCR.
@@ -140,7 +151,9 @@ the schedule in `vercel.json`, for example `"0 * * * *"` for hourly.
 | Symptom | Fix |
 | --- | --- |
 | Sign-in shows "Invalid origin" or nothing happens | `BETTER_AUTH_URL` does not match the address in the browser. Set it to the exact `https://` address and redeploy. For a second domain, add it to `TRUSTED_ORIGINS` (comma-separated). |
-| "File storage is not set up on this deployment" | Add `CLOUDINARY_URL` and redeploy. |
+| "File storage is not set up on this deployment" | Add `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET`, then redeploy. |
+| Receipt upload says Cloudinary rejected the API key, the API secret or the cloud name | Copy that value again from Cloudinary > Settings > API Keys (click the eye icon for the secret), update it in Vercel and redeploy. `/api/health?check=storage` confirms the fix. |
+| "Cloudinary is not set up correctly … placeholder" | A value still holds `<your_api_key>`, `your_api_secret` or `*****`. Paste the real value. |
 | Pages show "The database is not reachable" | Atlas Network Access or `MONGODB_URI` (and URL-encode symbols in the password). |
 | Recurring expenses did not post | `CRON_SECRET` missing, or check **Settings > Cron Jobs** and the function logs. |
 
@@ -176,9 +189,15 @@ the schedule in `vercel.json`, for example `"0 * * * *"` for hourly.
 
 **Turn it on**
 
-- Vercel: Settings > Environment Variables: add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and, if your company
-  domain is not `biios.in`, `GOOGLE_ALLOWED_DOMAINS`. Redeploy.
+- Vercel: Settings > Environment Variables: add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as two rows, with
+  **Production** ticked, and, if your company domain is not `biios.in`, `GOOGLE_ALLOWED_DOMAINS`. Then
+  **Deployments > ... > Redeploy**: variables reach only deployments made after they were added.
 - Local or review server: put the same variables in `.env.local` (never commit it) and restart.
+
+**Check it:** open `https://<your-app>/api/health`. `"googleSignIn":"on"` means the button is on the sign-in page.
+Otherwise it reads `"off: ..."` with the reason, for example `GOOGLE_CLIENT_SECRET is missing`, a Client ID that
+does not end in `.apps.googleusercontent.com`, or variables named `AUTH_GOOGLE_ID` / `GOOGLE_ID` from another guide.
+The same reason is in the deployment's logs at start-up. A wrong Google value never stops email sign-in.
 
 If Google shows **redirect_uri_mismatch**, the address in the browser is not in the list from step 4, or
 `BETTER_AUTH_URL` does not match it. Preview deployments get new addresses each time, so sign in to previews with

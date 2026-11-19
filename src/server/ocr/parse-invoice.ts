@@ -49,7 +49,10 @@ const AMOUNT_TOKEN_RE = /(?<![\w.])(?:₹|rs\.?|inr)?\s*(\d{1,3}(?:,\d{2,3})+(?:
 
 /** All money-looking numbers on a line, with percentages and long ids removed. */
 function amountsOnLine(line: string): number[] {
-  const withoutPercents = line.replace(/\d+(?:\.\d+)?\s*%/g, " ");
+  const withoutPercents = line
+    .replace(/\d+(?:\.\d+)?\s*%/g, " ")
+    // Short bracketed marks are column units, not amounts: "(₹)" is often read as "(3)" or "(53)".
+    .replace(/\(\s*[^\s()]{1,3}\s*\)/g, " ");
   const out: number[] = [];
   for (const match of withoutPercents.matchAll(AMOUNT_TOKEN_RE)) {
     const digits = match[1].replace(/,/g, "");
@@ -138,6 +141,22 @@ const LABELS: LabelSpec[] = [
   },
 ];
 
+/**
+ * Labels that start another field. Two-column invoices come out of OCR with both columns on one
+ * line ("SGST @ 9% 13,590.00 Grand Total 1,78,180.00"), so a value ends where the next label starts.
+ */
+const FIELD_LABEL_RE =
+  /\b(grand\s*total|sub\s*-?\s*total|net\s*(amount|payable|total)|total\s*(gst|tax|amount|value|payable|invoice)|amount\s*payable|taxable|assessable\s*value|c\.?\s?gst|s\.?\s?gst|utgst|i\.?\s?gst|cess|round(ed)?\s*off|amount\s*in\s*words|invoice\s*(no|number|date|#)|due\s*date|balance\s*due)\b/i;
+
+/** The text after a label, up to the next field's label on the same line. */
+function valueSegment(text: string, pattern: RegExp): string | null {
+  const match = pattern.exec(text);
+  if (!match) return null;
+  const rest = text.slice(match.index + match[0].length);
+  const next = FIELD_LABEL_RE.exec(rest);
+  return next ? rest.slice(0, next.index) : rest;
+}
+
 function labelledAmount(lines: TextLine[], spec: LabelSpec): OcrField<number> {
   for (let p = 0; p < spec.patterns.length; p++) {
     const pattern = spec.patterns[p];
@@ -147,12 +166,17 @@ function labelledAmount(lines: TextLine[], spec: LabelSpec): OcrField<number> {
       const line = lines[i];
       if (!pattern.test(line.text)) continue;
       if (spec.exclude?.test(line.text)) continue;
-      // A tax table header row ("CGST Rate Amount") has no amounts; look one line down.
-      let amounts = amountsOnLine(line.text.replace(pattern, " "));
+      let amounts = amountsOnLine(valueSegment(line.text, pattern) ?? "");
       let confidence = line.confidence;
-      if (amounts.length === 0 && lines[i + 1]) {
-        amounts = amountsOnLine(lines[i + 1].text);
-        confidence = Math.min(confidence, lines[i + 1].confidence) * 0.8;
+      // A tax table header row ("CGST Rate Amount") has no amounts; look one line down, unless
+      // that line is another field's label or an item row (many amounts).
+      const below = lines[i + 1];
+      if (amounts.length === 0 && below && !FIELD_LABEL_RE.test(below.text)) {
+        const belowAmounts = amountsOnLine(below.text);
+        if (belowAmounts.length <= 3) {
+          amounts = belowAmounts;
+          confidence = Math.min(confidence, below.confidence) * 0.8;
+        }
       }
       if (amounts.length === 0) continue;
       const value = amounts[amounts.length - 1];
@@ -338,9 +362,10 @@ export function parseInvoiceText(input: string | TextLine[]): InvoiceExtraction 
     const addressLines: string[] = [];
     let addressConfidence = 1;
     for (const line of lines.slice(vendorIndex + 1, vendorIndex + 6)) {
-      if (/gstin|gst\s*no|phone|mobile|tel|email|e-mail|invoice|bill\s*to|buyer|www\.|state\s*code|pan\b/i.test(line.text)) break;
-      if (HEADER_NOISE.test(line.text)) continue;
-      addressLines.push(line.text);
+      const text = withoutRightColumn(line.text);
+      if (!text || /gstin|gst\s*no|phone|mobile|tel|email|e-mail|invoice|bill\s*to|buyer|www\.|state\s*code|pan\b/i.test(text)) break;
+      if (HEADER_NOISE.test(text)) continue;
+      addressLines.push(text);
       addressConfidence = Math.min(addressConfidence, line.confidence);
     }
     const address = addressLines.join(", ");
@@ -388,8 +413,19 @@ function reconcileAmounts(r: InvoiceExtraction): InvoiceExtraction {
   return r;
 }
 
+/**
+ * Drops the right-hand column that OCR joins onto vendor lines:
+ * "TechVision Technologies Pvt. Ltd. Invoice No. : INV-1" -> "TechVision Technologies Pvt. Ltd.".
+ */
+const RIGHT_COLUMN_RE =
+  /\s+(?:tax\s+invoice\b|invoice\s*(?:no|number|#|date)\b|inv\.?\s*(?:no|date)\b|bill\s*(?:no|date)\b|dated?\s*[:\-]|due\s*date\b|place\s*of\s*supply\b|(?:phone|mobile|tel|e-?mail)\s*[:\-]).*$/i;
+
+function withoutRightColumn(text: string) {
+  return text.replace(RIGHT_COLUMN_RE, "").trim();
+}
+
 function cleanName(text: string) {
-  return text.replace(/^(m\/s\.?|messrs\.?)\s*/i, "").replace(/[|:]+$/, "").trim();
+  return withoutRightColumn(text).replace(/^(m\/s\.?|messrs\.?)\s*/i, "").replace(/[|:]+$/, "").trim();
 }
 
 function clamp01(n: number) {

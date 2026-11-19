@@ -41,10 +41,13 @@ export type InvoiceExtraction = {
 };
 
 
+/** File types the receipt reader handles. */
+export const OCR_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "application/pdf"] as const;
+
 /** Fields below this confidence are highlighted for review in the UI. */
 export const LOW_CONFIDENCE = 0.75;
 
-/** What /api/ocr returns. */
+/** What /api/ocr returns. `ocr` is null, with `error` saying why, when the receipt is stored but could not be read. */
 export type OcrResponse = {
   file: import("@/features/files/types").FileDTO;
   ocr: { fields: InvoiceExtraction; overallConfidence: number; source: "image-ocr" | "pdf-text" | "pdf-ocr"; durationMs: number } | null;

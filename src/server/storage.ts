@@ -3,12 +3,14 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { cloudinaryStatus, type CloudinarySettings } from "./cloudinary-config";
 
 /**
  * File storage for receipts, documents and attachments.
  *
  * Three drivers behind one API (saveUpload / readStoredFile / deleteStoredFile), picked in this order:
- *   - cloudinary: when CLOUDINARY_URL (or CLOUDINARY_CLOUD_NAME + API key + secret) is set.
+ *   - cloudinary: when CLOUDINARY_CLOUD_NAME + CLOUDINARY_API_KEY + CLOUDINARY_API_SECRET (or
+ *     CLOUDINARY_URL) is set; see cloudinary-config.ts.
  *     Stored as private "authenticated" assets: images and PDFs as image resources, other
  *     files as raw resources. Recommended on Vercel.
  *   - s3:         when S3_BUCKET is set. Any S3-compatible bucket (Cloudflare R2, AWS S3, MinIO).
@@ -47,7 +49,15 @@ export const ALLOWED_MIME_TYPES: Record<string, string> = {
   "image/svg+xml": "svg",
 };
 
-export class UploadError extends Error {}
+/** A problem the person uploading should see as is; `status` is the HTTP status to answer with. */
+export class UploadError extends Error {
+  constructor(
+    message: string,
+    readonly status = 400,
+  ) {
+    super(message);
+  }
+}
 
 /* Drivers */
 
@@ -137,27 +147,58 @@ export function cloudinaryLocation(storageKey: string, folder = process.env.CLOU
   };
 }
 
+/**
+ * Turns a Cloudinary error into what to fix. Cloudinary answers bad settings with 401s whose
+ * messages name the part that is wrong ("Unknown API key", "Invalid Signature", "Invalid cloud_name").
+ */
+function cloudinaryFailure(action: string, error: unknown, settings: CloudinarySettings): Error {
+  const e = (error ?? {}) as { message?: string; http_code?: number; code?: string; error?: { message?: string; http_code?: number } };
+  const message = String(e.message ?? e.error?.message ?? error);
+  const status = e.http_code ?? e.error?.http_code;
+  const fix = settings.source === "url" ? "CLOUDINARY_URL" : null;
+  const where = "(Cloudinary > Settings > API Keys), then redeploy";
+  if (/api[_ ]?key/i.test(message)) {
+    return new UploadError(`Cloudinary does not recognise the API key. Check ${fix ?? "CLOUDINARY_API_KEY"} ${where}.`, 503);
+  }
+  if (/signature/i.test(message)) {
+    return new UploadError(`Cloudinary rejected the API secret. Check ${fix ?? "CLOUDINARY_API_SECRET"} ${where}; click the eye icon to show the secret before copying it.`, 503);
+  }
+  if (/cloud[_ ]?name/i.test(message)) {
+    return new UploadError(`Cloudinary has no cloud named "${settings.cloudName}". Check ${fix ?? "CLOUDINARY_CLOUD_NAME"} ${where}.`, 503);
+  }
+  if (status === 401 || status === 403) {
+    return new UploadError(`Cloudinary refused the account details. Check ${fix ?? "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET"} ${where}.`, 503);
+  }
+  if (status === 420 || status === 429) return new UploadError("Cloudinary's usage limit was reached. Try again in a few minutes.", 503);
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|timed? ?out|fetch failed|socket hang up/i.test(`${message} ${e.code ?? ""}`)) {
+    return new UploadError("Could not reach Cloudinary. Try again in a moment.", 503);
+  }
+  return new Error(`Cloudinary ${action} failed (${status ?? "no status"}): ${message}`);
+}
+
 function cloudinaryDriver(): Driver {
   type Sdk = typeof import("cloudinary").v2;
-  let sdkPromise: Promise<Sdk> | null = null;
+  let sdkPromise: Promise<{ cloudinary: Sdk; settings: CloudinarySettings }> | null = null;
   const getSdk = () =>
-    (sdkPromise ??= import("cloudinary").then(({ v2 }) => {
-      // CLOUDINARY_URL is read by the SDK itself; the separate variables are an alternative.
-      if (!process.env.CLOUDINARY_URL) {
-        v2.config({
-          cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-          api_key: process.env.CLOUDINARY_API_KEY,
-          api_secret: process.env.CLOUDINARY_API_SECRET,
-        });
-      }
-      v2.config({ secure: true });
-      return v2;
+    (sdkPromise ??= (async () => {
+      const { settings, problems } = cloudinaryStatus();
+      if (!settings) throw new UploadError(`File storage (Cloudinary) is not set up correctly. ${problems.join(" ")}`, 503);
+      // The SDK reads CLOUDINARY_URL by itself on first use and throws on a malformed value, so it
+      // gets the cleaned URL, or none when the three separate variables are used.
+      if (settings.source === "url") process.env.CLOUDINARY_URL = settings.url;
+      else delete process.env.CLOUDINARY_URL;
+      const { v2 } = await import("cloudinary");
+      v2.config({ cloud_name: settings.cloudName, api_key: settings.apiKey, api_secret: settings.apiSecret, secure: true });
+      return { cloudinary: v2, settings };
+    })().catch((error) => {
+      sdkPromise = null; // try again on the next request
+      throw error;
     }));
 
   return {
     name: "cloudinary",
     async put(key, body) {
-      const cloudinary = await getSdk();
+      const { cloudinary, settings } = await getSdk();
       const { publicId, resourceType } = cloudinaryLocation(key);
       await new Promise<void>((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
@@ -169,13 +210,13 @@ function cloudinaryDriver(): Driver {
             unique_filename: false,
             use_filename: false,
           },
-          (error) => (error ? reject(new Error(`Cloudinary upload failed: ${error.message}`)) : resolve()),
+          (error) => (error ? reject(cloudinaryFailure("upload", error, settings)) : resolve()),
         );
         stream.end(body);
       });
     },
     async get(key) {
-      const cloudinary = await getSdk();
+      const { cloudinary, settings } = await getSdk();
       const { publicId, resourceType, format } = cloudinaryLocation(key);
       // 1) A signed CDN URL (fast). 2) The signed download API, which also serves PDFs on
       // accounts where PDF delivery through the CDN is switched off.
@@ -194,21 +235,30 @@ function cloudinaryDriver(): Driver {
         }),
       ];
       let lastStatus = 0;
+      let lastError = "";
       for (const url of urls) {
         try {
           const res = await fetch(url, { cache: "no-store" });
           if (res.ok) return Buffer.from(await res.arrayBuffer());
           lastStatus = res.status;
+          lastError = res.headers.get("x-cld-error") ?? "";
         } catch {
           // Network error on the CDN: try the download API next.
         }
       }
-      throw new Error(`Cloudinary could not return the file (HTTP ${lastStatus}).`);
+      if (lastStatus === 401 || lastStatus === 403) {
+        throw cloudinaryFailure("download", { http_code: lastStatus, message: lastError }, settings);
+      }
+      throw new Error(`Cloudinary could not return the file (HTTP ${lastStatus}${lastError ? `: ${lastError}` : ""}).`);
     },
     async remove(key) {
-      const cloudinary = await getSdk();
+      const { cloudinary, settings } = await getSdk();
       const { publicId, resourceType } = cloudinaryLocation(key);
-      await cloudinary.uploader.destroy(publicId, { resource_type: resourceType, type: "authenticated", invalidate: true });
+      await cloudinary.uploader
+        .destroy(publicId, { resource_type: resourceType, type: "authenticated", invalidate: true })
+        .catch((error: unknown) => {
+          throw cloudinaryFailure("delete", error, settings);
+        });
     },
   };
 }
@@ -217,7 +267,7 @@ const globalForStorage = globalThis as unknown as { __storageDriver?: Driver };
 
 /** Which driver is active, for health checks and startup logs. */
 export function storageDriverName(): DriverName {
-  if (process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME) return "cloudinary";
+  if (cloudinaryStatus().wanted) return "cloudinary";
   if (process.env.S3_BUCKET) return "s3";
   return "local";
 }
@@ -268,7 +318,10 @@ export async function saveUpload(buffer: Buffer, mimeType: string): Promise<Stor
   }
   if (!sniffMatches(buffer, mimeType)) throw new UploadError("The file content does not match its type.");
   if (ON_VERCEL && storageDriverName() === "local") {
-    throw new UploadError("File storage is not set up on this deployment. An admin needs to add CLOUDINARY_URL (see docs/DEPLOYMENT.md).");
+    throw new UploadError(
+      "File storage is not set up on this deployment. An admin needs to add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in Vercel, then redeploy.",
+      503,
+    );
   }
 
   const now = new Date();
@@ -293,4 +346,56 @@ export function readStoredFile(storageKey: string): Promise<Buffer> {
 export async function deleteStoredFile(storageKey: string) {
   if (storageKey.includes("..") || storageKey.startsWith("/")) throw new Error("Invalid storage key");
   await driver().remove(storageKey);
+}
+
+/** 1x1 transparent PNG used to test storage end to end. */
+const PROBE_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+export type StorageCheck = { driver: DriverName; ok: boolean; message: string; problems: string[]; notes: string[] };
+
+/**
+ * Uploads a 1x1 image, reads it back and deletes it: proves the storage settings work.
+ * For admins, through /api/health?check=storage.
+ */
+export async function checkStorage(): Promise<StorageCheck> {
+  const name = storageDriverName();
+  const status = name === "cloudinary" ? cloudinaryStatus() : { problems: [], notes: [], settings: null };
+  const base = { driver: name, problems: status.problems, notes: status.notes };
+  if (name === "cloudinary" && !status.settings) {
+    return { ...base, ok: false, message: "Cloudinary is not set up correctly; see problems." };
+  }
+  if (ON_VERCEL && name === "local") {
+    return { ...base, ok: false, message: "No file storage on Vercel. Add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET, then redeploy." };
+  }
+  const key = `healthcheck/${randomUUID()}.png`;
+  try {
+    await driver().put(key, PROBE_PNG, "image/png");
+  } catch (error) {
+    return { ...base, ok: false, message: `Upload failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  let readBack = "";
+  try {
+    const bytes = await driver().get(key);
+    readBack = bytes.equals(PROBE_PNG) ? "" : " The file came back changed.";
+  } catch (error) {
+    readBack = ` Reading it back failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  let removed = "";
+  try {
+    await driver().remove(key);
+  } catch (error) {
+    removed = ` Deleting the test file failed (${error instanceof Error ? error.message : String(error)}); remove ${key} by hand.`;
+  }
+  const where =
+    name === "cloudinary"
+      ? `Cloudinary cloud "${status.settings!.cloudName}" (settings from ${status.settings!.source === "variables" ? "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET" : "CLOUDINARY_URL"})`
+      : name === "s3"
+        ? `the S3 bucket "${process.env.S3_BUCKET}"`
+        : `the folder ${STORAGE_ROOT}`;
+  return readBack || removed
+    ? { ...base, ok: false, message: `Uploaded to ${where}.${readBack}${removed}` }
+    : { ...base, ok: true, message: `Uploads work: a test file was stored in ${where}, read back and deleted.` };
 }

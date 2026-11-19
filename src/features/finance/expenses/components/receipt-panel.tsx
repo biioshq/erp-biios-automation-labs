@@ -9,31 +9,26 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { LOW_CONFIDENCE, type OcrResponse } from "@/lib/ocr";
 import { FileViewer } from "@/features/files/components/file-preview";
-import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, prepareUpload } from "@/features/files/prepare";
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/features/files/prepare";
+import { httpFailureMessage, uploadFile } from "@/features/files/upload";
 import { ACCEPT_RECEIPTS, type FileDTO } from "@/features/files/types";
 
 type Stage = "idle" | "uploading" | "reading";
 
-function postForOcr(file: File, onProgress: (p: number) => void): Promise<OcrResponse> {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    form.append("file", file);
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/ocr");
-    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
-    xhr.onload = () => {
-      let body: Partial<OcrResponse> & { error?: string } = {};
-      try {
-        body = JSON.parse(xhr.responseText);
-      } catch {
-        /* ignore */
-      }
-      if (xhr.status >= 200 && xhr.status < 300 && body.file) resolve(body as OcrResponse);
-      else reject(new Error(body.error ?? "Could not upload the receipt."));
-    };
-    xhr.onerror = () => reject(new Error("Network error while uploading."));
-    xhr.send(form);
-  });
+/** Step 2: read a stored receipt. Never throws: a failure comes back as `ocr: null` with the reason. */
+async function readReceipt(fileId: string): Promise<Pick<OcrResponse, "ocr" | "error">> {
+  try {
+    const res = await fetch("/api/ocr", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fileId }),
+    });
+    const body = (await res.json().catch(() => null)) as Partial<OcrResponse> | null;
+    if (res.ok && body) return { ocr: body.ocr ?? null, error: body.error };
+    return { ocr: null, error: body?.error ?? httpFailureMessage(res.status, res.headers.get("x-vercel-error"), "Reading") };
+  } catch {
+    return { ocr: null, error: "Network error while reading the receipt." };
+  }
 }
 
 /**
@@ -72,16 +67,21 @@ export function ReceiptPanel({
     setStage("uploading");
     setProgress(0);
     try {
-      // Large phone photos are shrunk first (faster upload, under Vercel's request limit).
-      file = await prepareUpload(file);
-      const result = await postForOcr(file, (p) => {
-        setProgress(p);
-        if (p >= 1) setStage("reading");
-      });
-      onRead(result);
-      if (!result.ocr) toast.warning(result.error ?? "Receipt stored, but it could not be read. Fill the form by hand.");
+      // Step 1: store the receipt (large photos are shrunk first, under Vercel's request limit).
+      const stored = await uploadFile(file, { kind: "receipt" }, setProgress);
+      // Step 2: read it. Whatever happens here, the receipt stays attached to the expense.
+      setStage("reading");
+      const read = await readReceipt(stored.id);
+      onRead({ file: stored, ocr: read.ocr, error: read.error });
+      if (!read.ocr) {
+        toast.warning("Receipt attached, but it could not be read. Fill in the form by hand.", {
+          description: read.error,
+        });
+      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Upload failed");
+      toast.error("Could not upload the receipt", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
     } finally {
       setStage("idle");
       if (inputRef.current) inputRef.current.value = "";

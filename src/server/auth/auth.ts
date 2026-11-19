@@ -6,7 +6,7 @@ import { APIError } from "better-auth/api";
 import { mongodbAdapter } from "better-auth/adapters/mongodb";
 import { nextCookies } from "better-auth/next-js";
 import { MongoClient } from "mongodb";
-import { googleEnabled, isAllowedCompanyEmail } from "./google";
+import { googleStatus, isAllowedCompanyEmail } from "./google";
 import { DB_NAME } from "@/server/db-name";
 
 const globalForAuth = globalThis as unknown as { __authMongo?: MongoClient };
@@ -21,6 +21,7 @@ const db = client.db(DB_NAME);
 export const allowAccountCreation = new AsyncLocalStorage<boolean>();
 
 const openSignUp = () => process.env.ALLOW_OPEN_SIGNUP === "true";
+const google = googleStatus();
 const isOAuthCallback = (path: string | undefined) => Boolean(path && (path.startsWith("/callback") || path.startsWith("/oauth2/callback")));
 
 export const auth = betterAuth({
@@ -31,12 +32,12 @@ export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   database: mongodbAdapter(db),
   emailAndPassword: { enabled: true, minPasswordLength: 8, maxPasswordLength: 128, autoSignIn: true },
-  // "Continue with Google" when GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set.
-  socialProviders: googleEnabled()
+  // "Continue with Google" when GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set and look right.
+  socialProviders: google.enabled
     ? {
         google: {
-          clientId: process.env.GOOGLE_CLIENT_ID!,
-          clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+          clientId: google.clientId!,
+          clientSecret: google.clientSecret!,
           // Always show the account chooser, so people with several Google accounts pick the work one.
           prompt: "select_account",
         },

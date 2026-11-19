@@ -53,7 +53,10 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ file: toFileDTO(doc) }, { status: 201 });
   } catch (error) {
-    if (error instanceof UploadError) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error instanceof UploadError) {
+      if (error.status >= 500) console.error("[upload] storage problem: %s", error.message);
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error("[upload] failed", error);
     return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 });
   }

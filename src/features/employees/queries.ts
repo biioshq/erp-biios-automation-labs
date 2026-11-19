@@ -2,13 +2,14 @@ import "server-only";
 
 import { Types, type QueryFilter } from "mongoose";
 import { connectDB } from "@/server/db";
-import { Employee, Expense, ProjectMember, RecurringExpense, Task, User, type EmployeeDoc } from "@/server/models";
+import { Employee, Expense, ProjectMember, RecurringExpense, Task, User, type EmployeeDoc, type RecurringExpenseDoc } from "@/server/models";
 import { getCurrentUser } from "@/server/auth/session";
 import { listTeamMembers } from "@/server/services/users";
 import { iso } from "@/server/serialize";
 import { financialYearIST } from "@/lib/dates";
 import { searchRegex, type ListParams } from "@/lib/list-params";
 import type { Department, EmployeeStatus, EmploymentType } from "@/lib/constants";
+import { currentMembership, isCurrentMembership } from "./membership";
 import type {
   EmployeeDetail,
   EmployeePageData,
@@ -32,7 +33,7 @@ export async function isAdminViewer(): Promise<boolean> {
 async function currentProjectsFor(employeeIds: Types.ObjectId[]): Promise<Map<string, EmployeeProjectChip[]>> {
   const out = new Map<string, EmployeeProjectChip[]>();
   if (!employeeIds.length) return out;
-  const memberships = await ProjectMember.find({ employee: { $in: employeeIds }, endDate: null })
+  const memberships = await ProjectMember.find({ employee: { $in: employeeIds }, ...currentMembership() })
     .populate("project", "name code color status")
     .lean();
   for (const m of memberships) {
@@ -100,7 +101,7 @@ export async function getEmployeeSummary(): Promise<EmployeeSummary> {
     Employee.aggregate<{ _id: string; n: number }>([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
     Employee.distinct("department", { status: { $ne: "exited" } }),
     ProjectMember.aggregate<{ n: number }>([
-      { $match: { endDate: null } },
+      { $match: currentMembership() },
       { $group: { _id: "$employee" } },
       { $lookup: { from: "employees", localField: "_id", foreignField: "_id", as: "e" } },
       { $match: { "e.status": { $in: ["active", "on_leave"] } } },
@@ -123,6 +124,35 @@ export async function getEmployeeSummary(): Promise<EmployeeSummary> {
   };
 }
 
+/**
+ * The schedule linked on the employee, while it is still their salary schedule. An admin can move a schedule to
+ * someone else or to another category on the Recurring page; the stale link must not take it back. Older schedules
+ * made before they named the employee have no employee and still count.
+ */
+export function linkedSalarySchedule(employeeId: Types.ObjectId, linkedId: Types.ObjectId): QueryFilter<RecurringExpenseDoc> {
+  return { _id: linkedId, category: "salaries", $or: [{ employee: employeeId }, { employee: null }] };
+}
+
+/**
+ * The employee's salary schedules: the one linked on the employee (even if ended), then any live "salaries"
+ * schedule that names them, such as one made from the Salary template on the Recurring page. Linked first,
+ * then oldest first, so callers can treat the first live one as the employee's salary schedule.
+ */
+export async function salarySchedulesFor(employeeId: Types.ObjectId, linkedId?: Types.ObjectId | null) {
+  const list = await RecurringExpense.find({
+    $or: [...(linkedId ? [linkedSalarySchedule(employeeId, linkedId)] : []), { employee: employeeId, category: "salaries", status: { $ne: "ended" } }],
+  })
+    .sort({ createdAt: 1 })
+    .lean();
+  const linked = linkedId ? list.filter((s) => String(s._id) === String(linkedId)) : [];
+  return [...linked, ...list.filter((s) => !linkedId || String(s._id) !== String(linkedId))];
+}
+
+/** The schedule that pays the employee: the first live one, else the linked one. */
+export function primarySalarySchedule<T extends { status?: string | null }>(schedules: T[]): T | null {
+  return schedules.find((s) => s.status !== "ended") ?? schedules[0] ?? null;
+}
+
 /** Everything the form needs for one employee. Salary fields are stripped for members. */
 export async function getEmployee(id: string): Promise<EmployeeDetail | null> {
   if (!Types.ObjectId.isValid(id)) return null;
@@ -131,12 +161,13 @@ export async function getEmployee(id: string): Promise<EmployeeDetail | null> {
   const e = await Employee.findById(id).lean();
   if (!e) return null;
   const chips = await currentProjectsFor([e._id]);
-  const schedule = e.salaryRecurring && isAdmin ? await RecurringExpense.findById(e.salaryRecurring, { status: 1 }).lean() : null;
+  // A schedule made on the Recurring page for this person counts too, so "Pay salary" shows it and no second one is made.
+  const schedule = isAdmin ? primarySalarySchedule(await salarySchedulesFor(e._id, e.salaryRecurring)) : null;
   return {
     ...toRow(e, chips.get(String(e._id)) ?? [], isAdmin),
     notes: e.notes ?? null,
     userId: e.user ? String(e.user) : null,
-    salaryRecurringId: isAdmin && e.salaryRecurring ? String(e.salaryRecurring) : null,
+    salaryRecurringId: schedule ? String(schedule._id) : null,
     paysSalary: schedule?.status === "active",
     updatedAt: iso(e.updatedAt as Date)!,
   };
@@ -192,8 +223,8 @@ export async function getEmployeePage(id: string): Promise<EmployeePageData | nu
   ]);
 
   const all = memberships.map(toMembership).filter((m): m is MembershipDTO => m !== null);
-  const current = all.filter((m) => !m.endDate);
-  const past = all.filter((m) => m.endDate);
+  const current = all.filter((m) => isCurrentMembership(m.endDate));
+  const past = all.filter((m) => !isCurrentMembership(m.endDate));
 
   let tasks: EmployeePageData["tasks"] = null;
   if (user) {
@@ -233,7 +264,7 @@ export async function getEmployeePage(id: string): Promise<EmployeePageData | nu
 /** Counts of people on each project (open memberships), for lists and badges elsewhere. */
 export async function getEmployeeProjectCounts(projectIds?: string[]): Promise<Record<string, number>> {
   await connectDB();
-  const match: Record<string, unknown> = { endDate: null };
+  const match: Record<string, unknown> = currentMembership();
   if (projectIds?.length) match.project = { $in: projectIds.filter((p) => Types.ObjectId.isValid(p)).map((p) => new Types.ObjectId(p)) };
   const rows = await ProjectMember.aggregate<{ _id: Types.ObjectId; n: number }>([
     { $match: match },

@@ -4,16 +4,20 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { Money } from "@/components/shared/money";
+import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { parseListParams } from "@/lib/list-params";
 import { formatNumber } from "@/lib/format";
 import { getProjectOptions, getVendorNames } from "@/server/lookups";
 import { listExpenses } from "@/features/finance/expenses/queries";
 import { EXPENSE_FILTER_KEYS, EXPENSE_SORT_KEYS } from "@/features/finance/expenses/schemas";
 import { ExpensesView } from "@/features/finance/expenses/components/expenses-view";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Expenses" };
 
 export default async function ExpensesPage({ searchParams }: PageProps<"/finance/expenses">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const params = parseListParams(await searchParams, {
     filterKeys: EXPENSE_FILTER_KEYS,
     sortable: EXPENSE_SORT_KEYS,
@@ -41,6 +45,8 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/finance
           </Button>
         }
       />
+      {/* Members' totals and rows leave out salaries; without this the gap to the dashboard has no reason. */}
+      <SalariesHiddenNote className="-mt-2" />
       <ExpensesView data={data} projects={projects} vendors={vendors} />
     </Page>
   );

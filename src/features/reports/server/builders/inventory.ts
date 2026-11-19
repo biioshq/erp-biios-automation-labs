@@ -1,13 +1,16 @@
 import "server-only";
 
 import { connectDB } from "@/server/db";
+import { allocatedValueByItem } from "@/server/services/metrics";
 import { InventoryItem, InventoryMovement } from "@/server/models";
+import { movementFilter } from "@/features/inventory/movements/queries";
 import { MOVEMENT_TYPES, PROJECT_STAGES, INVENTORY_UNITS, labelOf, type InventoryUnit, type MovementType, type ProjectStage } from "@/lib/constants";
 import { STOCK_STATUS_META, getStockStatus } from "@/lib/stock-status";
 import { formatDate, round2 } from "@/lib/format";
 import { searchRegex } from "@/lib/list-params";
-import { col, day, describeFilters, objectIds, projectMatch, rangeOf, sumTotals } from "../common";
+import { col, day, describeFilters, objectIds, projectMatch, sumTotals } from "../common";
 import type { ReportData, ReportFilters, ReportRow } from "../../types";
+import { roundQty } from "@/server/services/inventory-ledger";
 
 const valuationColumns = [
   col("item", "Item", "text", 30),
@@ -27,11 +30,9 @@ async function buildValuation(f: ReportFilters): Promise<ReportData> {
   const query: Record<string, unknown> = { archivedAt: null };
   if (f.category.length) query.category = { $in: objectIds(f.category) };
   if (f.q) query.$or = [{ name: searchRegex(f.q) }, { sku: searchRegex(f.q) }];
-  const items = await InventoryItem.find(query as never)
-    .populate("category", "name")
-    .lean();
+  const [items, charged] = await Promise.all([InventoryItem.find(query as never).populate("category", "name").lean(), allocatedValueByItem()]);
   const withCategory = items
-    .map((i) => ({ i, category: (i.category as unknown as { name: string } | null)?.name ?? "Uncategorised" }))
+    .map((i) => ({ i, category: (i.category as unknown as { name: string } | null)?.name ?? "Uncategorized" }))
     .sort((a, b) => a.category.localeCompare(b.category) || a.i.name.localeCompare(b.i.name));
 
   const rows: ReportRow[] = [];
@@ -54,13 +55,13 @@ async function buildValuation(f: ReportFilters): Promise<ReportData> {
       group = { name: category, value: 0, allocated: 0, count: 0 };
     }
     const value = round2(i.available * i.unitPrice);
-    const alloc = round2(i.allocated * i.unitPrice);
+    const alloc = charged.get(String(i._id)) ?? 0;
     group.value += value;
     group.allocated += alloc;
     group.count += 1;
     onHandValue += value;
     allocatedValue += alloc;
-    const st = getStockStatus(i.available, i.minStock);
+    const st = getStockStatus(roundQty(i.available), i.minStock);
     status[st] += 1;
     rows.push({
       item: i.name,
@@ -86,7 +87,8 @@ async function buildValuation(f: ReportFilters): Promise<ReportData> {
       .join(" · "),
     columns: valuationColumns,
     rows,
-    totals: sumTotals(valuationColumns, rows),
+    // Unit costs added up mean nothing: only the values are totalled.
+    totals: sumTotals(valuationColumns, rows, "Total", ["money"], ["value", "allocatedValue"]),
     summary: [
       { label: "Items", value: withCategory.length, type: "number" },
       { label: "On-hand value", value: round2(onHandValue), type: "money" },
@@ -115,19 +117,24 @@ const movementColumns = [
 ];
 
 async function buildMovements(f: ReportFilters): Promise<ReportData> {
-  const query: Record<string, unknown> = {};
-  const range = rangeOf(f);
-  if (range) query.date = range;
-  if (f.movementType.length) query.type = { $in: f.movementType };
-  if (f.item.length) query.item = { $in: objectIds(f.item) };
+  // The Movements page's own filter, so an export from that page holds exactly the rows it lists.
+  const query = (await movementFilter({
+    q: f.q,
+    from: f.from,
+    to: f.to,
+    filters: {
+      ...(f.movementType.length ? { type: f.movementType } : {}),
+      ...(f.item.length ? { item: f.item } : {}),
+    },
+  })) as Record<string, unknown>;
+  // Report-only filters on top: "No project", vendor and inventory category.
   const project = projectMatch(f.project);
   if (project) query.project = project;
   if (f.vendor.length) query.vendor = { $in: f.vendor };
-  if (f.q) query.$or = [{ vendor: searchRegex(f.q) }, { note: searchRegex(f.q) }, { "invoice.number": searchRegex(f.q) }];
   if (f.category.length) {
     const ids = await InventoryItem.find({ category: { $in: objectIds(f.category) } }, { _id: 1 }).lean();
-    query.item = { $in: ids.map((d) => d._id) };
-    if (f.item.length) query.$and = [{ item: { $in: objectIds(f.item) } }];
+    // Both an item and a category filter may be set: a movement must match both.
+    query.$and = [...((query.$and as unknown[]) ?? []), { item: { $in: ids.map((d) => d._id) } }];
   }
 
   const docs = await InventoryMovement.find(query as never)
@@ -154,7 +161,8 @@ async function buildMovements(f: ReportFilters): Promise<ReportData> {
       note: m.note ?? "",
     };
   });
-  const totals = sumTotals(movementColumns, rows);
+  // No totals row: unit costs do not add up, and stock in and stock out would cancel into a meaningless cost.
+  const totals = null;
   const count = (t: MovementType) => docs.filter((m) => m.type === t).length;
   const purchased = docs.filter((m) => m.type === "purchase").reduce((s, m) => s + (m.totalCost ?? 0), 0);
 

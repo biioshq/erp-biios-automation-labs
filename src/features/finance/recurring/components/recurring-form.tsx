@@ -16,7 +16,7 @@ import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
 import { applyFieldErrors } from "@/lib/action-result";
 import { EXPENSE_CATEGORIES, PAYMENT_METHODS, PROJECT_STAGES, RECURRING_FREQUENCIES } from "@/lib/constants";
-import { addDays, fromDateInput, startOfDayIST, toDateInput } from "@/lib/dates";
+import { addDays, fromDateInput, startOfDayIST, startOfMonthIST, toDateInput } from "@/lib/dates";
 import { emitDataChanged } from "@/lib/events";
 import { formatDate, round2 } from "@/lib/format";
 import { isInterState, splitGst } from "@/lib/gst";
@@ -28,6 +28,7 @@ import { createRecurring, updateRecurring } from "../actions";
 import { ordinal } from "../format";
 import { RECURRING_TEMPLATES, recurringFormSchema, type RecurringFormInput, type RecurringFormValues, type RecurringTemplate } from "../schemas";
 import type { RecurringDetail } from "../types";
+import { formValidation } from "@/components/forms/form-options";
 
 const PAYMENT_OPTIONS = PAYMENT_METHODS.filter((m) => m.value !== "stock");
 const CATEGORY_OPTIONS = EXPENSE_CATEGORIES.filter((c) => c.value !== "inventory");
@@ -67,7 +68,12 @@ function previewFirst(values: { startDate?: string; frequency?: RecurringFormInp
   if (unchanged || schedule.status === "ended") return new Date(schedule.nextRunDate);
   // Changed rhythm: continue from today, never from dates that were already due.
   let from = new Date(Math.max(startOfDayIST().getTime(), start.getTime()));
-  if (schedule.lastRunDate) from = new Date(Math.max(from.getTime(), addDays(new Date(schedule.lastRunDate), 1).getTime()));
+  // Same rule as the server: a monthly or longer schedule never posts again in the month it last posted.
+  if (schedule.lastRunDate) {
+    const last = new Date(schedule.lastRunDate);
+    const afterLast = schedule.frequency === "weekly" ? addDays(last, 1) : startOfMonthIST(last, 1);
+    from = new Date(Math.max(from.getTime(), afterLast.getTime()));
+  }
   let candidate = first;
   for (let i = 0; i < 1500 && candidate.getTime() < from.getTime(); i++) candidate = nextOccurrence(candidate, values.frequency, day);
   return candidate;
@@ -98,7 +104,7 @@ export function RecurringForm({
   const form = useForm<RecurringFormInput, unknown, RecurringFormValues>({
     resolver: zodResolver(recurringFormSchema),
     defaultValues: defaultsFrom(schedule, RECURRING_TEMPLATES.find((t) => t.key === template)),
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control, setValue, getValues } = form;
   const [amount, gstRate, gstin, frequency, dayOfMonth, startDate, endDate, projectId] = useWatch({
@@ -108,14 +114,22 @@ export function RecurringForm({
 
   const tax = useMemo(() => {
     if (!amount || !gstRate) return null;
-    const taxable = round2(amount / (1 + gstRate / 100));
-    const total = round2(amount - taxable);
+    // Same rounding as the posted expense (postOccurrence): taxable + tax equals the amount, CGST equals SGST,
+    // and the last paisa goes to IGST across states, or to the taxable value otherwise.
+    const gross = round2(amount);
     const interState = isInterState(gstin);
+    let taxable = round2(gross / (1 + gstRate / 100));
     const split = splitGst(taxable, gstRate, interState);
-    // Same rounding as the posted expense: taxable + tax equals the amount.
-    const cgst = interState ? 0 : split.cgst;
-    const sgst = interState ? 0 : round2(total - split.cgst);
-    return { taxable, cgst, sgst, igst: interState ? total : 0, interState };
+    if (!interState) {
+      split.cgst = split.sgst = round2((taxable * gstRate) / 200);
+      taxable = round2(gross - split.cgst - split.sgst);
+    }
+    const drift = round2(gross - (taxable + split.cgst + split.sgst + split.igst));
+    if (drift !== 0) {
+      if (split.igst) split.igst = round2(split.igst + drift);
+      else taxable = round2(taxable + drift);
+    }
+    return { taxable, cgst: split.cgst, sgst: split.sgst, igst: split.igst, interState };
   }, [amount, gstRate, gstin]);
 
   const dates = useMemo(() => {

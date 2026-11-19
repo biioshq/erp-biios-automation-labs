@@ -14,10 +14,14 @@ import { CategoryChart } from "@/features/finance/dashboard/components/category-
 import { BudgetUsage } from "@/features/finance/dashboard/components/budget-usage";
 import { RecentTransactions } from "@/features/finance/dashboard/components/recent-transactions";
 import { GstSummary, QuickActions, RecurringCommitmentsCard } from "@/features/finance/dashboard/components/side-cards";
+import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Finance" };
 
 export default async function FinanceDashboardPage({ searchParams }: PageProps<"/finance">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const period = parsePeriod((await searchParams).period);
   const data = await getFinanceDashboard(period);
   const hasMonthly = data.monthly.some((m) => m.income > 0 || m.expenses > 0);
@@ -70,6 +74,7 @@ export default async function FinanceDashboardPage({ searchParams }: PageProps<"
           )}
         </Section>
         <Section title="Budget usage" description="Spent against budget, open projects" contentClassName="p-3">
+          <SalariesHiddenNote className="px-1 pb-2" />
           <BudgetUsage rows={data.budgets} />
         </Section>
       </div>

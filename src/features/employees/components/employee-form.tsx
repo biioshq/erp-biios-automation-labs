@@ -18,6 +18,7 @@ import { emitDataChanged } from "@/lib/events";
 import { createEmployee, updateEmployee } from "../actions";
 import { employeeFormSchema, type EmployeeFormInput, type EmployeeFormValues } from "../schemas";
 import type { EmployeeDetail, UserLinkOption } from "../types";
+import { formValidation } from "@/components/forms/form-options";
 
 function defaultsFrom(employee?: EmployeeDetail | null): EmployeeFormInput {
   return {
@@ -56,7 +57,7 @@ export function EmployeeForm({
   const form = useForm<EmployeeFormInput, unknown, EmployeeFormValues>({
     resolver: zodResolver(employeeFormSchema),
     defaultValues: defaultsFrom(employee),
-    mode: "onTouched",
+    ...formValidation,
   });
   // The skills text is transformed to a list on output, so the field components get the input-typed control.
   const control = form.control as unknown as Control<EmployeeFormInput>;

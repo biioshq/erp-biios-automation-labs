@@ -59,6 +59,27 @@ function group(rows: TaskRow[]): Columns {
 
 const toRecord = (rows: TaskRow[]): Tasks => Object.fromEntries(rows.map((t) => [t.id, t]));
 
+/**
+ * New positions for a dropped card whose neighbours share one position. Only the run of tied cards around
+ * it is spread out, between the positions of the nearest cards that differ, so every other card (and any
+ * card the board does not show) keeps its place.
+ */
+export function spreadTies(list: string[], index: number, orderOf: (id: string) => number): { id: string; order: number }[] {
+  const others = list.filter((_, i) => i !== index);
+  const value = orderOf(list[index - 1]!);
+  const tied = (tid: string) => Math.abs(orderOf(tid) - value) <= 1e-6;
+  // The column was sorted before the drop, so the tied cards sit next to each other around the drop point.
+  let start = index - 1;
+  while (start > 0 && tied(others[start - 1]!)) start--;
+  let end = index; // index into `others` of the first card after the drop point
+  while (end < others.length && tied(others[end]!)) end++;
+  const low = start > 0 ? orderOf(others[start - 1]!) : value - 1;
+  const high = end < others.length ? orderOf(others[end]!) : value + 1;
+  const run = [...others.slice(start, index), list[index]!, ...others.slice(index, end)];
+  const step = (high - low) / (run.length + 1);
+  return run.map((tid, i) => ({ id: tid, order: low + step * (i + 1) }));
+}
+
 /** Prefer what the pointer is over; fall back to rectangle overlap (keyboard drags, fast moves). */
 const collision: CollisionDetection = (args) => {
   const pointer = pointerWithin(args);
@@ -243,9 +264,30 @@ export function TaskBoard({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
   const snapshot = useRef<{ columns: Columns; tasks: Tasks } | null>(null);
+  // Moves still saving, and the server data that was on hand when the last one finished. A refresh that
+  // lands while a move saves was rendered before the move was written, so applying it would snap the card
+  // back. It is held until the move's own refreshed data (the next `rows`) arrives.
+  const [saving, setSaving] = useState(0);
+  const [held, setHeld] = useState<TaskRow[] | null>(null);
+  const latestRows = useRef(rows);
+  useEffect(() => {
+    latestRows.current = rows;
+  });
 
-  // New data from the server replaces local state (unless a drag is in progress).
-  if (source !== rows && !activeId) {
+  /** Runs a move with the resync paused, then holds back whatever server data arrived meanwhile. */
+  async function saveMove<T extends { ok: boolean }>(run: () => Promise<T>): Promise<T> {
+    setSaving((n) => n + 1);
+    try {
+      const result = await run();
+      if (result.ok) setHeld(latestRows.current);
+      return result;
+    } finally {
+      setSaving((n) => n - 1);
+    }
+  }
+
+  // New data from the server replaces local state (unless a drag is in progress or a move is saving).
+  if (source !== rows && !activeId && !saving && rows !== held) {
     setSource(rows);
     setTasks(toRecord(rows));
     setColumns(group(rows));
@@ -325,9 +367,9 @@ export function TaskBoard({
     if (prev !== undefined && following !== undefined) {
       if (following - prev > 1e-6) order = (prev + following) / 2;
       else {
-        // Neighbours share a position (never reordered before): number the whole column.
-        renumber = list.map((tid, i) => ({ id: tid, order: i + 1 }));
-        order = index + 1;
+        const spread = spreadTies(list, index, (tid) => tasks[tid]?.order ?? 0);
+        renumber = spread;
+        order = spread.find((r) => r.id === id)!.order;
       }
     } else if (prev !== undefined) order = prev + 1;
     else if (following !== undefined) order = following - 1;
@@ -342,7 +384,7 @@ export function TaskBoard({
       return updated;
     });
 
-    const result = await moveTask({ id, status, order, renumber });
+    const result = await saveMove(() => moveTask({ id, status, order, renumber }));
     if (!result.ok) {
       toast.error(result.error);
       setColumns(snap.columns);
@@ -360,17 +402,20 @@ export function TaskBoard({
     if (!before || !from || from === status) return;
     const snap = { columns, tasks };
     const last = columns[status][columns[status].length - 1];
-    const order = (last ? (tasks[last]?.order ?? 0) : 0) + 1;
+    const guess = (last ? (tasks[last]?.order ?? 0) : 0) + 1;
     const closed = status === "completed" || status === "cancelled";
+    const moved = { ...before, status, order: guess, overdue: !closed && before.dueDate ? daysUntil(before.dueDate) < 0 : false };
     setColumns({ ...columns, [from]: columns[from].filter((x) => x !== id), [status]: [...columns[status], id] });
-    setTasks({ ...tasks, [id]: { ...before, status, order, overdue: !closed && before.dueDate ? daysUntil(before.dueDate) < 0 : false } });
-    const result = await moveTask({ id, status, order });
+    setTasks({ ...tasks, [id]: moved });
+    // No order: the server puts it after every card in the column, including ones a filter hides here.
+    const result = await saveMove(() => moveTask({ id, status }));
     if (!result.ok) {
       toast.error(result.error);
       setColumns(snap.columns);
       setTasks(snap.tasks);
       return;
     }
+    setTasks((current) => (current[id] ? { ...current, [id]: { ...current[id]!, order: result.data.order } } : current));
     toast.success(`${before.number} moved to ${labelOf(TASK_STATUSES, status)}`);
     emitDataChanged();
   }

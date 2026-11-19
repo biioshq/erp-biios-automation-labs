@@ -12,11 +12,13 @@ import {
   Task,
   type FileDoc,
   ProjectMember,
+  RecurringExpense,
   type ProjectDoc,
   type ProjectMemberDoc,
   type TaskDoc,
 } from "@/server/models";
 import { iso } from "@/server/serialize";
+import { salaryScope } from "@/server/auth/session";
 import { projectSpend, type ProjectSpend } from "@/server/services/metrics";
 import { toFileDTO } from "@/features/files/server";
 import { listExpenses } from "@/features/finance/expenses/queries";
@@ -36,29 +38,34 @@ import type {
   StageRow,
   TimelineEvent,
 } from "./types";
+import { currentMembership } from "@/features/employees/membership";
 
 const stageMap = () => Object.fromEntries(PROJECT_STAGES.map((s) => [s.value, 0])) as Record<ProjectStage, number>;
-const NO_LINKS: ProjectLinks = { expenses: 0, income: 0, allocations: 0, tasks: 0 };
+const NO_LINKS: ProjectLinks = { expenses: 0, income: 0, allocations: 0, tasks: 0, schedules: 0 };
 
-/** Income, allocation and task counts per project (what stops a delete). */
+/** Income, allocation, task and live recurring schedule counts per project (what stops a delete). */
 async function linkedCounts(ids?: Types.ObjectId[]) {
   const pipeline: PipelineStage[] = [
     { $match: ids ? { project: { $in: ids } } : { project: { $ne: null } } },
     { $group: { _id: "$project", n: { $sum: 1 } } },
   ];
-  const [income, allocations, tasks] = await Promise.all([
+  // An active or paused schedule would keep posting to the project after it is gone.
+  const schedulePipeline: PipelineStage[] = [{ $match: { status: { $ne: "ended" } } }, ...pipeline];
+  const [income, allocations, tasks, schedules] = await Promise.all([
     Income.aggregate<{ _id: Types.ObjectId; n: number }>(pipeline),
     InventoryAllocation.aggregate<{ _id: Types.ObjectId; n: number }>(pipeline),
     Task.aggregate<{ _id: Types.ObjectId; n: number }>(pipeline),
+    RecurringExpense.aggregate<{ _id: Types.ObjectId; n: number }>(schedulePipeline),
   ]);
   const out = new Map<string, Omit<ProjectLinks, "expenses">>();
   const get = (id: string) => {
-    if (!out.has(id)) out.set(id, { income: 0, allocations: 0, tasks: 0 });
+    if (!out.has(id)) out.set(id, { income: 0, allocations: 0, tasks: 0, schedules: 0 });
     return out.get(id)!;
   };
   for (const r of income) get(String(r._id)).income = r.n;
   for (const r of allocations) get(String(r._id)).allocations = r.n;
   for (const r of tasks) get(String(r._id)).tasks = r.n;
+  for (const r of schedules) get(String(r._id)).schedules = r.n;
   return out;
 }
 
@@ -155,18 +162,16 @@ export async function getProjectDetail(id: string): Promise<ProjectDetail | null
   const [spend, links, held, openTasks, teamSize] = await Promise.all([
     projectSpend([id]),
     linkedCounts([oid]),
-    InventoryAllocation.aggregate<{ value: number }>([
-      { $match: { project: oid } },
-      { $group: { _id: null, value: { $sum: { $multiply: ["$quantity", "$unitCost"] } } } },
-    ]),
+    InventoryAllocation.find({ project: oid }, { quantity: 1, unitCost: 1 }).lean(),
     Task.countDocuments(openFilter as QueryFilter<TaskDoc>),
-    ProjectMember.countDocuments({ project: oid, endDate: null } as QueryFilter<ProjectMemberDoc>),
+    ProjectMember.countDocuments({ project: oid, ...currentMembership() } as QueryFilter<ProjectMemberDoc>),
   ]);
   const creator = p.createdBy as unknown as { name?: string } | null;
   return {
     ...toRow(p as unknown as ProjectDoc, spend.get(id), links.get(id)),
     byStage: spend.get(id)?.byStage ?? stageMap(),
-    inventoryValue: round2(held[0]?.value ?? 0),
+    // Rounded per allocation, as the Inventory tab and the generated expenses are, so the figures match.
+    inventoryValue: round2(held.reduce((s, a) => s + round2(a.quantity * a.unitCost), 0)),
     openTasks,
     teamSize,
     createdBy: creator?.name ?? null,
@@ -189,18 +194,21 @@ export function stageRows(project: Pick<ProjectDetail, "byStage" | "stageBudgets
   });
 }
 
-/** This project's expenses, reusing the Finance expense query. */
+/** All of this project's expenses (the tab filters and totals them in the browser), reusing the Finance expense query. */
 export async function listProjectExpenses(projectId: string): Promise<ExpenseRow[]> {
-  const data = await listExpenses({
-    q: "",
-    page: 1,
-    pageSize: 1000,
-    sort: { id: "date", desc: true },
-    filters: { project: [projectId] },
-    from: null,
-    to: null,
-  });
-  return data.rows;
+  const query = (pageSize: number) =>
+    listExpenses({
+      q: "",
+      page: 1,
+      pageSize,
+      sort: { id: "date", desc: true },
+      filters: { project: [projectId] },
+      from: null,
+      to: null,
+    });
+  const data = await query(1000);
+  // A large project would otherwise show a capped count and total with no sign that rows are missing.
+  return data.total > data.rows.length ? (await query(data.total)).rows : data.rows;
 }
 
 export async function getProjectInventory(projectId: string): Promise<{
@@ -242,9 +250,11 @@ export async function getProjectTimeline(project: Pick<ProjectDetail, "id" | "na
   const oid = new Types.ObjectId(project.id);
   const taskFilter = { project: oid } as Record<string, unknown>;
   const fileFilter = { project: oid, kind: "document" } as Record<string, unknown>;
+  // Members never see individual salary rows (payee and amount).
+  const scope = await salaryScope();
   const [expenses, income, movements, tasks, files] = await Promise.all([
-    // Inventory assignments show up as stock events below, not twice.
-    Expense.find({ project: oid, source: "manual" }).sort({ date: -1 }).limit(limit).lean(),
+    // Inventory assignments show up as stock events below, not twice. Recurring postings are listed.
+    Expense.find({ project: oid, source: { $ne: "inventory_assignment" }, ...scope }).sort({ date: -1 }).limit(limit).lean(),
     Income.find({ project: oid }).sort({ date: -1 }).limit(limit).lean(),
     InventoryMovement.find({ project: oid, type: { $in: ["assign", "return"] } })
       .populate("item", "name sku")
@@ -351,9 +361,11 @@ export async function getProjectDocuments(projectId: string): Promise<{ document
   await connectDB();
   const oid = new Types.ObjectId(projectId);
   const docFilter = { project: oid, kind: "document" } as Record<string, unknown>;
+  // Salary receipts are payslips: members never see them.
+  const scope = await salaryScope();
   const [docs, expenses] = await Promise.all([
     FileModel.find(docFilter as QueryFilter<FileDoc>).populate("uploadedBy", "name").sort({ createdAt: -1 }).lean(),
-    Expense.find({ project: oid, receipt: { $ne: null } }, { receipt: 1, number: 1, vendor: 1 }).sort({ date: -1 }).lean(),
+    Expense.find({ project: oid, receipt: { $ne: null }, ...scope }, { receipt: 1, number: 1, vendor: 1 }).sort({ date: -1 }).lean(),
   ]);
   const receiptFilter = { _id: { $in: expenses.map((e) => e.receipt) } } as Record<string, unknown>;
   const receiptFiles = expenses.length ? await FileModel.find(receiptFilter as QueryFilter<FileDoc>).populate("uploadedBy", "name").lean() : [];

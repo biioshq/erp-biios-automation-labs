@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { connectDB } from "@/server/db";
 import { Report } from "@/server/models";
 import { getCurrentUser } from "@/server/auth/session";
+import { bumpChanges } from "@/server/changes";
 import { parseReportRequest } from "@/features/reports/schemas";
 import { buildReport, rowCountOf } from "@/features/reports/server/build";
 import { CONTENT_TYPES, reportFileName, renderReport } from "@/features/reports/server/export";
@@ -39,6 +40,8 @@ export async function GET(request: NextRequest, { params }: RouteContext<"/api/r
         fileName,
         generatedBy: user.id,
       });
+      // A slow export can finish after the page's own refresh; this makes open report pages list it.
+      await bumpChanges();
     } catch (error) {
       console.error("Could not log report export", error);
     }

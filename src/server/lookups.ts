@@ -1,9 +1,11 @@
 import "server-only";
 
 import { connectDB } from "@/server/db";
-import { Expense, InventoryCategory, InventoryItem, Project } from "@/server/models";
+import { Expense, InventoryCategory, InventoryItem, InventoryMovement, Project } from "@/server/models";
+import { salaryScope } from "@/server/auth/session";
 import { getStockStatus } from "@/lib/stock-status";
 import type { ProjectStatus, StockStatus } from "@/lib/constants";
+import { roundQty } from "@/server/services/inventory-ledger";
 
 /** Option lists for pickers and filters, shared by every module. */
 
@@ -21,19 +23,24 @@ export async function getProjectOptions(): Promise<ProjectOption[]> {
   }));
 }
 
-/** Known vendor names (expenses and inventory), most used first. */
+/** Known vendor names (expenses, recurring bills, stock purchases and items), most used first. */
 export async function getVendorNames(limit = 300): Promise<string[]> {
   await connectDB();
-  const [fromExpenses, fromItems] = await Promise.all([
+  // Salary payees are employees: members never see who is paid (salaryScope is empty for admins).
+  // Assignment expenses only repeat an item's vendor (or "Company stock"), so they are left out.
+  const scope = await salaryScope();
+  const [fromExpenses, fromPurchases, fromItems] = await Promise.all([
     Expense.aggregate<{ _id: string }>([
-      { $match: { source: "manual" } },
+      { $match: { source: { $ne: "inventory_assignment" }, ...scope } },
       { $group: { _id: "$vendor", n: { $sum: 1 } } },
       { $sort: { n: -1 } },
       { $limit: limit },
     ]),
+    // Older suppliers of an item stay findable after another vendor becomes its latest one.
+    InventoryMovement.distinct("vendor", { type: "purchase" }),
     InventoryItem.distinct("vendor"),
   ]);
-  return [...new Set([...fromExpenses.map((v) => v._id), ...(fromItems as string[])].filter(Boolean))];
+  return [...new Set([...fromExpenses.map((v) => v._id), ...(fromPurchases as string[]), ...(fromItems as string[])].filter(Boolean))];
 }
 
 export type ItemOption = {
@@ -52,18 +59,22 @@ export type ItemOption = {
 export async function getInventoryItemOptions(): Promise<ItemOption[]> {
   await connectDB();
   const items = await InventoryItem.find({ archivedAt: null }).sort({ name: 1 }).lean();
-  return items.map((i) => ({
-    value: String(i._id),
-    label: i.name,
-    description: `${i.sku} · ${i.available} ${i.unit} available`,
-    sku: i.sku,
-    unit: i.unit ?? "pcs",
-    available: i.available,
-    allocated: i.allocated,
-    minStock: i.minStock,
-    unitPrice: i.unitPrice,
-    status: getStockStatus(i.available, i.minStock),
-  }));
+  return items.map((i) => {
+    // Older writes can leave float drift (5.55e-17): show and judge stock to 3 decimals, as the ledger does.
+    const available = roundQty(i.available);
+    return {
+      value: String(i._id),
+      label: i.name,
+      description: `${i.sku} · ${available} ${i.unit} available`,
+      sku: i.sku,
+      unit: i.unit ?? "pcs",
+      available,
+      allocated: roundQty(i.allocated),
+      minStock: i.minStock,
+      unitPrice: i.unitPrice,
+      status: getStockStatus(available, i.minStock),
+    };
+  });
 }
 
 export async function getInventoryCategoryOptions(): Promise<{ value: string; label: string; color: string }[]> {

@@ -10,12 +10,21 @@ import type { ReportColumn, ReportFilters, ReportRow, ReportTotals, ColumnType }
 
 export const col = (key: string, header: string, type: ColumnType, width: number): ReportColumn => ({ key, header, type, width });
 
-/** Sums the money (and optionally other numeric) columns into a totals row; `label` goes in the first text column. */
-export function sumTotals(columns: ReportColumn[], rows: ReportRow[], label = "Total", types: ColumnType[] = ["money"]): ReportTotals {
+/**
+ * Sums the money (and optionally other numeric) columns into a totals row; `label` goes in the first text column.
+ * `only` limits the sum to those column keys, for tables where some money columns (unit costs) mean nothing added up.
+ */
+export function sumTotals(
+  columns: ReportColumn[],
+  rows: ReportRow[],
+  label = "Total",
+  types: ColumnType[] = ["money"],
+  only?: string[],
+): ReportTotals {
   const totals: ReportTotals = {};
   let labelled = false;
   for (const c of columns) {
-    if (types.includes(c.type)) {
+    if (types.includes(c.type) && (!only || only.includes(c.key))) {
       let sum = 0;
       for (const r of rows) {
         if (r._kind === "subtotal") continue;
@@ -35,6 +44,20 @@ export const objectIds = (values: string[]) => values.filter((v) => Types.Object
 
 /** "yyyy-mm-dd" bounds as Mongo range (IST days, both inclusive). */
 export const rangeOf = (f: Pick<ReportFilters, "from" | "to">) => dateRangeFilter(f.from, f.to);
+
+/**
+ * Whether the period is whole IST months: it starts on the 1st (or has no start) and ends on the last day
+ * of a month, today or later (or has no end). Members see the company salary total only for such periods,
+ * the same view the dashboard gives. A total over a few days could be one person's pay, and two
+ * part-month totals could be subtracted to isolate one payment.
+ */
+export function coversWholeMonths(f: Pick<ReportFilters, "from" | "to">, today = toDateInput(new Date())): boolean {
+  if (f.from && !f.from.endsWith("-01")) return false;
+  if (!f.to || f.to >= today) return true;
+  const [y, m] = f.to.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return Number(f.to.slice(8, 10)) === lastDay;
+}
 
 export function periodText(f: Pick<ReportFilters, "from" | "to">): string {
   if (f.from && f.to) return `${formatDate(fromDateInput(f.from))} to ${formatDate(fromDateInput(f.to))}`;

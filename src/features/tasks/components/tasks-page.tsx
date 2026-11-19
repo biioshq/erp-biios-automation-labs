@@ -58,7 +58,9 @@ export async function TasksPage({
 
   const total = table?.total ?? board?.total ?? calendar?.total ?? 0;
   const projectFilter = params.filters.project?.length === 1 && params.filters.project[0] !== "none" ? params.filters.project[0] : undefined;
-  const hidden = [...(fixed?.assignee ? ["assignee"] : []), ...(fixed?.status ? ["status"] : [])];
+  // "Completed in" only matters for finished tasks: offer it on the Completed page or when a link set it.
+  const showCompleted = fixed?.status === "completed" || Boolean(params.filters.completed);
+  const hidden = [...(fixed?.assignee ? ["assignee"] : []), ...(fixed?.status ? ["status"] : []), ...(showCompleted ? [] : ["completed"])];
   const filtered = Boolean(params.q || params.from || params.to || Object.keys(params.filters).some((k) => !hidden.includes(k)));
 
   return (

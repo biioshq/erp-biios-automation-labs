@@ -11,6 +11,7 @@ import { DataTable, DataTableColumnHeader } from "@/components/data-table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
+import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ExpenseForm } from "@/features/finance/expenses/components/expense-form";
 import { ExpenseMobileCard, ExpenseSourceBadge } from "@/features/finance/expenses/components/expense-badges";
@@ -162,6 +163,8 @@ export function ProjectExpensesTab({
           <Money value={fromStock} className="mt-1 block text-xl font-semibold" />
         </div>
       </div>
+      {/* Members get the list without salary rows, so their total is lower than an admin's. */}
+      <SalariesHiddenNote className="-mt-2" />
 
       {rows.length === 0 ? (
         <EmptyState

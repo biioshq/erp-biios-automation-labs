@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { INVENTORY_UNITS, valuesOf } from "@/lib/constants";
-import { objectId, optionalDateInput, optionalMoney, optionalObjectId, optionalText, requiredText } from "@/lib/zod";
+import { money, objectId, optionalDateInput, optionalMoney, optionalObjectId, optionalText, requiredText } from "@/lib/zod";
+import { hasQtyDecimals, stockQuantity } from "../ledger/schemas";
 
 /** Validation shared by the item form (client) and the item actions (server). Client-safe. */
 
@@ -22,7 +23,7 @@ export const itemFormSchema = z
     description: optionalText(2000),
     location: optionalText(120),
     /** Create only: recorded as the first purchase movement. */
-    openingQuantity: optionalMoney,
+    openingQuantity: money.refine(hasQtyDecimals, "Use at most 3 decimals").optional(),
     openingUnitPrice: optionalMoney,
   })
   .superRefine((v, ctx) => {
@@ -36,9 +37,19 @@ export type ItemFormValues = z.output<typeof itemFormSchema>;
 
 export const itemIdSchema = z.object({ id: objectId });
 
+/**
+ * Edit only: the vendor and purchase date the form was filled with. A purchase made while the
+ * form is open changes both on the item, so a field still showing its loaded value is left as
+ * stored instead of being written back from the older copy. Lenient on purpose: it is a stored
+ * value echoed back (a purchase can set a vendor the item form would not accept), not user input.
+ */
+export const itemLoadedSchema = z.object({
+  loaded: z.object({ vendor: z.string().nullish(), purchaseDate: z.string().nullish() }).optional(),
+});
+
 export const adjustFormSchema = z.object({
   direction: z.enum(["add", "remove"]),
-  quantity: z.number({ error: "Enter a quantity" }).finite().positive("Must be more than zero"),
+  quantity: stockQuantity,
   reason: requiredText("A reason", 300),
 });
 export type AdjustFormInput = z.input<typeof adjustFormSchema>;
@@ -49,7 +60,8 @@ export const adjustStockSchema = z.object({
   delta: z
     .number({ error: "Enter a quantity" })
     .finite()
-    .refine((n) => n !== 0, "Enter a non-zero quantity"),
+    .refine((n) => n !== 0, "Enter a non-zero quantity")
+    .refine(hasQtyDecimals, "Use at most 3 decimals"),
   reason: requiredText("A reason", 300),
 });
 

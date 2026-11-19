@@ -4,10 +4,16 @@ import * as React from "react"
 import { cn } from "cn"
 import { Popover as PopoverPrimitive } from "radix-ui"
 
+/**
+ * Modal by default: while open, the popover owns scrolling. Otherwise a popover opened from a
+ * sheet, dialog or drawer (date pickers, project and item pickers) cannot be scrolled with the
+ * mouse wheel or by touch, because the sheet blocks scrolling outside itself.
+ */
 function Popover({
+  modal = true,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
-  return <PopoverPrimitive.Root data-slot="popover" {...props} />
+  return <PopoverPrimitive.Root data-slot="popover" modal={modal} {...props} />
 }
 
 function PopoverTrigger({

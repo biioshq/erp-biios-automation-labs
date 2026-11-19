@@ -35,6 +35,7 @@ import { FacetedFilter } from "@/components/data-table/faceted-filter";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { useIsAdmin } from "@/components/current-user";
 import { Money } from "@/components/shared/money";
 import { StockStatusBadge } from "@/components/shared/status-badge";
 import { StockLevelBar } from "@/components/shared/stock-level-bar";
@@ -73,6 +74,8 @@ export function ItemsView({
   const [record, setRecord] = useState<ItemFormRecord | null>(null);
   const [loadingRecord, setLoadingRecord] = useState(false);
   const [removing, setRemoving] = useState<ItemRow | null>(null);
+  // Archiving and deleting are admin-only (the action refuses members too).
+  const isAdmin = useIsAdmin();
 
   const panel: Panel = useMemo(() => {
     if (searchParams.get("new") === "1") return { kind: "new" };
@@ -100,6 +103,13 @@ export function ItemsView({
     });
 
   const editId = panel?.kind === "edit" ? panel.id : null;
+  // Closing the sheet (by any path, the back button included) drops the cached copy, so the
+  // next open loads the item as it is then instead of reusing an older one.
+  const [prevEditId, setPrevEditId] = useState(editId);
+  if (editId !== prevEditId) {
+    setPrevEditId(editId);
+    if (!editId) setRecord(null);
+  }
   useEffect(() => {
     if (!editId || record?.id === editId) return;
     let cancelled = false;
@@ -188,10 +198,14 @@ export function ItemsView({
           <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: item.id })}>
             <Pencil /> Edit
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(item)}>
-            <Archive /> Archive
-          </DropdownMenuItem>
+          {isAdmin ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(item)}>
+                <Archive /> Archive
+              </DropdownMenuItem>
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -312,7 +326,7 @@ export function ItemsView({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchParams],
+    [searchParams, isAdmin],
   );
 
   const emptyState = (
@@ -382,8 +396,12 @@ export function ItemsView({
             <Skeleton className="h-32 w-full" />
           </div>
         ) : editing && record ? (
+          // Keyed by id only: someone else's stock movement bumps updatedAt, and the live refresh
+          // that follows must not remount an open form and drop what is being typed. The open form
+          // keeps the values it was filled with; updateItem leaves a vendor or purchase date that a
+          // purchase changed meanwhile alone unless the user edited that field.
           <ItemForm
-            key={record.updatedAt}
+            key={record.id}
             item={record}
             categories={categories}
             vendors={vendors}
@@ -397,10 +415,10 @@ export function ItemsView({
       </FormSheet>
 
       <ConfirmDialog
-        open={removing !== null}
+        open={isAdmin && removing !== null}
         onOpenChange={(o) => !o && setRemoving(null)}
         title={removing ? `Archive ${removing.name}?` : "Archive item?"}
-        description="Items with stock history are archived and hidden from lists. Items that were never used are deleted. Items still assigned to projects cannot be archived."
+        description="Items with stock history are archived and hidden from lists. Items that were never used are deleted. Items still in stock or assigned to projects cannot be archived."
         confirmLabel="Archive"
         onConfirm={() => (removing ? remove(removing) : false)}
       />

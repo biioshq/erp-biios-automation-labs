@@ -10,6 +10,7 @@ import {
   InventoryMovement,
   type InventoryItemDoc,
 } from "@/server/models";
+import { roundQty } from "@/server/services/inventory-ledger";
 import { iso } from "@/server/serialize";
 import { mongoSort, searchRegex, type ListParams, type Paginated } from "@/lib/list-params";
 import { STOCK_STATUSES, type InventoryUnit, type MovementType, type StockStatus } from "@/lib/constants";
@@ -40,15 +41,17 @@ function toRow(i: ItemLean, categories: Map<string, ItemCategoryRef>): ItemRow {
     sku: i.sku,
     unit: (i.unit ?? "pcs") as InventoryUnit,
     category,
-    available: i.available,
-    allocated: i.allocated,
-    quantity: i.quantity,
+    // Rounded to the ledger's 3 decimals, as the Assign and Return forms do, so float drift that
+    // older writes stored (5.55e-17) shows as 0 and Out of Stock on every screen.
+    available: roundQty(i.available),
+    allocated: roundQty(i.allocated),
+    quantity: roundQty(i.quantity),
     minStock: i.minStock,
     unitPrice: i.unitPrice,
     value: round2(i.available * i.unitPrice),
     vendor: i.vendor ?? null,
     location: i.location ?? null,
-    status: getStockStatus(i.available, i.minStock),
+    status: getStockStatus(roundQty(i.available), i.minStock),
     updatedAt: iso(i.updatedAt)!,
   };
 }
@@ -180,7 +183,7 @@ export const getItemDetail = cache(async (id: string): Promise<ItemDetail | null
     assigned: byType.get("assign")?.quantity ?? 0,
     returned: byType.get("return")?.quantity ?? 0,
     adjusted: byType.get("adjustment")?.delta ?? 0,
-    remaining: item.available,
+    remaining: roundQty(item.available),
     count: totals.reduce((n, t) => n + t.count, 0),
   };
 
@@ -198,8 +201,9 @@ export const getItemDetail = cache(async (id: string): Promise<ItemDetail | null
       cost: 0,
       lastAssignedAt: iso(a.assignedAt)!,
     };
-    row.quantity += a.quantity;
-    row.cost = round2(row.cost + a.quantity * a.unitCost);
+    row.quantity = roundQty(row.quantity + a.quantity);
+    // Per lot, as the project's expenses and the Return screen round it.
+    row.cost = round2(row.cost + round2(a.quantity * a.unitCost));
     if (new Date(a.assignedAt) > new Date(row.lastAssignedAt)) row.lastAssignedAt = iso(a.assignedAt)!;
     grouped.set(key, row);
   }

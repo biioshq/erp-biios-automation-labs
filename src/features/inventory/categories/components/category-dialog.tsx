@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { createCategory, updateCategory } from "../actions";
 import { CATEGORY_COLORS, categoryFormSchema, type CategoryFormInput, type CategoryFormValues } from "../schemas";
 import type { CategoryRow } from "../types";
+import { formValidation } from "@/components/forms/form-options";
 
 /** Create or edit a category. */
 export function CategoryDialog({
@@ -36,7 +37,7 @@ export function CategoryDialog({
       description: category?.description ?? "",
       color: category?.color ?? CATEGORY_COLORS[0],
     },
-    mode: "onTouched",
+    ...formValidation,
   });
 
   const onSubmit = form.handleSubmit((values) => {

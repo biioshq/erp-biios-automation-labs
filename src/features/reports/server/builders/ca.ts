@@ -1,19 +1,22 @@
-import { salaryScope } from "@/server/auth/session";
 import "server-only";
 
+import { salaryScope } from "@/server/auth/session";
 import { connectDB } from "@/server/db";
-import { Expense } from "@/server/models";
+import { Expense, InventoryMovement } from "@/server/models";
 import { expenseFilter } from "@/features/finance/expenses/queries";
 import { round2 } from "@/lib/format";
-import { col, describeFilters, sumTotals } from "../common";
+import { filtersForReport } from "../../schemas";
+import { col, coversWholeMonths, describeFilters, rangeOf, sumTotals } from "../common";
 import { buildExpenseReport } from "./expense";
 import { buildGstReport } from "./gst";
 import { buildIncomeReport } from "./income";
 import type { ReportData, ReportFilters, ReportRow, ReportSection } from "../../types";
 
 /** One pack for the chartered accountant: summary, registers and vendor totals. */
-export async function buildCaReport(f: ReportFilters): Promise<ReportData> {
+export async function buildCaReport(filters: ReportFilters): Promise<ReportData> {
   await connectDB();
+  // Every table below uses this one filter set, so the summary, registers and vendor totals agree.
+  const f = filtersForReport("ca", filters);
   const scope = await salaryScope();
   const expenseFBase = expenseFilter({
     q: "",
@@ -25,15 +28,30 @@ export async function buildCaReport(f: ReportFilters): Promise<ReportData> {
       ...(f.category.length ? { category: f.category } : {}),
     },
   });
+  const member = Object.keys(scope).length > 0;
+  // Vendor totals are what was paid to each supplier: assignment expenses only move stock already
+  // bought (and paid) to a project, so they are left out and the stock purchases themselves added below.
   // Members never receive individual salary rows.
-  const expenseF = (Object.keys(scope).length ? { $and: [expenseFBase, scope] } : expenseFBase) as typeof expenseFBase;
+  const expenseF = { $and: [expenseFBase, { source: { $ne: "inventory_assignment" } }, scope] };
+  // Same rule as the GST register: purchases have no project, and count as "inventory" spend.
+  const includePurchases = f.project.length === 0 && (f.category.length === 0 || f.category.includes("inventory"));
+  const purchaseQuery: Record<string, unknown> = { type: "purchase" };
+  const range = rangeOf(f);
+  if (range) purchaseQuery.date = range;
+  if (f.vendor.length) purchaseQuery.vendor = { $in: f.vendor };
+  // A member's pack is a company P&L, so it carries salaries as one company-wide line. With a project or
+  // vendor filter, or over part of a month, that line could be one person's pay, so then salaries are left out.
+  const salariesInScope = f.category.length === 0 || f.category.includes("salaries");
+  const salaryLine = member && salariesInScope && !f.project.length && !f.vendor.length && coversWholeMonths(f);
+  const salariesHidden = member && salariesInScope && !salaryLine;
+  type VendorGroup = { _id: string | null; gstin: string | null; count: number; taxable: number; tax: number; total: number };
   // Income has its own category list, so the expense category filter does not apply to it.
   const incomeFilters = { ...f, category: [], vendor: [] };
-  const [expense, income, gst, vendors] = await Promise.all([
+  const [expense, income, gst, vendors, purchases, salaries, assigned] = await Promise.all([
     buildExpenseReport(f),
     buildIncomeReport(incomeFilters),
     buildGstReport(f),
-    Expense.aggregate<{ _id: string; gstin: string | null; count: number; taxable: number; tax: number; total: number }>([
+    Expense.aggregate<VendorGroup>([
       { $match: expenseF as never },
       {
         $group: {
@@ -45,33 +63,62 @@ export async function buildCaReport(f: ReportFilters): Promise<ReportData> {
           total: { $sum: "$amount" },
         },
       },
-      { $sort: { total: -1 } },
+    ]),
+    includePurchases
+      ? InventoryMovement.aggregate<VendorGroup>([
+          { $match: purchaseQuery },
+          {
+            $group: {
+              _id: "$vendor",
+              gstin: { $max: "$invoice.gstin" },
+              count: { $sum: 1 },
+              taxable: { $sum: { $ifNull: ["$invoice.taxableAmount", 0] } },
+              tax: {
+                $sum: { $add: [{ $ifNull: ["$invoice.cgst", 0] }, { $ifNull: ["$invoice.sgst", 0] }, { $ifNull: ["$invoice.igst", 0] }, { $ifNull: ["$invoice.cess", 0] }] },
+              },
+              // The invoice total when one was recorded, otherwise the cost of the stock.
+              total: { $sum: { $cond: [{ $gt: [{ $ifNull: ["$invoice.total", 0] }, 0] }, "$invoice.total", { $ifNull: ["$totalCost", 0] }] } },
+            },
+          },
+        ])
+      : Promise.resolve([] as VendorGroup[]),
+    salaryLine
+      ? Expense.aggregate<{ total: number }>([
+          { $match: { $and: [expenseFBase, { category: "salaries" }] } as never },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ])
+      : Promise.resolve([] as { total: number }[]),
+    // Stock used on projects: in the expense register at cost, but left out of the vendor totals.
+    Expense.aggregate<{ total: number }>([
+      { $match: { $and: [expenseFBase, { source: "inventory_assignment" }, scope] } as never },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
     ]),
   ]);
 
   const incomeTotal = Number(income.totals?.amount ?? 0);
-  const expenseTotal = Number(expense.totals?.total ?? 0);
+  // For members the register has no salary rows; the company salary total is added back as its own line.
+  const registerTotal = Number(expense.totals?.total ?? 0);
+  const salaryTotal = round2(salaries[0]?.total ?? 0);
+  const expenseTotal = round2(registerTotal + salaryTotal);
   const itc = (k: string) => Number(gst.totals?.[k] ?? 0);
   const itcTotal = round2(itc("cgst") + itc("sgst") + itc("igst") + itc("cess"));
+  const profitLabel = salariesHidden ? "Profit (salaries excluded)" : "Profit";
 
-  const summaryRows: ReportRow[] = [
-    { line: "Income received", amount: incomeTotal },
-    { line: "Expenses paid", amount: expenseTotal },
-    { line: "Profit", amount: round2(incomeTotal - expenseTotal), _kind: "subtotal" },
-    { line: "GST input credit: CGST", amount: itc("cgst") },
-    { line: "GST input credit: SGST", amount: itc("sgst") },
-    { line: "GST input credit: IGST", amount: itc("igst") },
-    { line: "GST input credit: CESS", amount: itc("cess") },
-    { line: "GST input credit: total", amount: itcTotal, _kind: "subtotal" },
-  ];
-  const summarySection: ReportSection = {
-    title: "Summary",
-    columns: [col("line", "Item", "text", 36), col("amount", "Amount", "money", 20)],
-    rows: summaryRows,
-    totals: null,
-  };
-
-  const vendorRows: ReportRow[] = vendors.map((v) => ({
+  // Expenses and stock purchases from the same supplier make one row.
+  const byVendor = new Map<string, VendorGroup>();
+  for (const v of [...vendors, ...purchases]) {
+    const key = v._id || "No vendor recorded";
+    const cur = byVendor.get(key);
+    if (!cur) byVendor.set(key, { ...v, _id: key });
+    else {
+      cur.gstin = cur.gstin || v.gstin;
+      cur.count += v.count;
+      cur.taxable += v.taxable;
+      cur.tax += v.tax;
+      cur.total += v.total;
+    }
+  }
+  const vendorRows: ReportRow[] = [...byVendor.values()].sort((a, b) => b.total - a.total).map((v) => ({
     vendor: v._id,
     gstin: v.gstin ?? "",
     entries: v.count,
@@ -94,6 +141,39 @@ export async function buildCaReport(f: ReportFilters): Promise<ReportData> {
     totals: sumTotals(vendorColumns, vendorRows, "Total", ["money", "number"]),
   };
 
+  const assignedTotal = round2(assigned[0]?.total ?? 0);
+  const purchaseTotal = round2(purchases.reduce((s, p) => s + p.total, 0));
+  const vendorTotal = Number(vendorSection.totals?.total ?? 0);
+  const summaryRows: ReportRow[] = [
+    { line: "Income received", amount: incomeTotal },
+    ...(salaryLine
+      ? [
+          { line: "Expenses other than salaries", amount: registerTotal },
+          { line: "Salaries & wages (company total)", amount: salaryTotal },
+          { line: "Expenses", amount: expenseTotal, _kind: "subtotal" as const },
+        ]
+      : [{ line: salariesHidden ? "Expenses (salaries excluded)" : "Expenses", amount: expenseTotal }]),
+    { line: profitLabel, amount: round2(incomeTotal - expenseTotal), _kind: "subtotal" },
+    { line: "GST input credit: CGST", amount: itc("cgst") },
+    { line: "GST input credit: SGST", amount: itc("sgst") },
+    { line: "GST input credit: IGST", amount: itc("igst") },
+    { line: "GST input credit: CESS", amount: itc("cess") },
+    { line: "GST input credit: total", amount: itcTotal, _kind: "subtotal" },
+    // "Expenses" counts stock when it is used on a project (at cost), while the vendor table counts it when
+    // it is bought (at invoice value), so the two differ by this much.
+    { line: "Reconciliation to vendor-wise totals", amount: null, _kind: "subtotal" },
+    { line: salaryLine ? "Expense register (other than salaries)" : "Expense register", amount: registerTotal },
+    { line: "Less: stock used on projects", amount: assignedTotal ? -assignedTotal : 0 },
+    { line: "Add: stock purchases at invoice value", amount: purchaseTotal },
+    { line: "Vendor-wise total", amount: vendorTotal, _kind: "subtotal" },
+  ];
+  const summarySection: ReportSection = {
+    title: "Summary",
+    columns: [col("line", "Item", "text", 36), col("amount", "Amount", "money", 20)],
+    rows: summaryRows,
+    totals: null,
+  };
+
   const expenseSection: ReportSection = { title: "Expense register", columns: expense.columns, rows: expense.rows, totals: expense.totals };
   const incomeSection: ReportSection = { title: "Income register", columns: income.columns, rows: income.rows, totals: income.totals };
   const gstSection: ReportSection = { title: "GST register", columns: gst.columns, rows: gst.rows, totals: gst.totals };
@@ -103,11 +183,17 @@ export async function buildCaReport(f: ReportFilters): Promise<ReportData> {
     // The primary table (used for CSV) is the expense register with its GST columns.
     ...expenseSection,
     title: "CA report",
-    subtitle: await describeFilters(f, { categories: "expense" }),
+    subtitle: [
+      await describeFilters(f, { categories: "expense" }),
+      salaryLine ? "Salaries appear as one company total, not as rows" : salariesHidden ? "Salaries are hidden for your role" : "",
+      assignedTotal || purchaseTotal ? "Vendor totals count stock when it is bought, at invoice value, not when it is used on a project" : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
     summary: [
       { label: "Income", value: incomeTotal, type: "money" },
-      { label: "Expenses", value: expenseTotal, type: "money" },
-      { label: "Profit", value: round2(incomeTotal - expenseTotal), type: "money" },
+      { label: salariesHidden ? "Expenses (salaries excluded)" : "Expenses", value: expenseTotal, type: "money" },
+      { label: profitLabel, value: round2(incomeTotal - expenseTotal), type: "money" },
       { label: "GST input credit", value: itcTotal, type: "money" },
     ],
     sections: [summarySection, expenseSection, incomeSection, gstSection, vendorSection],

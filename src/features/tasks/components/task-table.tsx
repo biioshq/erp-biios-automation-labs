@@ -89,7 +89,8 @@ export function TaskTable({
   filters: FilterDef[];
   onOpen: (id: string) => void;
   onEdit: (id: string) => void;
-  onDelete: (task: TaskRow) => void;
+  /** Left out for members: only admins can delete tasks. */
+  onDelete?: (task: TaskRow) => void;
   onNew: () => void;
   toolbarActions?: React.ReactNode;
 }) {
@@ -223,10 +224,14 @@ export function TaskTable({
                 <DropdownMenuItem onSelect={() => onEdit(row.original.id)}>
                   <Pencil /> Edit
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={() => onDelete(row.original)}>
-                  <Trash2 /> Delete
-                </DropdownMenuItem>
+                {onDelete ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" onSelect={() => onDelete(row.original)}>
+                      <Trash2 /> Delete
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

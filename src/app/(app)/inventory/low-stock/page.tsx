@@ -9,6 +9,7 @@ import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { getLowStockItems } from "@/features/inventory/low-stock/queries";
 import { LowStockList } from "@/features/inventory/low-stock/components/low-stock-list";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Low Stock" };
 
@@ -19,6 +20,8 @@ const VIEWS = [
 ] as const;
 
 export default async function LowStockPage({ searchParams }: PageProps<"/inventory/low-stock">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const sp = await searchParams;
   const raw = Array.isArray(sp.status) ? sp.status[0] : sp.status;
   const view = VIEWS.some((v) => v.value === raw) ? (raw as (typeof VIEWS)[number]["value"]) : "all";

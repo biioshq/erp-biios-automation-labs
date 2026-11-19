@@ -2,7 +2,14 @@ import type { FileDTO } from "@/features/files/types";
 import type { ProjectStage, ProjectStatus } from "@/lib/constants";
 
 /** What blocks a project from being deleted. */
-export type ProjectLinks = { expenses: number; income: number; allocations: number; tasks: number };
+export type ProjectLinks = {
+  expenses: number;
+  income: number;
+  allocations: number;
+  tasks: number;
+  /** Recurring schedules that are not ended (they would keep posting to a deleted project). */
+  schedules: number;
+};
 
 /** A project with its live budget numbers. Used by cards, the table, the form and the detail header. */
 export type ProjectRow = {
@@ -37,7 +44,7 @@ export type ProjectsSummary = {
 
 export type ProjectDetail = ProjectRow & {
   byStage: Record<ProjectStage, number>;
-  /** Value of stock the project holds right now (held quantity x unit cost). */
+  /** Value of stock the project holds right now (held quantity x the unit cost charged at assignment). */
   inventoryValue: number;
   openTasks: number;
   /** People currently on the project (memberships without an end date). */

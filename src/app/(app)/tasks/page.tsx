@@ -58,10 +58,10 @@ export default async function TasksDashboardPage() {
             className="h-full"
           />
         </Link>
-        <Link href="/tasks/status/completed" className={card}>
+        <Link href="/tasks/status/completed?completed=this_month" className={card}>
           <StatCard label="Completed this month" value={formatNumber(d.completedThisMonth)} icon={CircleCheckBig} tone="success" className="h-full" />
         </Link>
-        <Link href="/tasks/mine" className={card}>
+        <Link href="/tasks/mine?status=pending,in_progress,review" className={card}>
           <StatCard label="My open tasks" value={formatNumber(d.myOpen)} icon={UserRound} tone="brand" hint="Assigned to you" className="h-full" />
         </Link>
       </StatGrid>
@@ -138,7 +138,7 @@ export default async function TasksDashboardPage() {
                 <div className="min-w-0 flex-1 space-y-1.5">
                   <div className="flex items-baseline justify-between gap-2">
                     <Link
-                      href={w.person ? `/tasks/all?assignee=${w.person.id}` : "/tasks/all?assignee=none"}
+                      href={`/tasks/all?status=pending,in_progress,review&assignee=${w.person?.id ?? "none"}`}
                       className="truncate text-sm font-medium hover:underline"
                     >
                       {w.person?.name ?? "Unassigned"}

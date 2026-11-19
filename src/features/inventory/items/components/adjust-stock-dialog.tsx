@@ -19,6 +19,7 @@ import { getStockStatus } from "@/lib/stock-status";
 import { adjustItemStock } from "../actions";
 import { adjustFormSchema, type AdjustFormInput, type AdjustFormValues } from "../schemas";
 import type { ItemDetail } from "../types";
+import { formValidation } from "@/components/forms/form-options";
 
 /**
  * Manual correction of available stock (count differences, damage, found stock).
@@ -39,7 +40,7 @@ export function AdjustStockDialog({
   const form = useForm<AdjustFormInput, unknown, AdjustFormValues>({
     resolver: zodResolver(adjustFormSchema),
     defaultValues: { direction: "add", quantity: undefined, reason: "" },
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control, setValue } = form;
   const direction = useWatch({ control, name: "direction" });

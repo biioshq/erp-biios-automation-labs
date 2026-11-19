@@ -10,7 +10,7 @@ import { useTableUrl, type FilterDef } from "@/components/data-table";
 import { TASK_PRIORITIES, TASK_STATUSES } from "@/lib/constants";
 import type { ProjectOption } from "@/server/lookups";
 import type { TeamMember } from "@/server/services/users";
-import type { TaskView } from "../schemas";
+import { TASK_COMPLETED_RANGES, type TaskView } from "../schemas";
 
 /** Filter chips for the table, board and calendar. `hidden` drops filters a page fixes itself (status pages, My Tasks). */
 export function buildTaskFilters({ projects, people, hidden }: { projects: ProjectOption[]; people: TeamMember[]; hidden: string[] }): FilterDef[] {
@@ -27,6 +27,7 @@ export function buildTaskFilters({ projects, people, hidden }: { projects: Proje
       title: "Assignee",
       options: [{ value: "none", label: "Unassigned" }, ...people.map((m) => ({ value: m.id, label: m.name }))],
     },
+    { key: "completed", title: "Completed in", options: TASK_COMPLETED_RANGES.map((o) => ({ ...o })) },
   ];
   return all.filter((f) => !hidden.includes(f.key));
 }

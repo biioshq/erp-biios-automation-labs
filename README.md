@@ -61,9 +61,19 @@ top-right corner shows the picture, name and email, and has Team members, Change
 
 ## Roles
 
-Admins can do everything. Members work with records day to day but cannot delete expenses, income, projects or
-categories, manage recurring schedules, see salaries or add team members. The server enforces this; the interface
-hides what a member cannot do.
+Admins can do everything. Members work with records day to day but cannot delete anything (expenses, income,
+projects, documents, tasks, attachments, inventory items or categories), manage recurring schedules, record or
+change salaries, or add team members. The server enforces this; the interface hides what a member cannot do.
+
+Salaries: members never see individual pay (salary expenses, payees, payslips or salary schedules). Company-wide
+totals still include salaries. For members, project spend and stage totals leave salaries out and say so, so a
+project figure never reveals one person's pay.
+
+## Live updates
+
+Open pages keep themselves current. Every change (from the app, recurring postings or uploads to a project) bumps a
+change counter, and each open page checks `/api/live` every 15 seconds while visible, and right away when you come
+back to the tab, then refreshes its data if something changed. Typing, open forms and table filters are kept.
 
 ## Review server
 

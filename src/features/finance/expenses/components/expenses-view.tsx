@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useOptimistic, useState, startTransition } from "react";
+import { useEffect, useMemo, useOptimistic, useRef, useState, startTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
@@ -22,6 +22,7 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { useIsAdmin } from "@/components/current-user";
+import { useOnLiveChange } from "@/components/live-updates";
 import { EXPENSE_CATEGORIES, EXPENSE_SOURCES, PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
 import { emitDataChanged } from "@/lib/events";
@@ -55,6 +56,8 @@ export function ExpensesView({
   const [rows, removeRow] = useOptimistic(data.rows, (state, id: string) => state.filter((r) => r.id !== id));
   const [detail, setDetail] = useState<ExpenseDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  // Bumped after a save so the open record is fetched again even when its id has not changed.
+  const [version, setVersion] = useState(0);
   const [deleting, setDeleting] = useState<ExpenseRow | null>(null);
 
   const panel: Panel = useMemo(() => {
@@ -79,6 +82,8 @@ export function ExpensesView({
   };
 
   const panelId = panel && panel.kind !== "new" ? panel.id : null;
+  // Closing the drawer drops the cached record, so the next open (and its edit form) shows fresh data.
+  if (!panelId && detail) setDetail(null);
   useEffect(() => {
     if (!panelId) return;
     if (detail?.id === panelId) return;
@@ -98,7 +103,32 @@ export function ExpensesView({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelId]);
+  }, [panelId, version]);
+
+  // When anyone changes data, reload the open record while it is only being shown, so Edit starts from current
+  // figures. Never while the edit form is open: it keeps what is being typed.
+  const viewing = useRef<string | null>(null);
+  useEffect(() => {
+    viewing.current = panel?.kind === "view" ? panel.id : null;
+  });
+  useOnLiveChange(() => {
+    const id = viewing.current;
+    if (!id || detail?.id !== id) return;
+    fetchExpense(id)
+      .then((d) => {
+        // Closed, switched to another record or opened for editing meanwhile: leave it.
+        if (viewing.current !== id) return;
+        if (!d) {
+          toast.error("That expense no longer exists.");
+          setPanel(null);
+          return;
+        }
+        setDetail(d);
+      })
+      .catch(() => {
+        // Offline: the drawer keeps what it shows and the next change tries again.
+      });
+  });
 
   async function remove(row: Pick<ExpenseRow, "id" | "number">) {
     startTransition(() => removeRow(row.id));
@@ -108,6 +138,8 @@ export function ExpensesView({
       return false;
     }
     toast.success(`${row.number} deleted`);
+    // The drawer showing it closes; it must not be reloaded by the change event below and report it missing.
+    if (viewing.current === row.id) viewing.current = null;
     emitDataChanged();
     if (panelId === row.id) setPanel(null);
     return true;
@@ -372,12 +404,14 @@ export function ExpensesView({
           <ExpenseDetailSkeleton />
         ) : panel?.kind === "edit" && detail ? (
           <ExpenseForm
-            key={detail.updatedAt}
+            // Keyed by the record only: a refresh must never remount the form and drop what is being typed.
+            key={detail.id}
             expense={detail}
             projects={projects}
             vendors={vendors}
             onDone={(id) => {
               setDetail(null);
+              setVersion((v) => v + 1);
               setPanel({ kind: "view", id });
             }}
             onCancel={() => setPanel({ kind: "view", id: detail.id })}

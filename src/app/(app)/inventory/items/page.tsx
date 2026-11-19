@@ -11,10 +11,13 @@ import { inventorySnapshot } from "@/server/services/metrics";
 import { getItemVendors, listItems } from "@/features/inventory/items/queries";
 import { ITEM_FILTER_KEYS, ITEM_SORT_KEYS } from "@/features/inventory/items/schemas";
 import { ItemsView } from "@/features/inventory/items/components/items-view";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "All Inventory" };
 
 export default async function ItemsPage({ searchParams }: PageProps<"/inventory/items">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const sp = await searchParams;
   const params = parseListParams(sp, {
     filterKeys: ITEM_FILTER_KEYS,

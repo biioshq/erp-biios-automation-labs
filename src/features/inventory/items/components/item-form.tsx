@@ -19,6 +19,7 @@ import { round2 } from "@/lib/format";
 import { createItem, suggestSku, updateItem } from "../actions";
 import { itemFormSchema, type ItemFormInput, type ItemFormValues } from "../schemas";
 import type { ItemFormRecord } from "../types";
+import { formValidation } from "@/components/forms/form-options";
 
 export type CategoryOption = { value: string; label: string; color: string };
 
@@ -94,11 +95,14 @@ export function ItemForm({
   const [pending, startTransition] = useTransition();
   const [suggesting, setSuggesting] = useState(false);
   const [skuTouched, setSkuTouched] = useState(isEdit);
+  // What the form was filled with, fixed at mount: the item prop can refresh while the form stays
+  // open, and the server compares against these to leave a purchase made meanwhile in place.
+  const [loaded] = useState(() => ({ vendor: item?.vendor ?? null, purchaseDate: item?.purchaseDate ?? null }));
 
   const form = useForm<ItemFormInput, unknown, ItemFormValues>({
     resolver: zodResolver(itemFormSchema),
     defaultValues: defaultsFrom(item, defaultCategoryId),
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control, setValue, getValues } = form;
   const unit = useWatch({ control, name: "unit" });
@@ -121,7 +125,7 @@ export function ItemForm({
   const onSubmit = form.handleSubmit((values) => {
     startTransition(async () => {
       const payload = isEdit ? { ...values, openingQuantity: undefined, openingUnitPrice: undefined } : values;
-      const result = isEdit && item ? await updateItem({ ...payload, id: item.id }) : await createItem(payload);
+      const result = isEdit && item ? await updateItem({ ...payload, id: item.id, loaded }) : await createItem(payload);
       if (!result.ok) {
         applyFieldErrors(result, form.setError);
         toast.error(result.error);

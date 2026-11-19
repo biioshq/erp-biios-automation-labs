@@ -195,14 +195,25 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
     pageCount: server ? Math.max(1, Math.ceil(props.total / props.pageSize)) : undefined,
     enableSortingRemoval: true,
     onSortingChange: (updater) => {
-      if (!server) return setSorting(updater);
+      if (!server) {
+        setSorting(updater);
+        return setPagination((p) => ({ ...p, pageIndex: 0 }));
+      }
       const next = typeof updater === "function" ? updater(serverSorting) : updater;
       const s = next[0];
       url.set({ sort: s ? `${s.id}.${s.desc ? "desc" : "asc"}` : null });
     },
     onColumnVisibilityChange: setColumnVisibility,
-    onGlobalFilterChange: setGlobalFilter,
-    onColumnFiltersChange: setColumnFilters,
+    // Client mode: a new search or filter starts from page 1. (Not on every data change: live
+    // updates re-render with fresh rows, and that must not throw the reader back to page 1.)
+    onGlobalFilterChange: (updater) => {
+      setGlobalFilter(updater);
+      setPagination((p) => ({ ...p, pageIndex: 0 }));
+    },
+    onColumnFiltersChange: (updater) => {
+      setColumnFilters(updater);
+      setPagination((p) => ({ ...p, pageIndex: 0 }));
+    },
     onPaginationChange: (updater) => {
       if (!server) return setPagination(updater);
       const current = { pageIndex: props.page - 1, pageSize: props.pageSize };
@@ -216,8 +227,14 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
     getPaginationRowModel: server ? undefined : getPaginationRowModel(),
     getFacetedUniqueValues: server ? undefined : getFacetedUniqueValues(),
     globalFilterFn: "includesString",
-    autoResetPageIndex: !server,
+    autoResetPageIndex: false,
   });
+
+  // When rows disappear (deleted elsewhere), stay on the last page that still exists.
+  const lastPage = server ? 0 : Math.max(0, table.getPageCount() - 1);
+  useEffect(() => {
+    if (!server && pagination.pageIndex > lastPage) setPagination((p) => ({ ...p, pageIndex: lastPage }));
+  }, [server, lastPage, pagination.pageIndex]);
 
   // Filter values and setters for both modes.
   const filterValue = (key: string): string[] =>
@@ -353,18 +370,31 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
             {rows.length ? (
               rows.map((row) =>
                 onRowClick ? (
-                  <button
+                  // Not a <button>: cards may hold their own buttons (an actions menu), and a button
+                  // inside a button is invalid HTML that breaks hydration. Taps on those inner
+                  // controls belong to them, not to the card.
+                  <div
                     key={row.id}
-                    type="button"
-                    onClick={() => onRowClick(row.original)}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      const inner = (e.target as HTMLElement).closest("button, a, input, select, textarea, label, [role=menuitem]");
+                      if (inner && inner !== e.currentTarget && e.currentTarget.contains(inner)) return;
+                      onRowClick(row.original);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+                      e.preventDefault();
+                      onRowClick(row.original);
+                    }}
                     className={cn(
-                      "flex min-h-14 w-full items-center gap-2 px-4 py-3 text-left transition-colors outline-none hover:bg-muted/40 active:bg-muted/70 focus-visible:bg-muted/60",
+                      "flex min-h-14 w-full cursor-pointer items-center gap-2 px-4 py-3 text-left transition-colors outline-none hover:bg-muted/40 active:bg-muted/70 focus-visible:bg-muted/60",
                       rowClassName?.(row.original),
                     )}
                   >
                     <div className="min-w-0 flex-1">{renderMobileRow(row.original)}</div>
                     <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" aria-hidden />
-                  </button>
+                  </div>
                 ) : (
                   <div key={row.id} className={cn("min-w-0 px-4 py-3", rowClassName?.(row.original))}>
                     {renderMobileRow(row.original)}

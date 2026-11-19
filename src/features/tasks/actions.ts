@@ -44,11 +44,19 @@ function completionPatch(from: string | undefined, to: TaskStatus): { set: Recor
   return { set: {}, unset: {} };
 }
 
-/** Files that are free to attach: uploaded but not yet owned by another record, or already on this task. */
-async function claimableFiles(fileIds: string[], taskId: string): Promise<string[]> {
-  if (!fileIds.length) return [];
+/**
+ * Files that are free to attach: the user's own attachment uploads not yet owned by a record, or files already
+ * on this task. Someone else's unsaved upload, such as a receipt waiting on an expense form, is never taken.
+ */
+async function claimableFiles(fileIds: string[], taskId: string, userId: string): Promise<string[]> {
+  const valid = fileIds.filter((id) => Types.ObjectId.isValid(id));
+  if (!valid.length) return [];
+  const free = { kind: "attachment" as const, uploadedBy: oid(userId) };
   const docs = await FileModel.find(
-    { _id: { $in: fileIds.map(oid) }, $or: [{ "entity.id": { $exists: false } }, { "entity.id": null }, { "entity.id": oid(taskId) }] },
+    {
+      _id: { $in: valid.map(oid) },
+      $or: [{ "entity.id": { $exists: false }, ...free }, { "entity.id": null, ...free }, { "entity.id": oid(taskId) }],
+    },
     { _id: 1 },
   ).lean();
   const ok = new Set(docs.map((d) => String(d._id)));
@@ -79,7 +87,7 @@ export const createTask = defineAction(
     const [number, order, attachmentIds] = await Promise.all([
       nextNumber("task"),
       endOfColumn(input.status),
-      claimableFiles(input.attachmentIds, id),
+      claimableFiles(input.attachmentIds, id, user.id),
     ]);
     await Task.create({
       _id,
@@ -112,19 +120,21 @@ export const updateTask = defineAction(
     const statusChanged = existing.status !== input.status;
     const completion = completionPatch(existing.status, input.status);
     const currentFiles = (existing.attachments ?? []).map(String);
-    const wanted = input.attachmentIds;
+    // Only what the editor removed is deleted, never a file someone attached while the form was open.
+    const removed = input.removedAttachmentIds.filter((f) => currentFiles.includes(f) && !input.attachmentIds.includes(f));
+    if (removed.length && user.role !== "admin") {
+      throw new AppError("Only an admin can remove attachments. Ask an admin on your team.", "forbidden");
+    }
     const added = await claimableFiles(
-      wanted.filter((f) => !currentFiles.includes(f)),
+      input.attachmentIds.filter((f) => !currentFiles.includes(f)),
       input.id,
+      user.id,
     );
-    const kept = wanted.filter((f) => currentFiles.includes(f) || added.includes(f));
-    const removed = currentFiles.filter((f) => !kept.includes(f));
 
     const set: Record<string, unknown> = {
       title: input.title,
       priority: input.priority,
       status: input.status,
-      attachments: kept.map(oid),
       ...completion.set,
     };
     const unset: Record<string, 1> = { ...completion.unset };
@@ -140,9 +150,25 @@ export const updateTask = defineAction(
     }
     if (statusChanged) set.order = await endOfColumn(input.status);
 
-    await Task.updateOne({ _id: existing._id }, { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
+    // $addToSet and $pull on the same array cannot share one update, so removals go second.
+    await Task.updateOne(
+      { _id: existing._id },
+      {
+        $set: set,
+        ...(Object.keys(unset).length ? { $unset: unset } : {}),
+        ...(added.length ? { $addToSet: { attachments: { $each: added.map(oid) } } } : {}),
+      },
+    );
+    if (removed.length) await Task.updateOne({ _id: existing._id }, { $pull: { attachments: { $in: removed.map(oid) } } });
     await Promise.all(removed.map(removeFile));
     await attachFiles(added, { type: "task", id: input.id }, input.projectId);
+    // Files follow the task to its new project. Left on the old one, deleting that project would delete them.
+    if (String(existing.project ?? "") !== (input.projectId ?? "")) {
+      await FileModel.updateMany(
+        { "entity.type": "task", "entity.id": existing._id },
+        input.projectId ? { $set: { project: oid(input.projectId) } } : { $unset: { project: 1 } },
+      );
+    }
     if (String(existing.assignee ?? "") !== (input.assigneeId ?? "")) {
       await notifyAssigned({ id: input.id, number: existing.number, title: input.title }, input.assigneeId, user);
     }
@@ -169,10 +195,12 @@ export const setTaskStatus = defineAction(
 
 export const moveTask = defineAction(
   taskMoveSchema,
-  async ({ id, status, order, renumber }) => {
+  async ({ id, status, order: requested, renumber }) => {
     const existing = await Task.findById(id).lean();
     if (!existing) throw notFound("The task");
     const completion = completionPatch(existing.status, status);
+    // No position means "bottom of the column": the board may not show every card, so the server picks it.
+    const order = requested ?? (existing.status === status ? (existing.order ?? 0) : await endOfColumn(status));
     await Task.updateOne(
       { _id: existing._id },
       { $set: { status, order, ...completion.set }, ...(Object.keys(completion.unset).length ? { $unset: completion.unset } : {}) },
@@ -182,7 +210,7 @@ export const moveTask = defineAction(
         renumber.filter((r) => r.id !== id).map((r) => ({ updateOne: { filter: { _id: oid(r.id) }, update: { $set: { order: r.order } } } })),
       );
     }
-    return { id };
+    return { id, order };
   },
   { revalidate: REVALIDATE },
 );
@@ -196,7 +224,7 @@ export const deleteTask = defineAction(
     await Promise.all((existing.attachments ?? []).map((f) => removeFile(String(f))));
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Task deleted" },
+  { revalidate: REVALIDATE, message: "Task deleted", role: "admin" },
 );
 
 export const addTaskComment = defineAction(
@@ -231,10 +259,10 @@ export const addTaskComment = defineAction(
 
 export const attachToTask = defineAction(
   taskAttachSchema,
-  async ({ id, fileIds }) => {
+  async ({ id, fileIds }, user) => {
     const task = await Task.findById(id).lean();
     if (!task) throw notFound("The task");
-    const ok = await claimableFiles(fileIds, id);
+    const ok = await claimableFiles(fileIds, id, user.id);
     if (!ok.length) throw new AppError("Those files could not be attached.", "invalid");
     await Task.updateOne({ _id: task._id }, { $addToSet: { attachments: { $each: ok.map(oid) } } });
     await attachFiles(ok, { type: "task", id }, task.project ? String(task.project) : undefined);
@@ -253,7 +281,7 @@ export const removeTaskAttachment = defineAction(
     await removeFile(fileId);
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Attachment removed" },
+  { revalidate: REVALIDATE, message: "Attachment removed", role: "admin" },
 );
 
 /** Loads one task for the detail drawer / edit form. */

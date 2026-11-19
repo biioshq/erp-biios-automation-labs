@@ -23,6 +23,8 @@ import { createIncome, discardUnsavedIncomeReceipt, updateIncome } from "../acti
 import { incomeFormSchema, type IncomeFormInput, type IncomeFormValues } from "../schemas";
 import type { IncomeDetail } from "../types";
 import { MAX_UPLOAD_LABEL } from "@/features/files/prepare";
+import { formValidation } from "@/components/forms/form-options";
+import { useIsAdmin } from "@/components/current-user";
 
 const PAYMENT_OPTIONS = PAYMENT_METHODS.filter((m) => m.value !== "stock");
 
@@ -57,13 +59,14 @@ export function IncomeForm({
   onCancel: () => void;
 }) {
   const isEdit = Boolean(income);
+  const isAdmin = useIsAdmin();
   const [pending, startTransition] = useTransition();
   const [receipt, setReceipt] = useState<FileDTO | null>(income?.receipt ?? null);
 
   const form = useForm<IncomeFormInput, unknown, IncomeFormValues>({
     resolver: zodResolver(incomeFormSchema),
     defaultValues: defaultsFrom(income, defaultProjectId),
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control, setValue, getValues, setError } = form;
   const projectId = useWatch({ control, name: "projectId" });
@@ -181,7 +184,8 @@ export function IncomeForm({
 
         <FormSection title="Receipt" description={`Payment advice, bank credit or acknowledgement. Image or PDF up to ${MAX_UPLOAD_LABEL}.`} icon={<Paperclip />}>
           {receipt ? (
-            <FileTile file={receipt} onRemove={removeReceipt} />
+            // Removing the saved receipt deletes the file, which only admins may do.
+            <FileTile file={receipt} onRemove={isAdmin || receipt.id !== income?.receipt?.id ? removeReceipt : undefined} />
           ) : (
             <FileDropzone
               meta={{ kind: "receipt", entityType: "income" }}

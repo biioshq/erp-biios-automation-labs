@@ -14,6 +14,7 @@ import { USER_ROLES } from "@/lib/constants";
 import { emitDataChanged } from "@/lib/events";
 import { addTeamMember } from "../actions";
 import { teamMemberSchema, type TeamMemberInput, type TeamMemberValues } from "../schemas";
+import { formValidation } from "@/components/forms/form-options";
 
 const EMPTY: TeamMemberInput = { name: "", email: "", password: "", role: "member" };
 
@@ -24,7 +25,7 @@ export function AddMemberDialog() {
   const form = useForm<TeamMemberInput, unknown, TeamMemberValues>({
     resolver: zodResolver(teamMemberSchema),
     defaultValues: EMPTY,
-    mode: "onTouched",
+    ...formValidation,
   });
 
   const onSubmit = form.handleSubmit((values) => {

@@ -13,6 +13,7 @@ import { formatNumber, formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { getInventoryDashboard } from "@/features/inventory/dashboard/queries";
 import { CategoryValueChart, MovementTrendChart, StockHealthChart } from "@/features/inventory/dashboard/components/dashboard-charts";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Inventory" };
 
@@ -25,6 +26,8 @@ function StatLink({ href, children }: { href: string; children: React.ReactNode 
 }
 
 export default async function InventoryDashboardPage() {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const { snapshot, valueByCategory, weekly, attention, recent } = await getInventoryDashboard();
   const restock = snapshot.lowStock + snapshot.outOfStock;
   const share = (n: number) => (snapshot.items ? `${Math.round((n / snapshot.items) * 100)}% of items` : "No items yet");

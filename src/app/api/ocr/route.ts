@@ -6,7 +6,7 @@ import { connectDB } from "@/server/db";
 import { UploadError, readStoredFile } from "@/server/storage";
 import { FileModel } from "@/server/models";
 import { OCR_MIME_TYPES, type OcrResponse } from "@/lib/ocr";
-import { storeFile, toFileDTO } from "@/features/files/server";
+import { isClaimableFile, isHiddenFromUser, storeFile, toFileDTO } from "@/features/files/server";
 
 export const maxDuration = 60;
 
@@ -41,8 +41,14 @@ export async function POST(request: NextRequest) {
       const body = (await request.json().catch(() => null)) as { fileId?: unknown } | null;
       const fileId = typeof body?.fileId === "string" ? body.fileId : "";
       if (!Types.ObjectId.isValid(fileId)) return NextResponse.json({ error: "No receipt was given." }, { status: 400 });
-      const doc = await FileModel.findById(fileId).populate("uploadedBy", "name").lean();
-      if (!doc) return NextResponse.json({ error: "That receipt no longer exists." }, { status: 404 });
+      // Only a receipt the caller has just uploaded and not saved on a record yet, which is all the form reads.
+      // Any other stored file (a payslip, another record's receipt) would hand out its figures to whoever has
+      // the id, past the checks /api/files/[id] makes.
+      const own = await isClaimableFile(fileId, null, { uploadedBy: user.id });
+      const doc = own ? await FileModel.findById(fileId).populate("uploadedBy", "name").lean() : null;
+      if (!doc || (await isHiddenFromUser(doc._id, user))) {
+        return NextResponse.json({ error: "That receipt no longer exists." }, { status: 404 });
+      }
       if (!(OCR_MIME_TYPES as readonly string[]).includes(doc.mimeType)) {
         return NextResponse.json({ error: "Only PNG, JPEG and WebP images and PDFs can be read." }, { status: 400 });
       }

@@ -1,10 +1,11 @@
 import "server-only";
 
 import { connectDB } from "@/server/db";
+import { salaryScope } from "@/server/auth/session";
 import { Expense, Income } from "@/server/models";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, labelOf } from "@/lib/constants";
 import { round2 } from "@/lib/format";
-import { col, describeFilters, projectMatch, rangeOf } from "../common";
+import { col, coversWholeMonths, describeFilters, projectMatch, rangeOf } from "../common";
 import type { ReportData, ReportFilters, ReportRow, ReportSection } from "../../types";
 
 type Group = { _id: string; total: number; count: number };
@@ -22,10 +23,17 @@ export async function buildFinanceReport(f: ReportFilters): Promise<ReportData> 
   if (range) match.date = range;
   const project = projectMatch(f.project);
   if (project) match.project = project;
+  // Company-wide salary totals are fine for members (as on the dashboard), but per project or over part
+  // of a month they could single out one person's pay, so then a member's report leaves salaries out.
+  const scope = await salaryScope();
+  const member = Object.keys(scope).length > 0;
+  const partMonth = !coversWholeMonths(f);
+  const hideSalaries = member && (Boolean(project) || partMonth);
+  const expenseMatch = hideSalaries ? { ...match, ...scope } : match;
 
-  const byCategory = (field: string) => [{ $match: match }, { $group: { _id: field, total: { $sum: "$amount" }, count: { $sum: 1 } } }];
-  const byMonth = [
-    { $match: match },
+  const byCategory = (m: Record<string, unknown>) => [{ $match: m }, { $group: { _id: "$category", total: { $sum: "$amount" }, count: { $sum: 1 } } }];
+  const byMonth = (m: Record<string, unknown>) => [
+    { $match: m },
     {
       $group: {
         _id: { $dateToString: { format: "%Y-%m", date: "$date", timezone: "Asia/Kolkata" } },
@@ -35,10 +43,10 @@ export async function buildFinanceReport(f: ReportFilters): Promise<ReportData> 
     },
   ];
   const [incCat, expCat, incMonth, expMonth] = await Promise.all([
-    Income.aggregate<Group>(byCategory("$category")),
-    Expense.aggregate<Group>(byCategory("$category")),
-    Income.aggregate<Group>(byMonth),
-    Expense.aggregate<Group>(byMonth),
+    Income.aggregate<Group>(byCategory(match)),
+    Expense.aggregate<Group>(byCategory(expenseMatch)),
+    Income.aggregate<Group>(byMonth(match)),
+    Expense.aggregate<Group>(byMonth(expenseMatch)),
   ]);
 
   const income = round2(incCat.reduce((s, r) => s + r.total, 0));
@@ -51,7 +59,9 @@ export async function buildFinanceReport(f: ReportFilters): Promise<ReportData> 
       .sort((a, b) => b.total - a.total)
       .map((g) => ({
         category: labelOf(dict as never, (g._id ?? "other") as never),
-        entries: g.count,
+        // A member sees the salary total but not how many payments make it up (that count, with a
+        // total, can point at one person's pay).
+        entries: member && g._id === "salaries" ? null : g.count,
         amount: round2(g.total),
         share: total > 0 ? g.total / total : 0,
       }));
@@ -102,7 +112,7 @@ export async function buildFinanceReport(f: ReportFilters): Promise<ReportData> 
   ];
   return {
     type: "finance",
-    subtitle: await describeFilters(f, { vendor: false }),
+    subtitle: [await describeFilters(f, { vendor: false }), hideSalaries ? (project ? "Salaries are hidden for your role" : "Salaries are hidden for your role: they are shown for whole months only") : ""].filter(Boolean).join(" · "),
     summary: [
       { label: "Income", value: income, type: "money" },
       { label: "Expenses", value: expenses, type: "money" },

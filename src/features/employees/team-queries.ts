@@ -6,6 +6,7 @@ import { Employee, ProjectMember } from "@/server/models";
 import { getEmployeeOptions } from "@/server/lookups";
 import { iso } from "@/server/serialize";
 import type { Department, EmployeeStatus } from "@/lib/constants";
+import { currentMembership, isCurrentMembership } from "./membership";
 import type { TeamData, TeamMemberDTO } from "./types";
 
 type PopulatedEmployee = {
@@ -47,15 +48,15 @@ export async function getProjectTeam(projectId: string): Promise<TeamData> {
       endDate: iso(m.endDate),
     });
   }
-  const current = members.filter((m) => !m.endDate);
-  const past = members.filter((m) => m.endDate).sort((a, b) => (b.endDate ?? "").localeCompare(a.endDate ?? ""));
+  const current = members.filter((m) => isCurrentMembership(m.endDate));
+  const past = members.filter((m) => !isCurrentMembership(m.endDate)).sort((a, b) => (b.endDate ?? "").localeCompare(a.endDate ?? ""));
 
   // How much of each candidate's time is already committed across all projects.
   const onTeam = new Set(current.map((m) => m.employee.id));
   const candidates = options.filter((o) => o.status !== "exited" && !onTeam.has(o.value));
   const load = candidates.length
     ? await ProjectMember.aggregate<{ _id: Types.ObjectId; total: number }>([
-        { $match: { endDate: null, employee: { $in: candidates.map((c) => new Types.ObjectId(c.value)) } } },
+        { $match: { ...currentMembership(), employee: { $in: candidates.map((c) => new Types.ObjectId(c.value)) } } },
         { $group: { _id: "$employee", total: { $sum: "$allocation" } } },
       ])
     : [];
@@ -79,7 +80,7 @@ export async function getProjectTeam(projectId: string): Promise<TeamData> {
 export async function countProjectMembers(projectId: string): Promise<number> {
   if (!Types.ObjectId.isValid(projectId)) return 0;
   await connectDB();
-  return ProjectMember.countDocuments({ project: projectId, endDate: null });
+  return ProjectMember.countDocuments({ project: projectId, ...currentMembership() });
 }
 
 /** Active (not exited) headcount, handy for pickers and empty states. */

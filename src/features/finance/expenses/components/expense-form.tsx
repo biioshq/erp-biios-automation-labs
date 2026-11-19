@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useForm, useWatch, type FieldPath } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -34,10 +34,13 @@ import { createExpense, discardUnsavedReceipt, updateExpense } from "../actions"
 import { expenseFormSchema, type ExpenseFormInput, type ExpenseFormValues } from "../schemas";
 import type { ExpenseDetail } from "../types";
 import { ReceiptPanel } from "./receipt-panel";
+import { formValidation } from "@/components/forms/form-options";
+import { useIsAdmin } from "@/components/current-user";
 
 type Confidence = Partial<Record<FieldPath<ExpenseFormInput>, number>>;
 
 const PAYMENT_OPTIONS = PAYMENT_METHODS.filter((m) => m.value !== "stock");
+const TAX_FIELDS = new Set(["gst.cgst", "gst.sgst", "gst.igst"]);
 
 function defaultsFrom(expense?: ExpenseDetail | null, projectId?: string): ExpenseFormInput {
   const g = expense?.gst;
@@ -89,6 +92,14 @@ export function ExpenseForm({
   onCancel: () => void;
 }) {
   const isEdit = Boolean(expense);
+  // Inventory expenses come from assignments; salary payments are recorded by admins only.
+  const isAdmin = useIsAdmin();
+  const categoryOptions = useMemo(
+    () => EXPENSE_CATEGORIES.filter((o) => o.value !== "inventory" && (isAdmin || o.value !== "salaries")),
+    [isAdmin],
+  );
+  // The rate of the last quick fill, while its taxes are untouched: they are split again if the GSTIN state changes.
+  const quickRate = useRef<number | null>(null);
   const [pending, startTransition] = useTransition();
   const [receipt, setReceipt] = useState<FileDTO | null>(expense?.receipt ?? null);
   const [confidence, setConfidence] = useState<Confidence>(() => {
@@ -105,7 +116,7 @@ export function ExpenseForm({
   const form = useForm<ExpenseFormInput, unknown, ExpenseFormValues>({
     resolver: zodResolver(expenseFormSchema),
     defaultValues: defaultsFrom(expense, defaultProjectId),
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control, setValue, getValues } = form;
 
@@ -113,6 +124,7 @@ export function ExpenseForm({
   useEffect(() => {
     const sub = form.watch((_, { name, type }) => {
       if (type === "change" && name) {
+        if (TAX_FIELDS.has(name)) quickRate.current = null;
         setConfidence((c) => {
           if (!(name in c)) return c;
           const next = { ...c };
@@ -139,17 +151,25 @@ export function ExpenseForm({
 
   const interState = isInterState(gst?.gstin);
 
-  function applyRate(rate: number) {
+  function applyRate(rate: number, inter = interState) {
     const t = getValues("gst.taxableAmount") ?? 0;
     if (!t) {
       toast.info("Enter the taxable value first.");
       return;
     }
-    const split = splitGst(t, rate, interState);
+    const split = splitGst(t, rate, inter);
     setValue("gst.cgst", split.cgst || undefined, { shouldDirty: true });
     setValue("gst.sgst", split.sgst || undefined, { shouldDirty: true });
     setValue("gst.igst", split.igst || undefined, { shouldDirty: true });
+    quickRate.current = rate;
   }
+
+  // A rate picked before the GSTIN was typed used the wrong heads (CGST + SGST vs IGST): split it again.
+  // Taxes typed by hand or read from a receipt are left as they are.
+  useEffect(() => {
+    if (quickRate.current !== null && (getValues("gst.taxableAmount") ?? 0) > 0) applyRate(quickRate.current, interState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a change of state matters here
+  }, [interState]);
 
   function applyOcr(result: OcrResponse) {
     const previous = getValues("receiptId");
@@ -157,6 +177,7 @@ export function ExpenseForm({
     setReceipt(result.file);
     setValue("receiptId", result.file.id, { shouldDirty: true });
     if (!result.ocr) return;
+    quickRate.current = null;
 
     const f = result.ocr.fields;
     const next: Confidence = {};
@@ -253,6 +274,8 @@ export function ExpenseForm({
           receipt={receipt}
           onRead={applyOcr}
           onRemove={removeReceipt}
+          // Removing or replacing the saved receipt deletes the file, which only admins may do.
+          locked={!isAdmin && Boolean(receipt) && receipt?.id === expense?.receipt?.id}
           summary={ocrSummary}
           className="lg:sticky lg:top-0 lg:max-h-[calc(100dvh-170px)]"
         />
@@ -307,7 +330,7 @@ export function ExpenseForm({
               name="category"
               label="Category"
               required
-              options={EXPENSE_CATEGORIES.filter((o) => o.value !== "inventory")}
+              options={categoryOptions}
               placeholder="Choose a category"
             />
             <SelectField

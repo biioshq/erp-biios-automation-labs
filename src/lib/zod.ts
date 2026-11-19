@@ -11,15 +11,30 @@ export const optionalObjectId = z
   .pipe(objectId.optional());
 
 /** "yyyy-mm-dd" */
-export const dateInput = z.string({ error: "Pick a date" }).regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a date");
+export const dateInput = z
+  .string({ error: "Pick a date" })
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a date")
+  // A real calendar day: "2026-02-31" or "2026-13-45" would otherwise roll over into another month or year.
+  .refine((v) => {
+    const [y, m, d] = v.split("-").map(Number);
+    const date = new Date(Date.UTC(y, m - 1, d));
+    return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+  }, "Not a real date");
 export const optionalDateInput = z
   .string()
   .optional()
   .transform((v) => (v ? v : undefined))
   .pipe(dateInput.optional());
 
-export const money = z.number({ error: "Enter an amount" }).finite().min(0, "Cannot be negative");
-export const positiveMoney = z.number({ error: "Enter an amount" }).finite().positive("Must be more than zero");
+/** ₹1,000 crore: far above any real entry, and well inside the range where paise stay exact. */
+export const MAX_MONEY = 1e10;
+const tooLarge = "That amount is too large";
+export const money = z.number({ error: "Enter an amount" }).finite().min(0, "Cannot be negative").max(MAX_MONEY, tooLarge);
+export const positiveMoney = z
+  .number({ error: "Enter an amount" })
+  .finite()
+  .positive("Must be more than zero")
+  .max(MAX_MONEY, tooLarge);
 export const optionalMoney = money.optional();
 export const quantity = z.number({ error: "Enter a quantity" }).finite().positive("Must be more than zero");
 

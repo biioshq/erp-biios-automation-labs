@@ -21,6 +21,7 @@ import { round2 } from "@/lib/format";
 import { createProject, updateProject } from "../actions";
 import { PROJECT_COLORS, projectFormSchema, type ProjectFormInput, type ProjectFormValues } from "../schemas";
 import type { ProjectRow } from "../types";
+import { formValidation } from "@/components/forms/form-options";
 
 function defaultsFrom(project?: ProjectRow | null): ProjectFormInput {
   const stages = Object.fromEntries(PROJECT_STAGES.map((s) => [s.value, project?.stageBudgets[s.value] || undefined]));
@@ -54,7 +55,7 @@ export function ProjectForm({
   const form = useForm<ProjectFormInput, unknown, ProjectFormValues>({
     resolver: zodResolver(projectFormSchema),
     defaultValues: defaultsFrom(project),
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control, register, setValue, formState } = form;
 

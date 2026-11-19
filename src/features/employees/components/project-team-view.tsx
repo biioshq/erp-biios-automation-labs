@@ -24,6 +24,7 @@ import { addProjectMember, endProjectMember, updateProjectMember } from "../team
 import { ROLE_SUGGESTIONS, addMemberSchema, updateMemberSchema, type AddMemberInput, type UpdateMemberInput } from "../schemas";
 import type { TeamData, TeamMemberDTO } from "../types";
 import { AllocationBar, EmployeeAvatar } from "./employee-bits";
+import { formValidation } from "@/components/forms/form-options";
 
 const CHIP = "inline-flex min-h-10 items-center rounded-full border bg-surface px-3 text-xs transition-colors hover:bg-muted sm:min-h-8";
 
@@ -46,7 +47,7 @@ function AddMemberDialog({ projectId, options, open, onOpenChange }: { projectId
   const form = useForm<AddMemberInput>({
     resolver: zodResolver(addMemberSchema),
     defaultValues: { projectId, employeeId: "", role: "", allocation: 100, startDate: toDateInput(new Date()) },
-    mode: "onTouched",
+    ...formValidation,
   });
   const employeeId = useWatch({ control: form.control, name: "employeeId" });
   const allocation = useWatch({ control: form.control, name: "allocation" });
@@ -120,7 +121,7 @@ function EditMemberDialog({ member, onClose }: { member: TeamMemberDTO | null; o
   const form = useForm<UpdateMemberInput>({
     resolver: zodResolver(updateMemberSchema),
     values: member ? { id: member.id, role: member.role, allocation: member.allocation } : undefined,
-    mode: "onTouched",
+    ...formValidation,
   });
 
   const submit = form.handleSubmit((values) => {
@@ -178,7 +179,7 @@ function MemberRow({ m, past, onEdit, onEnd }: { m: TeamMemberDTO; past?: boolea
             <span className="truncate">{m.role}</span>
           </span>
           <span className="tabular text-xs whitespace-nowrap text-muted-foreground">
-            {past ? `${dateOrNotSet(m.startDate, "Start not set")} to ${dateOrNotSet(m.endDate)}` : `Since ${dateOrNotSet(m.startDate, "start date not set")}`}
+            {past ? `${dateOrNotSet(m.startDate, "Start not set")} to ${dateOrNotSet(m.endDate)}` : `Since ${dateOrNotSet(m.startDate, "start date not set")}${m.endDate ? `, until ${dateOrNotSet(m.endDate)}` : ""}`}
           </span>
         </div>
         <AllocationBar value={m.allocation} className="max-w-48" />

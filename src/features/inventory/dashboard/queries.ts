@@ -3,6 +3,7 @@ import "server-only";
 import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
 import { InventoryCategory, InventoryItem, InventoryMovement } from "@/server/models";
+import { roundQty } from "@/server/services/inventory-ledger";
 import { inventorySnapshot } from "@/server/services/metrics";
 import { iso } from "@/server/serialize";
 import { addDays, startOfDayIST } from "@/lib/dates";
@@ -16,22 +17,29 @@ const WINDOW_DAYS = 30;
 const DEFAULT_COLOR = "#4a82cc";
 
 async function valueByCategory(): Promise<CategoryValue[]> {
-  const [groups, categories] = await Promise.all([
-    InventoryItem.aggregate<{ _id: Types.ObjectId | null; value: number; items: number }>([
-      { $match: { archivedAt: null } },
-      { $group: { _id: "$category", value: { $sum: { $multiply: ["$available", "$unitPrice"] } }, items: { $sum: 1 } } },
-    ]),
+  const [items, categories] = await Promise.all([
+    InventoryItem.find({ archivedAt: null }, { category: 1, available: 1, unitPrice: 1 }).lean(),
     InventoryCategory.find().lean(),
   ]);
+  // Each item is rounded to paise before adding, as inventorySnapshot and the reports do, so the
+  // category values add up exactly to the On-hand total shown beside them.
+  const totals = new Map<string, { value: number; items: number }>();
+  for (const i of items) {
+    const key = i.category ? String(i.category) : "none";
+    const t = totals.get(key) ?? { value: 0, items: 0 };
+    t.value = round2(t.value + round2(i.available * i.unitPrice));
+    t.items += 1;
+    totals.set(key, t);
+  }
   const byId = new Map(categories.map((c) => [String(c._id), c]));
-  return groups
-    .map((g) => {
-      const category = g._id ? byId.get(String(g._id)) : null;
+  return [...totals]
+    .map(([key, t]) => {
+      const category = byId.get(key);
       return {
         name: category?.name ?? "Uncategorized",
         color: category?.color ?? DEFAULT_COLOR,
-        value: round2(g.value),
-        items: g.items,
+        value: t.value,
+        items: t.items,
       };
     })
     .sort((a, b) => b.value - a.value);
@@ -74,10 +82,10 @@ async function needsAttention(): Promise<AttentionItem[]> {
     name: i.name,
     sku: i.sku,
     unit: (i.unit ?? "pcs") as InventoryUnit,
-    available: i.available,
+    available: roundQty(i.available),
     minStock: i.minStock,
-    status: getStockStatus(i.available, i.minStock),
-    quantity: i.quantity,
+    status: getStockStatus(roundQty(i.available), i.minStock),
+    quantity: roundQty(i.quantity),
   }));
 }
 

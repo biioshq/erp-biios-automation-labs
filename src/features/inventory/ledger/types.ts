@@ -46,6 +46,8 @@ export type ProjectImpact = {
   budget: number;
   spent: number;
   byStage: Record<string, number>;
+  /** Spend leaves out salaries (member view), so the preview says so. */
+  salariesHidden: boolean;
 };
 
 /** What a project holds of one item, with its assignments (latest first) to price a return. */

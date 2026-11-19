@@ -1,4 +1,4 @@
-import { financialYearIST, startOfMonthIST, toDateInput } from "@/lib/dates";
+import { endOfDayIST, financialYearIST, fromDateInput, startOfMonthIST, toDateInput } from "@/lib/dates";
 
 /** Period switcher values for the finance dashboard. Client-safe. */
 export const DASHBOARD_PERIODS = [
@@ -25,11 +25,35 @@ export type PeriodRange = {
   phrase: string;
   from?: Date;
   to?: Date;
-  /** The previous period of equal length; absent for "all". */
+  /**
+   * The same stretch of the previous period: from its start to the same day as
+   * today (20 Nov compares with 20 Oct, 20 Aug or 20 Nov last year). Absent for "all".
+   */
   previous?: { from: Date; to: Date; phrase: string };
 };
 
 const before = (d: Date) => new Date(d.getTime() - 1);
+
+/**
+ * The end of the IST day `months` months before `now`, on the same day of the
+ * month, or the month's last day when it is shorter (31 Mar gives 28 Feb).
+ */
+function sameDayMonthsBack(now: Date, months: number): Date {
+  const [y, m, d] = toDateInput(now).split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m - months, 0)).getUTCDate();
+  const day = new Date(Date.UTC(y, m - 1 - months, Math.min(d, lastDay)));
+  return endOfDayIST(fromDateInput(day.toISOString().slice(0, 10)));
+}
+
+/**
+ * The previous period cut at the same point as today. The current period only
+ * has data up to today, so comparing it with the whole previous period would
+ * show a fall on every day but the last.
+ */
+function previousToDate(now: Date, months: number, from: Date, phrase: string) {
+  const end = Math.min(sameDayMonthsBack(now, months).getTime(), before(from).getTime());
+  return { from: startOfMonthIST(from, -months), to: new Date(end), phrase };
+}
 
 /** Date bounds (IST) of a dashboard period and the equal period before it. */
 export function resolvePeriod(period: DashboardPeriod, now: Date = new Date()): PeriodRange {
@@ -42,7 +66,7 @@ export function resolvePeriod(period: DashboardPeriod, now: Date = new Date()): 
       phrase: "this month",
       from,
       to: before(next),
-      previous: { from: startOfMonthIST(now, -1), to: before(from), phrase: "last month" },
+      previous: previousToDate(now, 1, from, "same days last month"),
     };
   }
   if (period === "quarter") {
@@ -57,19 +81,18 @@ export function resolvePeriod(period: DashboardPeriod, now: Date = new Date()): 
       phrase: "this quarter",
       from,
       to: before(next),
-      previous: { from: startOfMonthIST(now, -intoQuarter - 3), to: before(from), phrase: "last quarter" },
+      previous: previousToDate(now, 3, from, "same days last quarter"),
     };
   }
   if (period === "fy") {
     const fy = financialYearIST(now);
-    const prev = financialYearIST(before(fy.start));
     return {
       period,
       label: fy.label,
       phrase: "this financial year",
       from: fy.start,
       to: fy.end,
-      previous: { from: prev.start, to: prev.end, phrase: "last financial year" },
+      previous: previousToDate(now, 12, fy.start, "same date last year"),
     };
   }
   return { period, label: "All time", phrase: "across all time" };

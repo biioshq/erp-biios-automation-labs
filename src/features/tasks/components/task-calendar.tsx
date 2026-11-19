@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -100,6 +100,33 @@ function Agenda({ days, today, onOpen }: { days: { key: string; tasks: TaskRow[]
         );
       })}
     </ol>
+  );
+}
+
+/**
+ * "+N more" on a crowded day. Picking a task closes the list first: the popover is modal, so the task
+ * drawer opening on top would not dismiss it, and it would still be open (and stale) once the drawer closes.
+ */
+function MoreTasks({ day, hidden, tasks, onOpen }: { day: Date; hidden: number; tasks: TaskRow[]; onOpen: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const pick = (id: string) => {
+    setOpen(false);
+    onOpen(id);
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className="w-full rounded-md px-1.5 py-0.5 text-left text-[11px] font-medium text-muted-foreground hover:bg-muted">
+          +{hidden} more
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 space-y-1.5 p-2">
+        <p className="eyebrow px-1 text-[10px]">{format(day, "EEEE, d MMMM")}</p>
+        {tasks.map((t) => (
+          <Pill key={t.id} task={t} onOpen={pick} />
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -214,21 +241,7 @@ export function TaskCalendar({
                     {shown.map((t) => (
                       <Pill key={t.id} task={t} onOpen={onOpen} />
                     ))}
-                    {hidden > 0 ? (
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <button type="button" className="w-full rounded-md px-1.5 py-0.5 text-left text-[11px] font-medium text-muted-foreground hover:bg-muted">
-                            +{hidden} more
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent align="start" className="w-64 space-y-1.5 p-2">
-                          <p className="eyebrow px-1 text-[10px]">{format(day, "EEEE, d MMMM")}</p>
-                          {tasks.map((t) => (
-                            <Pill key={t.id} task={t} onOpen={onOpen} />
-                          ))}
-                        </PopoverContent>
-                      </Popover>
-                    ) : null}
+                    {hidden > 0 ? <MoreTasks day={day} hidden={hidden} tasks={tasks} onOpen={onOpen} /> : null}
                   </div>
                 );
               })}

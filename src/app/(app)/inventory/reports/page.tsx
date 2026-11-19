@@ -15,10 +15,13 @@ import { metaOf } from "@/features/reports/meta";
 import { getFilterOptions } from "@/features/reports/options";
 import { getInventoryReportOverview } from "@/features/reports/queries";
 import { parseReportFilters } from "@/features/reports/schemas";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Inventory reports" };
 
 export default async function InventoryReportsPage({ searchParams }: PageProps<"/inventory/reports">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const parsed = parseReportFilters(await searchParams);
   const meta = metaOf("inventory")!;
   const [overview, options] = await Promise.all([getInventoryReportOverview(parsed), getFilterOptions(meta, false)]);

@@ -6,6 +6,7 @@ import { AppError, notFound } from "@/server/errors";
 import { Employee, Project, ProjectMember } from "@/server/models";
 import { fromDateInput, startOfDayIST } from "@/lib/dates";
 import { addMemberSchema, endMemberSchema, updateMemberSchema } from "./schemas";
+import { currentMembership } from "./membership";
 
 const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
 
@@ -15,7 +16,8 @@ export const addProjectMember = defineAction(
     const [project, employee, open] = await Promise.all([
       Project.exists({ _id: input.projectId }),
       Employee.findById(input.employeeId, { name: 1, status: 1 }).lean(),
-      ProjectMember.exists({ project: input.projectId, employee: input.employeeId, endDate: null }),
+      // A membership ending later (someone on notice) still counts: they are on the team until then.
+      ProjectMember.exists({ project: input.projectId, employee: input.employeeId, ...currentMembership() }),
     ]);
     if (!project) throw notFound("The project");
     if (!employee) throw notFound("The employee");
@@ -40,7 +42,7 @@ export const addProjectMember = defineAction(
 export const updateProjectMember = defineAction(
   updateMemberSchema,
   async (input) => {
-    const updated = await ProjectMember.updateOne({ _id: input.id, endDate: null }, { $set: { role: input.role, allocation: input.allocation } });
+    const updated = await ProjectMember.updateOne({ _id: input.id, ...currentMembership() }, { $set: { role: input.role, allocation: input.allocation } });
     if (!updated.matchedCount) throw notFound("That team membership");
     return { id: input.id };
   },
@@ -50,7 +52,7 @@ export const updateProjectMember = defineAction(
 export const endProjectMember = defineAction(
   endMemberSchema,
   async (input) => {
-    const m = await ProjectMember.findOne({ _id: input.id, endDate: null }, { startDate: 1 }).lean();
+    const m = await ProjectMember.findOne({ _id: input.id, ...currentMembership() }, { startDate: 1 }).lean();
     if (!m) throw notFound("That team membership");
     let end = input.endDate ? fromDateInput(input.endDate) : startOfDayIST();
     if (m.startDate && end < m.startDate) end = m.startDate;

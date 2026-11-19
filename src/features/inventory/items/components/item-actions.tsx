@@ -16,6 +16,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { useIsAdmin } from "@/components/current-user";
 import { emitDataChanged } from "@/lib/events";
 import { removeItem } from "../actions";
 import type { ItemDetail } from "../types";
@@ -29,6 +30,8 @@ export function ItemActions({ item, categories, vendors }: { item: ItemDetail; c
   const searchParams = useSearchParams();
   const [adjusting, setAdjusting] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  // Archiving and deleting are admin-only (the action refuses members too).
+  const isAdmin = useIsAdmin();
 
   const outOfStock = item.status === "out_of_stock";
   const noAllocation = item.allocated <= 0;
@@ -114,10 +117,14 @@ export function ItemActions({ item, categories, vendors }: { item: ItemDetail; c
           <DropdownMenuItem onSelect={() => setEditing(true)}>
             <Pencil /> Edit item
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onSelect={() => setArchiving(true)}>
-            {hasHistory ? <Archive /> : <Trash2 />} {hasHistory ? "Archive" : "Delete"}
-          </DropdownMenuItem>
+          {isAdmin ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={() => setArchiving(true)}>
+                {hasHistory ? <Archive /> : <Trash2 />} {hasHistory ? "Archive" : "Delete"}
+              </DropdownMenuItem>
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -125,8 +132,12 @@ export function ItemActions({ item, categories, vendors }: { item: ItemDetail; c
 
       <FormSheet open={editing} onOpenChange={setEditing} title="Edit item" description={item.sku}>
         {editing ? (
+          // Keyed by id only: someone else's stock movement bumps updatedAt, and the live refresh
+          // that follows must not remount an open form and drop what is being typed. The open form
+          // keeps the values it was filled with; updateItem leaves a vendor or purchase date that a
+          // purchase changed meanwhile alone unless the user edited that field.
           <ItemForm
-            key={item.updatedAt}
+            key={item.id}
             item={item}
             categories={categories}
             vendors={vendors}
@@ -137,12 +148,12 @@ export function ItemActions({ item, categories, vendors }: { item: ItemDetail; c
       </FormSheet>
 
       <ConfirmDialog
-        open={archiving}
+        open={isAdmin && archiving}
         onOpenChange={setArchiving}
         title={hasHistory ? `Archive ${item.name}?` : `Delete ${item.name}?`}
         description={
           hasHistory
-            ? "The item is hidden from inventory lists. Its movements and the project costs it created stay in the records."
+            ? "The item is hidden from inventory lists. Its movements and the project costs it created stay in the records. Items still in stock or assigned to projects cannot be archived."
             : "This item has no stock history, so it will be deleted for good."
         }
         confirmLabel={hasHistory ? "Archive" : "Delete"}

@@ -10,12 +10,16 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { getClientNames, getProjectRow, listProjects } from "@/features/finance/projects/queries";
 import { PROJECT_SORTS, type ProjectSort } from "@/features/finance/projects/schemas";
 import { ProjectsView } from "@/features/finance/projects/components/projects-view";
+import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Projects" };
 
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
 export default async function ProjectsPage({ searchParams }: PageProps<"/finance/projects">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const sp = await searchParams;
   const sortRaw = first(sp.sort);
   const sort = PROJECT_SORTS.some((s) => s.value === sortRaw) ? (sortRaw as ProjectSort) : "newest";
@@ -58,6 +62,7 @@ export default async function ProjectsPage({ searchParams }: PageProps<"/finance
         />
         <StatCard label="Active projects" value={formatNumber(summary.activeCount)} icon={FolderKanban} tone="success" hint={`${formatNumber(summary.count)} in total`} />
       </StatGrid>
+      <SalariesHiddenNote className="-mt-2" />
       <ProjectsView rows={rows} editTarget={editTarget} clients={clients} layout={layout} hasAny={summary.count > 0} />
     </Page>
   );

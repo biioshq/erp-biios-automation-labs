@@ -39,12 +39,15 @@ export function ReceiptPanel({
   receipt,
   onRead,
   onRemove,
+  locked = false,
   summary,
   className,
 }: {
   receipt: FileDTO | null;
   onRead: (result: OcrResponse) => void;
   onRemove: () => void;
+  /** The receipt is the saved one and this person may not delete it: no Replace or Remove. */
+  locked?: boolean;
   summary: { filled: number; low: number; overall: number } | null;
   className?: string;
 }) {
@@ -97,7 +100,7 @@ export function ReceiptPanel({
           <p className="text-sm font-semibold">Receipt</p>
           <p className="text-xs text-muted-foreground">Image or PDF. We read it and fill the form for you.</p>
         </div>
-        {receipt && !busy ? (
+        {receipt && !busy && !locked ? (
           <div className="flex gap-1">
             <Button type="button" variant="ghost" size="sm" onClick={() => inputRef.current?.click()}>
               <RefreshCw /> Replace

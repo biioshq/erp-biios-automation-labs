@@ -11,14 +11,17 @@ import { metaOf, type ReportMeta } from "@/features/reports/meta";
 import { getFilterOptions } from "@/features/reports/options";
 import { listReportHistory } from "@/features/reports/queries";
 import { parseReportFilters, reportQueryString } from "@/features/reports/schemas";
+import { canSeeSalaries, requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Reports" };
 
 export default async function ReportsPage({ searchParams }: PageProps<"/finance/reports">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const sp = await searchParams;
   const selected = metaOf(typeof sp.report === "string" ? sp.report : undefined);
   const filters = parseReportFilters(sp);
-  const [options, history] = await Promise.all([getFilterOptions(selected), listReportHistory(20)]);
+  const [options, history, seesAll] = await Promise.all([getFilterOptions(selected), listReportHistory(20), canSeeSalaries()]);
 
   const today = toDateInput(new Date());
   const fy = financialYearIST();
@@ -56,7 +59,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/finance/
           description="Pick one of the reports above to set a period, filter it and see a preview before you download."
         />
       )}
-      <ExportHistory rows={history} />
+      <ExportHistory rows={history} ownOnly={!seesAll} />
     </Page>
   );
 }

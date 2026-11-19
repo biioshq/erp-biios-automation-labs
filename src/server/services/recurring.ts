@@ -29,21 +29,28 @@ export const occurrenceKey = (scheduleId: Types.ObjectId | string, due: Date) =>
 async function postOccurrence(t: RecurringExpenseDoc, due: Date) {
   const rate = t.gstRate ?? 0;
   const amount = round2(t.amount);
-  const taxable = rate > 0 ? round2(amount / (1 + rate / 100)) : amount;
-  const split = rate > 0 ? splitGst(taxable, rate, isInterState(t.gstin)) : null;
-  // Keep taxable + tax equal to the amount after rounding.
+  const interState = isInterState(t.gstin);
+  // The amount includes GST and is fixed, so rounding is absorbed by the taxable value. Within the state CGST and
+  // SGST are always equal halves (rate / 2 each); across states the IGST absorbs the last paisa instead.
+  let taxable = rate > 0 ? round2(amount / (1 + rate / 100)) : amount;
+  const split = rate > 0 ? splitGst(taxable, rate, interState) : null;
+  if (split && !interState) {
+    split.cgst = split.sgst = round2((taxable * rate) / 200);
+    taxable = round2(amount - split.cgst - split.sgst);
+  }
   const gst = split
     ? (() => {
         const drift = round2(amount - (taxable + split.cgst + split.sgst + split.igst));
         const fixed = { ...split };
+        let taxableAmount = taxable;
         if (drift !== 0) {
           if (fixed.igst) fixed.igst = round2(fixed.igst + drift);
-          else fixed.sgst = round2(fixed.sgst + drift);
+          else taxableAmount = round2(taxableAmount + drift);
         }
         return {
           gstin: t.gstin || undefined,
           invoiceDate: due,
-          taxableAmount: taxable,
+          taxableAmount,
           ...fixed,
           cess: 0,
           hsnSac: t.hsnSac || undefined,
@@ -126,6 +133,9 @@ export async function postDueRecurringExpenses(now: Date = new Date()): Promise<
     }
   }
   if (posted > 0) {
+    // Open pages (expenses, dashboard, projects) refresh to show the new postings.
+    const { bumpChanges } = await import("@/server/changes");
+    await bumpChanges();
     await createNotification({
       type: "system",
       severity: "info",

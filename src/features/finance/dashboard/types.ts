@@ -13,6 +13,7 @@ export type DashboardKpis = {
   profitDelta: number | null;
   /** Calendar month spending, independent of the selected period. */
   monthSpend: number;
+  /** This month up to today against the same days of last month (1st to today's date). */
   monthSpendDelta: number | null;
   inventoryValue: number;
   inventoryItems: number;
@@ -56,12 +57,12 @@ export type Transaction = {
 };
 
 export type RecurringCommitments = {
-  /** Sum of monthly equivalents over active schedules. */
+  /** Sum of monthly equivalents over all active schedules, salaries included for every viewer. */
   perMonth: number;
   /** The part of perMonth that is salaries. */
   salariesPerMonth: number;
   activeCount: number;
-  /** The next due items across active schedules, soonest first. */
+  /** The next due items, soonest first; members do not get salary schedules here. */
   upcoming: { id: string; name: string; date: string; amount: number }[];
 };
 
@@ -69,6 +70,8 @@ export type FinanceDashboardData = {
   period: DashboardPeriod;
   periodLabel: string;
   periodPhrase: string;
+  /** First and last day (YYYY-MM-DD, IST) of the selected period; null for all time. */
+  periodDates: { from: string; to: string } | null;
   previousPhrase: string | null;
   kpis: DashboardKpis;
   monthly: MonthlyPoint[];

@@ -6,7 +6,8 @@ import { connectDB } from "@/server/db";
 import { Expense, FileModel } from "@/server/models";
 import { assignToProject, purchaseStock, returnFromProject } from "@/server/services/inventory-ledger";
 import { getCurrentUser } from "@/server/auth/session";
-import { attachFiles, removeFile } from "@/features/files/server";
+import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
+import { AppError } from "@/server/errors";
 import { fromDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import { gstGrandTotal } from "@/lib/gst";
@@ -24,6 +25,10 @@ const REVALIDATE: [string, "layout"][] = [
 export const purchaseStockAction = defineAction(
   purchaseFormSchema,
   async (input, user): Promise<PurchaseResult> => {
+    // Only a receipt this person just uploaded (or nobody owns yet): never another record's file.
+    if (input.receiptFileId && !(await isClaimableFile(input.receiptFileId, null, { kind: "receipt", uploadedBy: user.id }))) {
+      throw new AppError("This receipt can't be used here. Upload the file again.", "conflict");
+    }
     const g = input.invoice;
     const taxable = round2(g.taxableAmount ?? 0);
     const hasInvoice = Boolean(g.invoiceNumber || g.gstin || taxable > 0);
@@ -31,7 +36,8 @@ export const purchaseStockAction = defineAction(
       {
         itemId: input.itemId,
         quantity: input.quantity,
-        unitPrice: round2(input.unitPrice),
+        // Not rounded to paise: ₹525 for 1,000 g is ₹0.525 a gram. The ledger keeps unit costs to 6 decimals.
+        unitPrice: input.unitPrice,
         vendor: input.vendor,
         date: fromDateInput(input.date),
         invoice: hasInvoice
@@ -57,9 +63,9 @@ export const purchaseStockAction = defineAction(
     return {
       itemName: item.name,
       unit: item.unit ?? "pcs",
-      quantity: input.quantity,
-      unitPrice: round2(input.unitPrice),
-      total: round2(input.quantity * input.unitPrice),
+      quantity: movement.quantity,
+      unitPrice: movement.unitCost ?? input.unitPrice,
+      total: movement.totalCost ?? round2(input.quantity * input.unitPrice),
       available: item.available,
       status: getStockStatus(item.available, item.minStock),
     };
@@ -85,7 +91,7 @@ export const assignStockAction = defineAction(
     return {
       itemName: result.after.name,
       unit: result.after.unit ?? "pcs",
-      quantity: input.quantity,
+      quantity: result.movement.quantity,
       projectName: result.project.name,
       expenseNumber: expense?.number ?? null,
       total: result.totalCost,
@@ -112,7 +118,7 @@ export const returnStockAction = defineAction(
     return {
       itemName: result.after.name,
       unit: result.after.unit ?? "pcs",
-      quantity: input.quantity,
+      quantity: result.movement.quantity,
       projectName: result.project.name,
       credited: result.creditedCost,
       available: result.after.available,

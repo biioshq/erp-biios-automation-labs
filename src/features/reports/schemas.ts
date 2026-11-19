@@ -57,6 +57,16 @@ export function parseReportFilters(sp: URLSearchParams | Record<string, string |
   return { ...rest, movementType: type };
 }
 
+/**
+ * Drops the filters a report does not offer, so the file, its export log entry and "Download again" all
+ * describe the same data. The CA pack offers only date, project, vendor and category: a hand-edited
+ * ?paymentMethod= or ?q= would otherwise narrow its registers but not its vendor totals or salary line.
+ */
+export function filtersForReport(type: ReportType, filters: ReportFilters): ReportFilters {
+  if (type !== "ca") return filters;
+  return { ...filters, q: "", stage: [], paymentMethod: [], source: [], movementType: [], item: [], movements: false };
+}
+
 /** Parses a download request. `ok: false` carries the first problem in words. */
 export function parseReportRequest(type: string, sp: URLSearchParams) {
   const t = reportTypeSchema.safeParse(type);
@@ -67,7 +77,7 @@ export function parseReportRequest(type: string, sp: URLSearchParams) {
     return { ok: false as const, error: `Invalid ${issue?.path.join(".") || "request"}: ${issue?.message ?? "check the parameters"}.` };
   }
   const { format, type: movementType, ...rest } = q.data;
-  const filters: ReportFilters = { ...rest, movementType };
+  const filters = filtersForReport(t.data as ReportType, { ...rest, movementType });
   if (filters.from && filters.to && filters.from > filters.to) {
     return { ok: false as const, error: "The start date is after the end date." };
   }

@@ -39,7 +39,7 @@ function MembershipRow({ m, past }: { m: MembershipDTO; past?: boolean }) {
         <div className="flex items-center gap-4 pl-5.5 sm:pl-0">
           {past ? null : <AllocationBar value={m.allocation} className="w-28" />}
           <p className="tabular text-xs whitespace-nowrap text-muted-foreground">
-            {past ? `${m.allocation}% · ${dateOrNotSet(m.startDate, "Start not set")} to ${dateOrNotSet(m.endDate)}` : `Since ${dateOrNotSet(m.startDate, "start date not set")}`}
+            {past ? `${m.allocation}% · ${dateOrNotSet(m.startDate, "Start not set")} to ${dateOrNotSet(m.endDate)}` : `Since ${dateOrNotSet(m.startDate, "start date not set")}${m.endDate ? `, until ${dateOrNotSet(m.endDate)}` : ""}`}
           </p>
           <ArrowUpRight className="hidden size-4 shrink-0 text-muted-foreground sm:block" aria-hidden />
         </div>

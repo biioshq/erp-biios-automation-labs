@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CalendarClock, Landmark, PauseCircle, Plus, Repeat } from "lucide-react";
+import { CalendarClock, EyeOff, Landmark, PauseCircle, Plus, Repeat } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
 import { parseListParams } from "@/lib/list-params";
 import { formatNumber } from "@/lib/format";
-import { getCurrentUser } from "@/server/auth/session";
+import { getCurrentUser, requireUser } from "@/server/auth/session";
 import { getEmployeeOptions, getProjectOptions, getVendorNames } from "@/server/lookups";
 import { getRecurringSummary, listRecurring } from "@/features/finance/recurring/queries";
 import { RECURRING_FILTER_KEYS, RECURRING_SORT_KEYS } from "@/features/finance/recurring/schemas";
@@ -16,6 +16,8 @@ import { RecurringView } from "@/features/finance/recurring/components/recurring
 export const metadata: Metadata = { title: "Recurring expenses" };
 
 export default async function RecurringPage({ searchParams }: PageProps<"/finance/recurring">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const params = parseListParams(await searchParams, {
     filterKeys: RECURRING_FILTER_KEYS,
     sortable: RECURRING_SORT_KEYS,
@@ -80,6 +82,13 @@ export default async function RecurringPage({ searchParams }: PageProps<"/financ
           className="p-4 sm:p-5"
         />
       </StatGrid>
+      {isAdmin ? null : (
+        // The totals above are company-wide; the list below names each schedule, so it leaves salaries out.
+        <p className="-mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <EyeOff className="size-3.5 shrink-0" aria-hidden />
+          The totals include all salaries together. Salary schedules are not listed: only admins can see them.
+        </p>
+      )}
 
       <RecurringView data={data} summary={summary} projects={projects} vendors={vendors} employees={employees} />
     </Page>

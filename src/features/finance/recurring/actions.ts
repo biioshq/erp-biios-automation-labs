@@ -7,7 +7,7 @@ import { Expense, RecurringExpense } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
 import { occurrenceKey, postNextOccurrenceNow } from "@/server/services/recurring";
 import { getCurrentUser } from "@/server/auth/session";
-import { addDays, fromDateInput, startOfDayIST, toDateInput } from "@/lib/dates";
+import { addDays, fromDateInput, startOfDayIST, startOfMonthIST, toDateInput } from "@/lib/dates";
 import { iso } from "@/server/serialize";
 import { round2 } from "@/lib/format";
 import { firstOccurrence, nextOccurrence } from "@/lib/recurrence";
@@ -66,6 +66,24 @@ async function firstUnposted(
   return candidate;
 }
 
+/** One live salary schedule per person, so a salary is never booked twice a month. */
+async function assertOneSalarySchedule(
+  doc: { category?: string | null; employee?: Types.ObjectId | null },
+  selfId?: Types.ObjectId,
+  statuses: ("active" | "paused")[] = ["active", "paused"],
+) {
+  if (doc.category !== "salaries" || !doc.employee) return;
+  const other = await RecurringExpense.findOne(
+    { employee: doc.employee, category: "salaries", status: { $in: statuses }, ...(selfId ? { _id: { $ne: selfId } } : {}) },
+    { code: 1 },
+  ).lean();
+  if (other) {
+    throw new AppError(`This person already has a salary schedule (${other.code}). Change that one, or end it first.`, "conflict", {
+      employeeId: ["Already has a salary schedule"],
+    });
+  }
+}
+
 const endedBeforeNext = () =>
   new AppError("The end date is before the next due date. Move the end date later, or end the schedule instead.", "invalid", {
     endDate: ["Must be on or after the next due date"],
@@ -77,6 +95,7 @@ export const createRecurring = defineAction(
     const doc = toDocument(input);
     const nextRunDate = firstOccurrence(doc.startDate, doc.frequency, doc.dayOfMonth);
     if (doc.endDate && nextRunDate.getTime() > doc.endDate.getTime()) throw endedBeforeNext();
+    await assertOneSalarySchedule(doc);
     const code = await nextNumber("recurring");
     const created = await RecurringExpense.create({
       ...doc,
@@ -97,6 +116,7 @@ export const updateRecurring = defineAction(
     const existing = await RecurringExpense.findById(input.id).lean();
     if (!existing) throw notFound("The schedule");
     const doc = toDocument(input);
+    if (existing.status !== "ended") await assertOneSalarySchedule(doc, existing._id);
 
     const rhythmChanged =
       doc.frequency !== existing.frequency ||
@@ -109,7 +129,14 @@ export const updateRecurring = defineAction(
         // Never re-post past dates: continue from today (or the start date), skipping anything already posted.
         const today = startOfDayIST();
         const from = new Date(Math.max(today.getTime(), doc.startDate.getTime()));
-        const afterLast = existing.lastRunDate ? addDays(existing.lastRunDate, 1) : null;
+        // Never post the period that was already paid either. Monthly and longer schedules post one expense per month
+        // ("Nov 2026"), so a new day of month starts in the month after the last posted one, not on the next day.
+        // Weekly posts cover a week, so the next day is enough.
+        const afterLast = existing.lastRunDate
+          ? existing.frequency === "weekly"
+            ? addDays(existing.lastRunDate, 1)
+            : startOfMonthIST(existing.lastRunDate, 1)
+          : null;
         nextRunDate = await firstUnposted(existing._id, doc, afterLast && afterLast.getTime() > from.getTime() ? afterLast : from);
       }
       if (doc.endDate && nextRunDate.getTime() > doc.endDate.getTime()) throw endedBeforeNext();
@@ -147,6 +174,9 @@ export const setRecurringStatus = defineAction(
     }
     // Resume: dates missed while paused are skipped, not posted in a burst.
     if (existing.status !== "paused") throw wrongState();
+    // A paused duplicate (or every schedule paused when pay was switched off) must not come back next to the one
+    // that already pays this person, or two salaries post each month.
+    await assertOneSalarySchedule(existing, existing._id);
     let nextRunDate = existing.nextRunDate;
     const today = startOfDayIST();
     if (nextRunDate.getTime() < today.getTime()) {
@@ -173,6 +203,9 @@ export const postRecurringNow = defineAction(
     const existing = await RecurringExpense.findById(id).lean();
     if (!existing) throw notFound("The schedule");
     if (existing.status !== "active") throw new AppError("Only an active schedule can post. Resume it first.", "conflict");
+    // A second active salary schedule for the same person (made before duplicates were refused) would pay them twice.
+    // A paused or ended one does not block this.
+    await assertOneSalarySchedule(existing, existing._id, ["active"]);
     const expenseId = await postNextOccurrenceNow(id);
     if (!expenseId) throw new AppError("That date was already posted by another run. Reload to see the latest.", "conflict");
     const expense = await Expense.findById(expenseId, { number: 1, date: 1, amount: 1 }).lean();

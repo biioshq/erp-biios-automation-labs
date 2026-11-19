@@ -13,12 +13,15 @@ import { ProjectTabsNav } from "@/features/finance/projects/components/project-t
 import { ProjectTeamTab } from "@/features/employees/components/project-team-tab";
 import { TimelineTab } from "@/features/finance/projects/components/timeline-tab";
 import { DocumentsTabLoader, ExpensesTabLoader, TabSkeleton } from "./tabs";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Project" };
 
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
 export default async function ProjectDetailPage({ params, searchParams }: PageProps<"/finance/projects/[id]">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const project = await getProjectDetail(id);
   if (!project) notFound();

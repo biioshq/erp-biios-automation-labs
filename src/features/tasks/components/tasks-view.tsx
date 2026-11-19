@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { useIsAdmin } from "@/components/current-user";
+import { useOnLiveChange } from "@/components/live-updates";
 import type { TaskStatus } from "@/lib/constants";
 import { emitDataChanged } from "@/lib/events";
 import type { Paginated } from "@/lib/list-params";
@@ -47,8 +49,12 @@ export function TasksView({ view, lockedView, table, board, calendar, people, pr
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const isAdmin = useIsAdmin();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  // Each fetch takes a ticket; only the newest one may apply, so a late answer for a task the drawer has
+  // left (or an older refresh of the same task) never replaces what is on screen.
+  const ticket = useRef(0);
   const [deleting, setDeleting] = useState<TaskRow | null>(null);
   const [newStatus, setNewStatus] = useState<TaskStatus | undefined>(undefined);
 
@@ -79,32 +85,65 @@ export function TasksView({ view, lockedView, table, board, calendar, people, pr
   const panelId = panel && panel.kind !== "new" ? panel.id : null;
   // Closing the drawer drops the cached task, so the next open shows fresh data.
   if (!panelId && detail) setDetail(null);
+  const panelKind = useRef(panel?.kind);
   useEffect(() => {
-    if (!panelId) return;
+    panelKind.current = panel?.kind;
+  });
+
+  /** Loads a task into the drawer. `skeleton` hides the task on screen until it arrives (another task, or a save). */
+  const load = useCallback(
+    (id: string, skeleton: boolean) => {
+      const mine = ++ticket.current;
+      if (skeleton) setLoading(true);
+      return fetchTask(id)
+        .then((d) => {
+          if (mine !== ticket.current) return;
+          // A refresh started while viewing that lands after Edit was clicked is dropped: the open form must
+          // keep the task it started from (its attachment list decides what a save removes).
+          if (!skeleton && panelKind.current !== "task") return;
+          if (!d) {
+            toast.error("That task no longer exists.");
+            setPanel(null);
+          }
+          setDetail(d);
+        })
+        .finally(() => {
+          if (mine === ticket.current) setLoading(false);
+        });
+    },
+    [setPanel],
+  );
+
+  useEffect(() => {
+    if (!panelId) {
+      ticket.current++;
+      return;
+    }
     if (detail?.id === panelId) return;
-    let cancelled = false;
-    setLoading(true);
-    fetchTask(panelId)
-      .then((d) => {
-        if (cancelled) return;
-        if (!d) {
-          toast.error("That task no longer exists.");
-          setPanel(null);
-        }
-        setDetail(d);
-      })
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
+    void load(panelId, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelId]);
 
+  // Live changes are skipped while the edit form is open, so leaving it without saving shows the copy from
+  // before Edit: refetch it quietly. A save already reloads with a skeleton (loading is set, detail cleared).
+  const lastKind = useRef(panel?.kind);
+  useEffect(() => {
+    const was = lastKind.current;
+    lastKind.current = panel?.kind;
+    if (was === "edit" && panel?.kind === "task" && !loading && detail?.id === panel.id) void load(panel.id, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel?.kind, panelId]);
+
   const reload = useCallback(async () => {
     if (!panelId) return;
-    setDetail(await fetchTask(panelId));
     router.refresh();
-  }, [panelId, router]);
+    await load(panelId, false);
+  }, [panelId, router, load]);
+
+  // Someone changed data: refresh the open task, but never under an open edit form (it would drop typing).
+  useOnLiveChange(() => {
+    if (panel?.kind === "task") void load(panel.id, false);
+  });
 
   async function remove(task: Pick<TaskRow, "id" | "number">) {
     const result = await deleteTask({ id: task.id });
@@ -115,6 +154,8 @@ export function TasksView({ view, lockedView, table, board, calendar, people, pr
     toast.success(`${task.number} deleted`);
     emitDataChanged();
     if (panelId === task.id) {
+      // Drop the refresh that emitDataChanged just started, or it would report the task as missing.
+      ticket.current++;
       setDetail(null);
       setPanel(null);
     }
@@ -139,7 +180,7 @@ export function TasksView({ view, lockedView, table, board, calendar, people, pr
   return (
     <>
       {view === "table" && table ? (
-        <TaskTable data={table} filters={filters} onOpen={openTask} onEdit={editTask} onDelete={askDelete} onNew={() => newTask()} toolbarActions={switcher} />
+        <TaskTable data={table} filters={filters} onOpen={openTask} onEdit={editTask} onDelete={isAdmin ? askDelete : undefined} onNew={() => newTask()} toolbarActions={switcher} />
       ) : null}
       {view === "board" && board ? (
         <div className="space-y-4">
@@ -175,18 +216,20 @@ export function TasksView({ view, lockedView, table, board, calendar, people, pr
           <TaskDetailSkeleton />
         ) : panel?.kind === "edit" && ready ? (
           <TaskForm
-            key={ready.updatedAt}
+            key={ready.id}
             task={ready}
             projects={projects}
             people={people}
             onDone={(id) => {
+              // The drawer keeps the same task id, so the fetch effect does not rerun: load the saved task here.
               setDetail(null);
               setPanel({ kind: "task", id });
+              void load(id, true);
             }}
             onCancel={() => setPanel({ kind: "task", id: ready.id })}
           />
         ) : panel?.kind === "task" && ready ? (
-          <TaskDetailView task={ready} currentUser={currentUser} onChanged={reload} onEdit={() => editTask(ready.id)} onDelete={() => remove(ready)} />
+          <TaskDetailView task={ready} currentUser={currentUser} onChanged={reload} onEdit={() => editTask(ready.id)} onDelete={() => remove(ready)} canDelete={isAdmin} />
         ) : null}
       </FormSheet>
 

@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
 import { CurrentUserProvider } from "@/components/current-user";
 import { requireUser } from "@/server/auth/session";
+import { LiveUpdates } from "@/components/live-updates";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -11,6 +12,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <CurrentUserProvider user={user}>
+      <LiveUpdates />
       <SidebarProvider defaultOpen={sidebarOpen}>
         <AppSidebar user={user} />
         <SidebarInset className="min-w-0 lg:peer-data-[variant=inset]:shadow-card">

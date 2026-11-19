@@ -10,12 +10,15 @@ import { formatNumber } from "@/lib/format";
 import { EMPLOYEE_FILTER_KEYS } from "@/features/employees/schemas";
 import { getEmployeeSummary, getUserLinkOptions, hasEmployees, listEmployees } from "@/features/employees/queries";
 import { EmployeesView } from "@/features/employees/components/employees-view";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Employees" };
 
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function EmployeesPage({ searchParams }: PageProps<"/finance/employees">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const sp = await searchParams;
   const params = parseListParams(sp, { filterKeys: EMPLOYEE_FILTER_KEYS });
   const needsUsers = Boolean(first(sp.new) || first(sp.edit));

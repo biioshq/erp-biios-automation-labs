@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getInventoryCategoryOptions, getVendorNames } from "@/server/lookups";
 import { getItemDetail } from "@/features/inventory/items/queries";
 import { ItemDetailView } from "@/features/inventory/items/components/item-detail";
+import { requireUser } from "@/server/auth/session";
 
 export async function generateMetadata({ params }: PageProps<"/inventory/items/[id]">): Promise<Metadata> {
   const { id } = await params;
@@ -11,6 +12,8 @@ export async function generateMetadata({ params }: PageProps<"/inventory/items/[
 }
 
 export default async function ItemPage({ params }: PageProps<"/inventory/items/[id]">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const { id } = await params;
   const [item, categories, vendors] = await Promise.all([getItemDetail(id), getInventoryCategoryOptions(), getVendorNames()]);
   if (!item) notFound();

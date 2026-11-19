@@ -3,13 +3,13 @@
 import { Types } from "mongoose";
 import { defineAction } from "@/server/action";
 import { AppError, notFound } from "@/server/errors";
-import { Expense, FileModel } from "@/server/models";
+import { Expense, FileModel, Project } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
-import { attachFiles, removeFile } from "@/features/files/server";
-import { getCurrentUser } from "@/server/auth/session";
+import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
+import { getCurrentUser, type SessionUser } from "@/server/auth/session";
 import { fromDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
-import { gstGrandTotal } from "@/lib/gst";
+import { gstGrandTotal, totalTax } from "@/lib/gst";
 import { expenseFormSchema, expenseIdSchema, type ExpenseFormValues } from "./schemas";
 import { getExpense } from "./queries";
 import type { ExpenseDetail } from "./types";
@@ -18,7 +18,8 @@ const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
 
 function toDocument(v: ExpenseFormValues) {
   const g = v.gst;
-  const hasGst = Boolean(g.gstin || g.invoiceNumber || (g.taxableAmount ?? 0) > 0);
+  // Tax typed without a GSTIN or invoice number is still input tax, so it keeps the GST block.
+  const hasGst = Boolean(g.gstin || g.invoiceNumber || (g.taxableAmount ?? 0) > 0 || totalTax(g) > 0);
   return {
     vendor: v.vendor,
     vendorAddress: v.vendorAddress,
@@ -49,9 +50,64 @@ function toDocument(v: ExpenseFormValues) {
   };
 }
 
+/** Individual pay is admin-only, so members can neither write a salary expense nor turn one into something else. */
+function assertMaySalary(user: SessionUser, ...categories: (string | undefined)[]) {
+  if (user.role !== "admin" && categories.includes("salaries")) {
+    throw new AppError("Only an admin can add or change salary payments.", "forbidden");
+  }
+}
+
+/**
+ * The project must exist, and a cancelled project takes no new expenses. An expense already on a cancelled
+ * project can still be edited (currentProject), so old records stay fixable.
+ */
+async function assertProjectOpen(projectId: string | undefined, currentProject?: unknown) {
+  if (!projectId) return;
+  const project = await Project.findById(projectId, { status: 1 }).lean();
+  if (!project) throw notFound("The project");
+  if (project.status === "cancelled" && String(currentProject ?? "") !== projectId) {
+    throw new AppError("This project is cancelled, so it takes no new expenses. Pick another project.", "conflict", {
+      projectId: ["This project is cancelled"],
+    });
+  }
+}
+
+/**
+ * The receipt must be this user's unsaved upload or already this expense's. Otherwise a known file id would pull
+ * another record's receipt over, and replacing this expense's receipt later would delete it from storage.
+ */
+async function assertReceiptFree(receiptId: string | undefined, user: SessionUser, expenseId: string | null, currentReceipt?: unknown) {
+  if (!receiptId || String(currentReceipt ?? "") === receiptId) return;
+  if (!(await isClaimableFile(receiptId, expenseId, { kind: "receipt", uploadedBy: user.id }))) {
+    throw new AppError("This receipt can't be used here. Upload the file again.", "conflict", { receiptId: ["Upload the receipt again"] });
+  }
+}
+
+/** Removing or replacing a saved receipt deletes the stored file, and deletes are admin-only. */
+function assertMayDropReceipt(user: SessionUser, currentReceipt: unknown, receiptId: string | undefined) {
+  if (user.role !== "admin" && currentReceipt && String(currentReceipt) !== receiptId) {
+    throw new AppError("Only an admin can remove or replace a saved receipt.", "forbidden", { receiptId: ["Only an admin can change this receipt"] });
+  }
+}
+
+/**
+ * Fields the form left empty are removed, not skipped: Mongoose drops undefined values from $set, so a cleared
+ * note, description or address (or the OCR map of a removed receipt) would otherwise keep its old value.
+ */
+function toUpdate(doc: ReturnType<typeof toDocument>) {
+  const entries = Object.entries(doc);
+  return {
+    $set: Object.fromEntries(entries.filter(([, v]) => v !== undefined)),
+    $unset: Object.fromEntries(entries.filter(([, v]) => v === undefined).map(([k]) => [k, 1 as const])),
+  };
+}
+
 export const createExpense = defineAction(
   expenseFormSchema,
   async (input, user) => {
+    assertMaySalary(user, input.category);
+    await assertProjectOpen(input.projectId);
+    await assertReceiptFree(input.receiptId, user, null);
     const doc = toDocument(input);
     const number = await nextNumber("expense", undefined, doc.date);
     const created = await Expense.create({ ...doc, number, source: "manual", createdBy: new Types.ObjectId(user.id) });
@@ -63,18 +119,18 @@ export const createExpense = defineAction(
 
 export const updateExpense = defineAction(
   expenseFormSchema.and(expenseIdSchema),
-  async (input) => {
+  async (input, user) => {
     const existing = await Expense.findById(input.id).lean();
     if (!existing) throw notFound("The expense");
     if (existing.source === "inventory_assignment") {
       throw new AppError("This expense comes from an inventory assignment. Change it by returning stock from the project.", "conflict");
     }
-    const doc = toDocument(input);
-    // Generated fields (recurring schedule, employee, occurrence key) are kept as they are.
-    await Expense.updateOne(
-      { _id: existing._id },
-      { $set: doc, $unset: { ...(doc.gst ? {} : { gst: 1 }), ...(doc.project ? {} : { project: 1, stage: 1 }), ...(doc.receipt ? {} : { receipt: 1 }) } },
-    );
+    assertMaySalary(user, existing.category, input.category);
+    await assertProjectOpen(input.projectId, existing.project);
+    assertMayDropReceipt(user, existing.receipt, input.receiptId);
+    await assertReceiptFree(input.receiptId, user, input.id, existing.receipt);
+    // Generated fields (recurring schedule, employee, occurrence key) are not in the form and are kept as they are.
+    await Expense.updateOne({ _id: existing._id }, toUpdate(toDocument(input)));
     // A replaced receipt is deleted from storage.
     if (existing.receipt && String(existing.receipt) !== input.receiptId) await removeFile(String(existing.receipt));
     if (input.receiptId) await attachFiles([input.receiptId], { type: "expense", id: input.id }, input.projectId);

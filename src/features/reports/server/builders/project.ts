@@ -28,7 +28,8 @@ const columns = [
 export async function buildProjectReport(f: ReportFilters): Promise<ReportData> {
   await connectDB();
   const only = new Set(f.project.filter((p) => p !== "none"));
-  const usage = (await budgetUsage()).filter((p) => !only.size || only.has(p.id));
+  // A project filter that names no real project ("No project" alone) matches no project row, not all of them.
+  const usage = (await budgetUsage()).filter((p) => !f.project.length || only.has(p.id));
   const ids = usage.map((u) => u.id);
   const [spend, docs] = await Promise.all([
     projectSpend(ids),
@@ -67,7 +68,15 @@ export async function buildProjectReport(f: ReportFilters): Promise<ReportData> 
   return {
     type: "project",
     title: "Project report",
-    subtitle: `Lifetime figures as of ${formatDate(new Date())}${only.size ? ` · ${rows.length} selected projects` : ""}`,
+    subtitle: [
+      `Lifetime figures as of ${formatDate(new Date())}`,
+      only.size ? `${rows.length} selected projects` : "",
+      f.project.includes("none") ? "Overhead has no project row: see the Finance report for it" : "",
+      // projectSpend leaves salaries out for members, so one project's spend cannot reveal one person's pay.
+      usage.some((u) => u.salariesHidden) ? "Salaries are hidden from spend for your role" : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
     columns,
     rows,
     totals,

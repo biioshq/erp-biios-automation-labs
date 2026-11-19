@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { ArrowDownToLine, Boxes, Undo2 } from "lucide-react";
 import { DateField, NumberField, TextareaField } from "@/components/forms/fields";
+import { useOnLiveChange } from "@/components/live-updates";
 import { Money } from "@/components/shared/money";
 import { StockStatusBadge } from "@/components/shared/status-badge";
 import { applyFieldErrors } from "@/lib/action-result";
@@ -19,6 +20,7 @@ import type { HeldItem, LedgerItem, LedgerProject, ProjectImpact } from "../type
 import { ItemCard } from "./item-card";
 import { ContextPlaceholder, ImpactRow, OperationForm, OperationLayout, SubmitBar } from "./operation-layout";
 import { PickerField, type PickerOption } from "./picker-field";
+import { formValidation } from "@/components/forms/form-options";
 
 const FORM_ID = "return-stock-form";
 
@@ -32,15 +34,19 @@ function defaultsFor(projectId?: string, itemId?: string): ReturnFormInput {
   };
 }
 
-/** Credit for returning `quantity`: the latest assignments are reduced first, each at its own cost. */
+const roundQty = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
+
+/** Credit for returning `quantity`: the latest assignments are reduced first, each at its own cost.
+ * Mirrors returnStock on the server: each lot is credited what its expense drops by (rounded
+ * before minus rounded after), so the preview matches the amount booked to the paisa. */
 export function creditFor(held: HeldItem, quantity: number) {
-  let remaining = quantity;
+  let remaining = roundQty(quantity);
   let credit = 0;
   for (const lot of held.lots) {
-    if (remaining <= 0) break;
-    const take = Math.min(remaining, lot.quantity);
-    credit += take * lot.unitCost;
-    remaining -= take;
+    if (remaining <= 1e-9) break;
+    const take = roundQty(Math.min(remaining, lot.quantity));
+    remaining = roundQty(remaining - take);
+    credit += round2(lot.quantity * lot.unitCost) - round2(roundQty(lot.quantity - take) * lot.unitCost);
   }
   return round2(credit);
 }
@@ -81,7 +87,7 @@ export function ReturnView({
   const form = useForm<ReturnFormInput, unknown, ReturnFormValues>({
     resolver: zodResolver(schema),
     defaultValues: defaultsFor(initialProject?.id, defaultItemId),
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control, setValue } = form;
 
@@ -101,6 +107,9 @@ export function ReturnView({
       cancelled = true;
     };
   }, [projectId, version]);
+  // Someone else's assign or return changes what the project holds and its budget: reload the
+  // preview (the form itself is not reset, so typing is kept). Also fires after this tab's own save.
+  useOnLiveChange(() => setVersion((v) => v + 1));
 
   const held = useMemo(() => (loaded && loaded.projectId === projectId ? loaded.held : []), [loaded, projectId]);
   const loading = Boolean(projectId) && !(loaded && loaded.projectId === projectId);
@@ -151,12 +160,11 @@ export function ReturnView({
       );
       emitDataChanged();
       form.reset({ ...defaultsFor(values.projectId), itemId: "" });
-      setVersion((v) => v + 1);
     });
   });
 
   const credit = heldItem && quantity > 0 && !overQuantity ? creditFor(heldItem, quantity) : 0;
-  const heldValue = held.reduce((sum, h) => sum + h.cost, 0);
+  const heldValue = round2(held.reduce((sum, h) => sum + h.cost, 0));
 
   const submitBar = (className: string) => (
     <SubmitBar
@@ -282,6 +290,9 @@ export function ReturnView({
                       ) : null}
                       {impact && impact.budget > 0 ? (
                         <ImpactRow label="Budget remaining" before={round2(impact.budget - impact.spent)} after={round2(impact.budget - impact.spent + credit)} format={(n) => <Money value={n} />} />
+                      ) : null}
+                      {impact?.salariesHidden ? (
+                        <p className="py-2 text-xs text-muted-foreground">Spend excludes salaries, which only admins can see.</p>
                       ) : null}
                     </div>
                     <div className="mt-1 flex items-center justify-between border-t pt-3 text-sm">

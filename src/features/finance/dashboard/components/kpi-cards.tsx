@@ -16,7 +16,7 @@ function CardLink({ href, children }: { href: string; children: React.ReactNode 
 /** Tighter tiles on phones so two fit across at 360px. */
 const KPI = "max-sm:p-4 max-sm:[&>.tabular]:text-xl";
 
-/** The six headline numbers. Period deltas compare with the previous period of equal length. */
+/** The six headline numbers. Deltas compare with the previous period up to the same day as today. */
 export function KpiCards({ data }: { data: FinanceDashboardData }) {
   const k = data.kpis;
   const vs = data.previousPhrase ? `vs ${data.previousPhrase}` : undefined;
@@ -86,7 +86,7 @@ export function KpiCards({ data }: { data: FinanceDashboardData }) {
         tone="warning"
         value={<ResponsiveMoney value={k.monthSpend} />}
         delta={k.monthSpendDelta}
-        deltaLabel="vs last month"
+        deltaLabel="vs same days last month"
         invertDelta
         hint={k.monthSpendDelta === null ? "Spent this calendar month" : undefined}
       />

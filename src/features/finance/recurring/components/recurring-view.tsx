@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
 import { useIsAdmin } from "@/components/current-user";
+import { useOnLiveChange } from "@/components/live-updates";
 import { cn } from "@/lib/utils";
 import { EXPENSE_CATEGORIES, RECURRING_FREQUENCIES, RECURRING_STATUSES, labelOf } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
@@ -126,6 +127,8 @@ export function RecurringView({
   };
 
   const panelId = panel && panel.kind !== "new" ? panel.id : null;
+  // Closing the drawer drops the cached schedule, so the next open shows fresh data.
+  if (!panelId && detail) setDetail(null);
   useEffect(() => {
     if (!panelId) return;
     if (detail?.id === panelId) return;
@@ -146,6 +149,31 @@ export function RecurringView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelId, version]);
+
+  // While the drawer only shows a schedule, someone else's change (or a posting) refreshes it in place. Never while
+  // the edit form is open: that would drop what is being typed.
+  const viewingId = panel?.kind === "view" ? panel.id : null;
+  const viewing = useRef(viewingId);
+  useEffect(() => {
+    viewing.current = viewingId;
+  }, [viewingId]);
+  useOnLiveChange(() => {
+    const id = viewing.current;
+    // Still loading (first open or after reload()): that fetch brings the fresh schedule already.
+    if (!id || detail?.id !== id) return;
+    fetchRecurring(id)
+      .then((d) => {
+        if (viewing.current !== id) return;
+        if (!d) {
+          toast.error("That schedule no longer exists.");
+          setPanel(null);
+        }
+        setDetail(d);
+      })
+      .catch(() => {
+        // Offline: the drawer keeps what it shows and the next change tries again.
+      });
+  });
 
   /** Refetch the open schedule after a change. */
   const reload = () => {
@@ -188,6 +216,8 @@ export function RecurringView({
       return false;
     }
     toast.success(`${detail.code} deleted`);
+    // The live refresh below must not refetch the deleted schedule and report it missing.
+    viewing.current = null;
     emitDataChanged();
     setDetail(null);
     setPanel(null);
@@ -441,7 +471,7 @@ export function RecurringView({
           <RecurringDetailSkeleton />
         ) : panel?.kind === "edit" && detail ? (
           <RecurringForm
-            key={detail.updatedAt}
+            key={detail.id}
             schedule={detail}
             projects={projects}
             vendors={vendors}

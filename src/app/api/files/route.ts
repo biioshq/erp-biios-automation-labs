@@ -6,6 +6,7 @@ import { connectDB } from "@/server/db";
 import { UploadError } from "@/server/storage";
 import { FILE_KINDS } from "@/server/models";
 import { storeFile, toFileDTO } from "@/features/files/server";
+import { bumpChanges } from "@/server/changes";
 import { PROJECT_DOCUMENT_TYPES, valuesOf } from "@/lib/constants";
 
 const metaSchema = z.object({
@@ -51,6 +52,8 @@ export async function POST(request: NextRequest) {
       projectId: meta.data.projectId,
       entity: meta.data.entityType && meta.data.entityId ? { type: meta.data.entityType, id: meta.data.entityId } : undefined,
     });
+    // A document added to a project shows up on other people's open project pages.
+    if (meta.data.projectId || meta.data.entityId) await bumpChanges();
     return NextResponse.json({ file: toFileDTO(doc) }, { status: 201 });
   } catch (error) {
     if (error instanceof UploadError) {

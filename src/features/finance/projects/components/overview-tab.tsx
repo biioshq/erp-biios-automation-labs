@@ -12,6 +12,7 @@ import type { ProjectDetail } from "../types";
 import { BudgetBar } from "./project-budget-bar";
 import { StageChart } from "./stage-chart";
 import { TimelineItem } from "./timeline-item";
+import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 
 /** Tighter tiles on phones so two fit across at 360px. */
 const KPI = "max-sm:p-4 max-sm:[&>.tabular]:text-xl";
@@ -59,6 +60,7 @@ export async function OverviewTab({ project }: { project: ProjectDetail }) {
           }
         />
       </div>
+      <SalariesHiddenNote className="-mt-3" />
 
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-4 sm:space-y-6 lg:col-span-2">

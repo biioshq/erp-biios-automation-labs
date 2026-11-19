@@ -1,6 +1,7 @@
 import "server-only";
 
 import { connectDB } from "@/server/db";
+import { salaryScope } from "@/server/auth/session";
 import { Expense, InventoryMovement } from "@/server/models";
 import { expenseFilter } from "@/features/finance/expenses/queries";
 import { gstGrandTotal } from "@/lib/gst";
@@ -51,9 +52,12 @@ export async function buildGstReport(f: ReportFilters): Promise<ReportData> {
       ...(f.category.length ? { category: f.category } : {}),
     },
   });
+  const scope = await salaryScope();
   const expenseQuery = {
-    $and: [expenseBase, { source: { $ne: "inventory_assignment" }, gst: { $exists: true }, $expr: TAX_POSITIVE("gst") }],
+    // Members never receive individual salary rows (salaryScope is empty for admins).
+    $and: [expenseBase, { source: { $ne: "inventory_assignment" }, gst: { $exists: true }, $expr: TAX_POSITIVE("gst") }, scope],
   };
+  const salariesHidden = Object.keys(scope).length > 0 && (f.category.length === 0 || f.category.includes("salaries"));
 
   // Stock purchases have no project or expense category of their own: they count as "inventory" spend.
   const includePurchases = f.project.length === 0 && (f.category.length === 0 || f.category.includes("inventory"));
@@ -155,7 +159,13 @@ export async function buildGstReport(f: ReportFilters): Promise<ReportData> {
     type: "gst",
     ...registerSection,
     title: "GST input credit report",
-    subtitle: [subtitle, !includePurchases && f.project.length ? "Stock purchases are not tied to a project and are left out" : ""].filter(Boolean).join(" · "),
+    subtitle: [
+      subtitle,
+      !includePurchases && f.project.length ? "Stock purchases are not tied to a project and are left out" : "",
+      salariesHidden ? "Salaries are hidden for your role" : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
     summary: [
       { label: "Invoices", value: rows.length, type: "number" },
       { label: "Taxable value", value: head("taxable"), type: "money" },

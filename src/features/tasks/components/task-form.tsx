@@ -23,6 +23,8 @@ import { createTask, discardUnsavedAttachments, updateTask } from "../actions";
 import { taskFormSchema, type TaskFormInput, type TaskFormValues } from "../schemas";
 import type { TaskDetail } from "../types";
 import { MAX_UPLOAD_LABEL } from "@/features/files/prepare";
+import { formValidation } from "@/components/forms/form-options";
+import { useIsAdmin } from "@/components/current-user";
 
 export type TaskDefaults = { projectId?: string; assigneeId?: string; status?: TaskStatus };
 
@@ -56,16 +58,18 @@ export function TaskForm({
   onCancel: () => void;
 }) {
   const isEdit = Boolean(task);
+  const isAdmin = useIsAdmin();
   // Phones: skip autofocus so the keyboard does not cover the form the moment it opens.
   const [focusTitle] = useState(() => typeof window !== "undefined" && window.innerWidth >= 768);
   const [pending, startTransition] = useTransition();
   const [files, setFiles] = useState<FileDTO[]>(task?.attachments ?? []);
-  const initialIds = useMemo(() => new Set((task?.attachments ?? []).map((f) => f.id)), [task]);
+  // Fixed when the form opens, like `files`: a newer copy of the task must not turn files attached meanwhile into removals.
+  const [initialIds] = useState(() => new Set((task?.attachments ?? []).map((f) => f.id)));
 
   const form = useForm<TaskFormInput, unknown, TaskFormValues>({
     resolver: zodResolver(taskFormSchema),
     defaultValues: defaultsFrom(task, defaults),
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control } = form;
 
@@ -113,7 +117,8 @@ export function TaskForm({
   const onSubmit = form.handleSubmit((values) => {
     startTransition(async () => {
       const payload = { ...values, attachmentIds: files.map((f) => f.id) };
-      const result = task ? await updateTask({ ...payload, id: task.id }) : await createTask(payload);
+      const removedAttachmentIds = [...initialIds].filter((id) => !files.some((f) => f.id === id));
+      const result = task ? await updateTask({ ...payload, id: task.id, removedAttachmentIds }) : await createTask(payload);
       if (!result.ok) {
         applyFieldErrors(result, form.setError);
         toast.error(result.error);
@@ -159,7 +164,8 @@ export function TaskForm({
           {files.length ? (
             <div className="space-y-2">
               {files.map((f) => (
-                <FileTile key={f.id} file={f} onRemove={() => removeFile(f)} />
+                // Removing a saved attachment deletes it, which only admins may do. New uploads can always be taken off.
+                <FileTile key={f.id} file={f} onRemove={isAdmin || !initialIds.has(f.id) ? () => removeFile(f) : undefined} />
               ))}
             </div>
           ) : null}

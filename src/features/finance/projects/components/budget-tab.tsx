@@ -5,12 +5,13 @@ import { Section } from "@/components/shared/page";
 import { StatCard } from "@/components/shared/stat-card";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { formatPercent } from "@/lib/format";
+import { formatPercent, round2 } from "@/lib/format";
 import { BUDGET_TEXT_CLASS, budgetTone } from "../utils";
 import { stageRows } from "../queries";
 import type { ProjectDetail } from "../types";
 import { BudgetBar } from "./project-budget-bar";
 import { StageChart } from "./stage-chart";
+import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 
 /** Tighter tiles on phones so two fit across at 360px. */
 const KPI = "max-sm:p-4 max-sm:[&>.tabular]:text-xl";
@@ -18,7 +19,10 @@ const KPI = "max-sm:p-4 max-sm:[&>.tabular]:text-xl";
 export function BudgetTab({ project }: { project: ProjectDetail }) {
   const rows = stageRows(project);
   const tone = budgetTone(project.usage, project.budget);
-  const planned = rows.reduce((s, r) => s + r.planned, 0);
+  // Rounded once so float drift (100.1 + 200.2) never shows a false "no stage" remainder.
+  const planned = round2(rows.reduce((s, r) => s + r.planned, 0));
+  const stagedTotal = round2(rows.reduce((s, r) => s + r.spent, 0));
+  const unstaged = round2(project.spent - stagedTotal);
 
   return (
     <div className="space-y-6">
@@ -34,6 +38,7 @@ export function BudgetTab({ project }: { project: ProjectDetail }) {
           hint={project.remaining < 0 ? "Over budget" : undefined}
         />
       </div>
+      <SalariesHiddenNote className="-mt-3" />
 
       <Section title="Stage-wise spending" description="Planned stage budget against what has been spent. Inventory assignments count in the stage they were assigned to.">
         <StageChart rows={rows} showPlanned={planned > 0} />
@@ -119,11 +124,11 @@ export function BudgetTab({ project }: { project: ProjectDetail }) {
                 <Money value={planned} className="font-semibold" />
               </TableCell>
               <TableCell className="text-right">
-                <Money value={rows.reduce((s, r) => s + r.spent, 0)} className="font-semibold" />
+                <Money value={stagedTotal} className="font-semibold" />
               </TableCell>
               <TableCell className="text-right">
                 {planned > 0 ? (
-                  <Money value={planned - rows.reduce((s, r) => s + r.spent, 0)} tone="auto" className="font-semibold" />
+                  <Money value={round2(planned - stagedTotal)} tone="auto" className="font-semibold" />
                 ) : (
                   <span className="text-muted-foreground">-</span>
                 )}
@@ -133,9 +138,9 @@ export function BudgetTab({ project }: { project: ProjectDetail }) {
           </TableFooter>
         </Table>
         </div>
-        {rows.reduce((s, r) => s + r.spent, 0) < project.spent ? (
+        {unstaged >= 0.01 ? (
           <p className="border-t px-5 py-3 text-xs text-muted-foreground">
-            <Money value={project.spent - rows.reduce((s, r) => s + r.spent, 0)} /> of spend has no stage and is not shown above.
+            <Money value={unstaged} /> of spend has no stage and is not shown above.
           </p>
         ) : null}
       </Section>

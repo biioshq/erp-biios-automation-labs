@@ -3,9 +3,12 @@ import "server-only";
 import type { ReportCell, ReportColumn, ReportData } from "../types";
 import { sectionsOf } from "./build";
 
-/** Text that spreadsheets would run as a formula gets a leading apostrophe. */
+/**
+ * Text that spreadsheets would run as a formula gets a leading apostrophe. A leading "-" counts too,
+ * even before a digit ("-1+1" is a formula): only text columns come here, numbers are written separately.
+ */
 function safeText(value: string): string {
-  return /^[=+@\t\r]/.test(value) || /^-(?!\d)/.test(value) ? `'${value}` : value;
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
 function cellText(column: ReportColumn, value: ReportCell): string {

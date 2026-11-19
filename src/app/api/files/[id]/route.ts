@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import { getCurrentUser } from "@/server/auth/session";
 import { connectDB } from "@/server/db";
 import { FileModel } from "@/server/models";
+import { isHiddenFromUser } from "@/features/files/server";
 import { UploadError, readStoredFile } from "@/server/storage";
 
 /** Serves a stored file to signed-in users. ?download=1 forces a download. */
@@ -15,6 +16,10 @@ export async function GET(request: NextRequest, { params }: RouteContext<"/api/f
   await connectDB();
   const doc = await FileModel.findById(id).lean();
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Payslips and other salary receipts are admin-only, even for someone who knows the file id.
+  if (await isHiddenFromUser(doc._id, user)) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
   let bytes: Buffer;
   try {

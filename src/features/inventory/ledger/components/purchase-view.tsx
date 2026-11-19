@@ -29,6 +29,7 @@ import { ItemCard, StatusDot } from "./item-card";
 import { ContextPlaceholder, ImpactRow, OperationForm, OperationLayout, SubmitBar } from "./operation-layout";
 import { PickerField, type PickerOption } from "./picker-field";
 import { MAX_UPLOAD_LABEL } from "@/features/files/prepare";
+import { formValidation } from "@/components/forms/form-options";
 
 const FORM_ID = "purchase-stock-form";
 
@@ -76,7 +77,7 @@ export function PurchaseView({
   const form = useForm<PurchaseFormInput, unknown, PurchaseFormValues>({
     resolver: zodResolver(purchaseFormSchema),
     defaultValues: defaultsFor(initialItem, defaultQuantity),
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control, setValue, getValues } = form;
 
@@ -202,6 +203,8 @@ export function PurchaseView({
               name="unitPrice"
               label="Unit price"
               currency
+              // Cheap units can cost fractions of a paisa (₹0.525 a gram), and that price is kept as entered.
+              step="any"
               required
               description={item?.lastPurchasePrice ? `Last paid ${formatCurrency(item.lastPurchasePrice)}. Excludes GST.` : "Price per unit, excluding GST"}
             />

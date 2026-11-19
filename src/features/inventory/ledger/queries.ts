@@ -4,8 +4,10 @@ import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
 import { InventoryAllocation, InventoryItem, InventoryMovement, Project } from "@/server/models";
 import { getProjectOptions } from "@/server/lookups";
+import { roundQty } from "@/server/services/inventory-ledger";
 import { projectSpend } from "@/server/services/metrics";
 import { iso } from "@/server/serialize";
+import { round2 } from "@/lib/format";
 import { getStockStatus } from "@/lib/stock-status";
 import type { MovementType, ProjectStage } from "@/lib/constants";
 import type { HeldItem, LedgerItem, LedgerProject, ProjectImpact, RecentOperation } from "./types";
@@ -13,19 +15,21 @@ import type { HeldItem, LedgerItem, LedgerProject, ProjectImpact, RecentOperatio
 export async function getLedgerItems(): Promise<LedgerItem[]> {
   await connectDB();
   const items = await InventoryItem.find({ archivedAt: null }).sort({ name: 1 }).lean();
+  // Rounded to the ledger's 3 decimals so float drift stored by older writes
+  // (0.19999999999999998 kg) does not make the forms refuse the 0.2 they show.
   return items.map((i) => ({
     id: String(i._id),
     name: i.name,
     sku: i.sku,
     unit: i.unit ?? "pcs",
-    available: i.available,
-    allocated: i.allocated,
-    quantity: i.quantity,
+    available: roundQty(i.available),
+    allocated: roundQty(i.allocated),
+    quantity: roundQty(i.quantity),
     minStock: i.minStock,
     unitPrice: i.unitPrice,
     lastPurchasePrice: i.lastPurchasePrice ?? null,
     vendor: i.vendor ?? null,
-    status: getStockStatus(i.available, i.minStock),
+    status: getStockStatus(roundQty(i.available), i.minStock),
   }));
 }
 
@@ -85,8 +89,10 @@ export async function getHeldItems(projectId: string): Promise<HeldItem[]> {
     const id = String(item._id);
     const entry =
       byItem.get(id) ?? { itemId: id, name: item.name, sku: item.sku, unit: item.unit ?? "pcs", held: 0, cost: 0, lots: [] };
-    entry.held += a.quantity;
-    entry.cost += a.quantity * a.unitCost;
+    entry.held = roundQty(entry.held + a.quantity);
+    // Each lot rounded to paise, as its expense and the return credit are, so the value shown
+    // next to "Credit to project" matches what returning everything would credit.
+    entry.cost = round2(entry.cost + round2(a.quantity * a.unitCost));
     entry.lots.push({ quantity: a.quantity, unitCost: a.unitCost, stage: a.stage as ProjectStage, assignedAt: iso(a.assignedAt)! });
     byItem.set(id, entry);
   }
@@ -99,5 +105,5 @@ export async function getProjectImpact(projectId: string): Promise<ProjectImpact
   const [project, spend] = await Promise.all([Project.findById(projectId, { budget: 1 }).lean(), projectSpend([projectId])]);
   if (!project) return null;
   const s = spend.get(projectId);
-  return { budget: project.budget, spent: s?.spent ?? 0, byStage: s?.byStage ?? {} };
+  return { budget: project.budget, spent: s?.spent ?? 0, byStage: s?.byStage ?? {}, salariesHidden: s?.salariesHidden ?? false };
 }

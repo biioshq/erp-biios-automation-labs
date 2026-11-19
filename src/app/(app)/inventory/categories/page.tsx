@@ -5,10 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { listCategories } from "@/features/inventory/categories/queries";
 import { CategoriesView } from "@/features/inventory/categories/components/categories-view";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Categories" };
 
 export default async function CategoriesPage() {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const { rows, uncategorized } = await listCategories();
   return (
     <Page>

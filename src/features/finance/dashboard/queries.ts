@@ -1,4 +1,4 @@
-import { salaryScope } from "@/server/auth/session";
+import { canSeeSalaries, salaryScope } from "@/server/auth/session";
 import "server-only";
 
 import type { Types } from "mongoose";
@@ -13,8 +13,8 @@ import {
   monthlyIncomeExpense,
 } from "@/server/services/metrics";
 import { EXPENSE_CATEGORIES, labelOf, type ExpenseCategory, type ProjectStatus } from "@/lib/constants";
-import { startOfMonthIST } from "@/lib/dates";
 import { round2 } from "@/lib/format";
+import { endOfDayIST, toDateInput } from "@/lib/dates";
 import { monthlyEquivalent } from "@/lib/recurrence";
 import type { RecurringFrequency } from "@/lib/constants";
 import { OTHER_KEY, resolvePeriod, type DashboardPeriod } from "./periods";
@@ -106,13 +106,18 @@ const UPCOMING_COUNT = 3;
 
 /** What the active recurring schedules commit the company to each month, and what is due next. */
 async function recurringCommitments(): Promise<RecurringCommitments> {
-  const docs = await RecurringExpense.find(
-    // Members see bills, not individual salaries.
-    { status: "active", ...(await salaryScope()) },
-    { name: 1, amount: 1, frequency: 1, category: 1, nextRunDate: 1, endDate: 1 },
-  )
-    .sort({ nextRunDate: 1 })
-    .lean();
+  const [docs, seesSalaries] = await Promise.all([
+    RecurringExpense.find(
+      { status: "active" },
+      { name: 1, amount: 1, frequency: 1, category: 1, nextRunDate: 1, endDate: 1 },
+    )
+      .sort({ nextRunDate: 1 })
+      .lean(),
+    canSeeSalaries(),
+  ]);
+  // The totals are company-wide and include salaries for everyone, like the
+  // expense totals on the same page. Only the named schedules in the "next
+  // due" list would show one person's pay, so members do not get salary rows there.
   let perMonth = 0;
   let salariesPerMonth = 0;
   for (const d of docs) {
@@ -125,6 +130,7 @@ async function recurringCommitments(): Promise<RecurringCommitments> {
     salariesPerMonth: round2(salariesPerMonth),
     activeCount: docs.length,
     upcoming: docs
+      .filter((d) => seesSalaries || d.category !== "salaries")
       .filter((d) => !d.endDate || d.nextRunDate.getTime() <= d.endDate.getTime())
       .slice(0, UPCOMING_COUNT)
       .map((d) => ({ id: String(d._id), name: d.name, date: iso(d.nextRunDate)!, amount: d.amount })),
@@ -135,14 +141,23 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
   await connectDB();
   const now = new Date();
   const range = resolvePeriod(period, now);
-  const monthStart = startOfMonthIST(now);
+  // The "Monthly spending" tile compares this month with the same days of last month.
+  const month = resolvePeriod("month", now);
+  // The previous side of every delta stops at today's date, so the current side
+  // must too: entries dated later this period (a rent bill for the 30th) would
+  // otherwise count on one side only and overstate the change. The headline
+  // figures still cover the whole period.
+  const today = endOfDayIST(now);
+  const toToday = (to: Date) => new Date(Math.min(to.getTime(), today.getTime()));
 
-  const [totals, previous, thisMonth, lastMonth, inventory, statusCounts, monthly, categoryRows, budgetRows, transactions, recurring] =
+  const [totals, current, previous, thisMonth, thisMonthToDate, lastMonth, inventory, statusCounts, monthly, categoryRows, budgetRows, transactions, recurring] =
     await Promise.all([
       financeTotals({ from: range.from, to: range.to }),
+      range.previous && range.to ? financeTotals({ from: range.from, to: toToday(range.to) }) : Promise.resolve(null),
       range.previous ? financeTotals({ from: range.previous.from, to: range.previous.to }) : Promise.resolve(null),
-      financeTotals({ from: monthStart, to: new Date(startOfMonthIST(now, 1).getTime() - 1) }),
-      financeTotals({ from: startOfMonthIST(now, -1), to: new Date(monthStart.getTime() - 1) }),
+      financeTotals({ from: month.from, to: month.to }),
+      financeTotals({ from: month.from, to: toToday(month.to!) }),
+      financeTotals({ from: month.previous!.from, to: month.previous!.to }),
       inventorySnapshot(),
       Project.aggregate<{ _id: ProjectStatus; n: number }>([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
       monthlyIncomeExpense(12),
@@ -168,6 +183,7 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
     period,
     periodLabel: range.label,
     periodPhrase: range.phrase,
+    periodDates: range.from && range.to ? { from: toDateInput(range.from), to: toDateInput(range.to) } : null,
     previousPhrase: range.previous?.phrase ?? null,
     kpis: {
       income: totals.income,
@@ -175,11 +191,11 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
       profit: totals.profit,
       margin: totals.income > 0 ? totals.profit / totals.income : null,
       gstPaid: totals.gstPaid,
-      incomeDelta: previous ? delta(totals.income, previous.income) : null,
-      expenseDelta: previous ? delta(totals.expenses, previous.expenses) : null,
-      profitDelta: previous ? delta(totals.profit, previous.profit) : null,
+      incomeDelta: current && previous ? delta(current.income, previous.income) : null,
+      expenseDelta: current && previous ? delta(current.expenses, previous.expenses) : null,
+      profitDelta: current && previous ? delta(current.profit, previous.profit) : null,
       monthSpend: thisMonth.expenses,
-      monthSpendDelta: delta(thisMonth.expenses, lastMonth.expenses),
+      monthSpendDelta: delta(thisMonthToDate.expenses, lastMonth.expenses),
       inventoryValue: inventory.value,
       inventoryItems: inventory.items,
       activeProjects: projectCount("active"),

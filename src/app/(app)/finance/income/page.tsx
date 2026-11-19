@@ -10,10 +10,13 @@ import { getProjectOptions } from "@/server/lookups";
 import { getClientNames, listIncome } from "@/features/finance/income/queries";
 import { INCOME_FILTER_KEYS, INCOME_SORT_KEYS } from "@/features/finance/income/schemas";
 import { IncomeView } from "@/features/finance/income/components/income-view";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Income" };
 
 export default async function IncomePage({ searchParams }: PageProps<"/finance/income">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const params = parseListParams(await searchParams, {
     filterKeys: INCOME_FILTER_KEYS,
     sortable: INCOME_SORT_KEYS,

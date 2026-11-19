@@ -48,6 +48,8 @@ export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> 
   });
   // Members never receive individual salary rows.
   const filter = (Object.keys(scope).length ? { $and: [filterBase, scope] } : filterBase) as typeof filterBase;
+  // Say so when it changes the result, since the Finance report and CA pack do show members a company salary total.
+  const salariesHidden = Object.keys(scope).length > 0 && (f.category.length === 0 || f.category.includes("salaries"));
   const docs = await Expense.find(filter).sort({ date: 1, _id: 1 }).populate("project", "name").lean();
 
   const rows: ReportRow[] = docs.map((e) => {
@@ -77,13 +79,13 @@ export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> 
   return {
     type: "expense",
     title: "Expense report",
-    subtitle: await describeFilters(f, { categories: "expense" }),
+    subtitle: [await describeFilters(f, { categories: "expense" }), salariesHidden ? "Salaries are hidden for your role" : ""].filter(Boolean).join(" · "),
     columns,
     rows,
     totals,
     summary: [
       { label: "Expenses", value: rows.length, type: "number" },
-      { label: "Total spend", value: Number(totals.total ?? 0), type: "money" },
+      { label: salariesHidden ? "Total spend (salaries excluded)" : "Total spend", value: Number(totals.total ?? 0), type: "money" },
       { label: "Taxable value", value: Number(totals.taxable ?? 0), type: "money" },
       { label: "GST paid", value: tax, type: "money" },
     ],

@@ -52,6 +52,7 @@ export function TaskDetailView({
   onChanged,
   onEdit,
   onDelete,
+  canDelete,
 }: {
   task: TaskDetail;
   currentUser: TaskPerson;
@@ -59,6 +60,8 @@ export function TaskDetailView({
   onChanged: () => Promise<void>;
   onEdit: () => void;
   onDelete: () => Promise<boolean>;
+  /** Only admins delete tasks and attachments; the server refuses everyone else. */
+  canDelete: boolean;
 }) {
   const [, startTransition] = useTransition();
   const [optimisticStatus, setOptimisticStatus] = useOptimistic(task.status);
@@ -196,7 +199,7 @@ export function TaskDetailView({
           {task.attachments.length ? (
             <div className="space-y-2">
               {task.attachments.map((f) => (
-                <FileTile key={f.id} file={f} onRemove={() => void removeAttachment(f.id, f.name)} />
+                <FileTile key={f.id} file={f} onRemove={canDelete ? () => void removeAttachment(f.id, f.name) : undefined} />
               ))}
             </div>
           ) : null}
@@ -277,16 +280,18 @@ export function TaskDetailView({
         </div>
       </FormSheetBody>
       <FormSheetFooter>
-        <ConfirmDialog
-          title="Delete this task?"
-          description={`${task.number} "${task.title}", its comments and attachments will be removed.`}
-          onConfirm={onDelete}
-          trigger={
-            <Button variant="ghost" className="mr-auto text-danger hover:bg-danger/10 hover:text-danger max-md:px-3">
-              <Trash2 /> Delete
-            </Button>
-          }
-        />
+        {canDelete ? (
+          <ConfirmDialog
+            title="Delete this task?"
+            description={`${task.number} "${task.title}", its comments and attachments will be removed.`}
+            onConfirm={onDelete}
+            trigger={
+              <Button variant="ghost" className="mr-auto text-danger hover:bg-danger/10 hover:text-danger max-md:px-3">
+                <Trash2 /> Delete
+              </Button>
+            }
+          />
+        ) : null}
         <Button onClick={onEdit} className="max-md:flex-1">
           <Pencil /> Edit
         </Button>

@@ -35,7 +35,7 @@ import { ProjectSheet } from "./project-sheet";
 type Layout = "grid" | "table";
 
 function linkedTotal(p: ProjectRow) {
-  return p.links.expenses + p.links.income + p.links.allocations + p.links.tasks;
+  return p.links.expenses + p.links.income + p.links.allocations + p.links.tasks + p.links.schedules;
 }
 
 function linkSummary(p: ProjectRow) {
@@ -44,6 +44,7 @@ function linkSummary(p: ProjectRow) {
     p.links.income && `${p.links.income} income record${p.links.income === 1 ? "" : "s"}`,
     p.links.allocations && `${p.links.allocations} inventory assignment${p.links.allocations === 1 ? "" : "s"}`,
     p.links.tasks && `${p.links.tasks} task${p.links.tasks === 1 ? "" : "s"}`,
+    p.links.schedules && `${p.links.schedules} active or paused recurring schedule${p.links.schedules === 1 ? "" : "s"}`,
   ].filter(Boolean) as string[];
   return parts.join(", ");
 }
@@ -392,7 +393,7 @@ export function ProjectsView({
           open
           onOpenChange={(o) => !o && setDeleting(null)}
           title="Delete this project?"
-          description={`${deleting.name} (${deleting.code}) and any documents uploaded to it will be removed. This cannot be undone.`}
+          description={`${deleting.name} (${deleting.code}), its team list and any documents uploaded to it will be removed. This cannot be undone.`}
           onConfirm={() => remove(deleting)}
         />
       ) : null}

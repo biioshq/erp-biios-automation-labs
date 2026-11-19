@@ -105,6 +105,9 @@ function findDate(text: string): string | null {
     if (!parts) continue;
     const [y, mo, d] = parts;
     if (y < 2000 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31) continue;
+    // A misread such as 31/02 is not a date: the form would refuse it, so leave the field empty.
+    const check = new Date(Date.UTC(y, mo - 1, d));
+    if (check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) continue;
     return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
   return null;

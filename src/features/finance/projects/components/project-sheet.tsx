@@ -28,7 +28,9 @@ export function ProjectSheet({
     >
       {open ? (
         <ProjectForm
-          key={project ? `${project.id}-${project.createdAt}-${project.budget}-${project.status}` : "new"}
+          // Keyed by id only: a live refresh brings new budget or status values, and remounting
+          // on them would throw away what the user is typing.
+          key={project ? project.id : "new"}
           project={project}
           clients={clients}
           onCancel={onClose}

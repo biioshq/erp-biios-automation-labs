@@ -1,17 +1,21 @@
 import { Download, History } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Section } from "@/components/shared/page";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { REPORT_FORMATS, labelOf } from "@/lib/constants";
 import { formatDateTime, formatNumber, formatRelative } from "@/lib/format";
 import { metaOf } from "../meta";
+import { DownloadAgainLink } from "./download-again";
 import type { ReportHistoryRow } from "../types";
 
 /** The latest exports, each with a link that rebuilds the report from today's data with the same filters. */
-export function ExportHistory({ rows }: { rows: ReportHistoryRow[] }) {
+export function ExportHistory({ rows, ownOnly = false }: { rows: ReportHistoryRow[]; /** Members are listed only their own exports. */ ownOnly?: boolean }) {
   return (
-    <Section title="Export history" description="The last 20 downloads. Download again to rebuild a report from current data." contentClassName="p-0">
+    <Section
+      title="Export history"
+      description={`${ownOnly ? "Your last 20 downloads" : "The last 20 downloads"}. Download again to rebuild a report from current data.`}
+      contentClassName="p-0"
+    >
       {rows.length === 0 ? (
         <div className="p-5">
           <EmptyState compact icon={History} title="No exports yet" description="Pick a report above and download it as PDF, Excel or CSV. It will be listed here." />
@@ -32,11 +36,9 @@ export function ExportHistory({ rows }: { rows: ReportHistoryRow[] }) {
                 <p className="min-w-0 truncate text-xs text-muted-foreground">
                   {formatNumber(r.rowCount)} rows · {r.by ?? "Unknown"} · {formatRelative(r.createdAt)}
                 </p>
-                <Button asChild variant="outline" size="sm" className="shrink-0">
-                  <a href={r.href} download aria-label={`Download ${r.title} again as ${labelOf(REPORT_FORMATS, r.format)}`}>
-                    <Download /> Again
-                  </a>
-                </Button>
+                <DownloadAgainLink variant="outline" className="shrink-0" href={r.href} label={`Download ${r.title} again as ${labelOf(REPORT_FORMATS, r.format)}`}>
+                  <Download /> Again
+                </DownloadAgainLink>
               </div>
             </li>
           ))}
@@ -85,11 +87,9 @@ export function ExportHistory({ rows }: { rows: ReportHistoryRow[] }) {
                       {formatRelative(r.createdAt)}
                     </td>
                     <td className="px-5 py-3 text-right">
-                      <Button asChild variant="ghost" size="sm">
-                        <a href={r.href} download aria-label={`Download ${r.title} again as ${labelOf(REPORT_FORMATS, r.format)}`}>
-                          <Download /> Download
-                        </a>
-                      </Button>
+                      <DownloadAgainLink variant="ghost" href={r.href} label={`Download ${r.title} again as ${labelOf(REPORT_FORMATS, r.format)}`}>
+                        <Download /> Download
+                      </DownloadAgainLink>
                     </td>
                   </tr>
                 );

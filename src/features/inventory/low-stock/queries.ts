@@ -3,6 +3,7 @@ import "server-only";
 import type { Types } from "mongoose";
 import { connectDB } from "@/server/db";
 import { InventoryItem } from "@/server/models";
+import { roundQty } from "@/server/services/inventory-ledger";
 import { getStockStatus, stockStatusFilter } from "@/lib/stock-status";
 import { round2 } from "@/lib/format";
 import type { LowStockItem, LowStockSummary } from "./types";
@@ -27,16 +28,19 @@ export async function getLowStockItems(): Promise<{ items: LowStockItem[]; summa
   const items: LowStockItem[] = docs.map((i) => {
     const category = i.category as unknown as PopulatedCategory;
     const unitPrice = i.lastPurchasePrice ?? i.unitPrice;
-    const suggestedQuantity = suggestedReorder(i.available, i.minStock);
+    // Rounded to the ledger's 3 decimals, as the items list and the ledger forms, so drift that
+    // older writes stored (5.55e-17) shows as 0 and Out of Stock here too.
+    const available = roundQty(i.available);
+    const suggestedQuantity = suggestedReorder(available, i.minStock);
     return {
       id: String(i._id),
       name: i.name,
       sku: i.sku,
       unit: i.unit ?? "pcs",
-      status: getStockStatus(i.available, i.minStock) as LowStockItem["status"],
-      available: i.available,
-      allocated: i.allocated,
-      quantity: i.quantity,
+      status: getStockStatus(available, i.minStock) as LowStockItem["status"],
+      available,
+      allocated: roundQty(i.allocated),
+      quantity: roundQty(i.quantity),
       minStock: i.minStock,
       suggestedQuantity,
       unitPrice,

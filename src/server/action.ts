@@ -6,6 +6,7 @@ import { connectDB } from "@/server/db";
 import { AppError, isDuplicateKeyError } from "@/server/errors";
 import { assertUser, type SessionUser } from "@/server/auth/session";
 import type { ActionResult } from "@/lib/action-result";
+import { bumpChanges } from "@/server/changes";
 
 type ActionOptions = {
   /** Paths to refresh after success. Use the layout form to refresh a whole section: ["/finance", "layout"]. */
@@ -14,6 +15,8 @@ type ActionOptions = {
   message?: string;
   /** "admin" limits the action to admins (deletes, team, salaries). */
   role?: "admin";
+  /** True for actions that only read (suggestions): they do not refresh other people's pages. */
+  readOnly?: boolean;
 };
 
 /**
@@ -51,6 +54,8 @@ export function defineAction<S extends z.ZodType, R>(
         if (Array.isArray(path)) revalidatePath(path[0], path[1]);
         else revalidatePath(path);
       }
+      // Other people's open pages pick the change up through /api/live.
+      if (!options.readOnly) await bumpChanges();
       return { ok: true, data, message: options.message };
     } catch (error) {
       return toActionError(error);

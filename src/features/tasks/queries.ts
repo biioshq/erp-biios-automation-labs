@@ -80,6 +80,15 @@ export function taskFilter(params: Pick<ListParams, "q" | "filters" | "from" | "
     const ids = objectIds(filters.assignee);
     and.push({ assignee: { $in: filters.assignee.includes("none") ? [...ids, null] : ids } });
   }
+  if (filters.completed?.length) {
+    // Same month boundaries as the dashboard's "Completed this month" count.
+    const months: Record<string, { $gte: Date; $lt?: Date }> = {
+      this_month: { $gte: startOfMonthIST(now) },
+      last_month: { $gte: startOfMonthIST(now, -1), $lt: startOfMonthIST(now) },
+    };
+    const clauses = filters.completed.filter((v) => Object.hasOwn(months, v)).map((v) => ({ completedAt: months[v] }));
+    and.push(clauses.length ? (clauses.length === 1 ? clauses[0]! : { $or: clauses }) : { _id: null });
+  }
   const range = dateRangeFilter(params.from, params.to);
   if (range) and.push({ dueDate: range });
   return asFilter(and.length ? { $and: and } : {});

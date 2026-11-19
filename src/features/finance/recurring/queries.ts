@@ -1,5 +1,6 @@
-import { salaryScope } from "@/server/auth/session";
 import "server-only";
+
+import { canSeeSalaries, salaryScope } from "@/server/auth/session";
 
 import { Types, type QueryFilter } from "mongoose";
 import { connectDB } from "@/server/db";
@@ -85,13 +86,20 @@ export async function listRecurring(params: ListParams): Promise<Paginated<Recur
   return { rows: docs.map(toRow), total, page: params.page, pageSize: params.pageSize };
 }
 
-/** KPI numbers and tab counts. Schedules are few, so this reads them all once. */
+/**
+ * KPI numbers and tab counts. Schedules are few, so this reads them all once.
+ *
+ * The money figures (committed, salaries, due) and the active count are company-wide and include every salary,
+ * the same totals the dashboard shows: all salaries together are not one person's pay. The tab counts, the
+ * paused count and the total count only the schedules the viewer can open, so members' counts match their list.
+ */
 export async function getRecurringSummary(now: Date = new Date()): Promise<RecurringSummary> {
   await connectDB();
-  const docs = await RecurringExpense.find(
-    await salaryScope(),
-    { category: 1, amount: 1, frequency: 1, dayOfMonth: 1, nextRunDate: 1, endDate: 1, status: 1 },
-  ).lean();
+  const [all, seesSalaries] = await Promise.all([
+    RecurringExpense.find({}, { category: 1, amount: 1, frequency: 1, dayOfMonth: 1, nextRunDate: 1, endDate: 1, status: 1 }).lean(),
+    canSeeSalaries(),
+  ]);
+  const docs = seesSalaries ? all : all.filter((t) => t.category !== "salaries");
   const horizon = addDays(startOfDayIST(now), 30);
   const summary: RecurringSummary = {
     committedMonthly: 0,
@@ -113,7 +121,10 @@ export async function getRecurringSummary(now: Date = new Date()): Promise<Recur
       summary.groupCounts.paused++;
     }
     if (t.status === "ended") summary.groupCounts.ended++;
+  }
+  for (const t of all) {
     if (t.status !== "active") continue;
+    const category = t.category as ExpenseCategory;
     summary.activeCount++;
     const frequency = t.frequency as RecurringFrequency;
     const monthly = monthlyEquivalent(t.amount, frequency);

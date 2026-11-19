@@ -12,7 +12,7 @@ import {
   positiveMoney,
   requiredText,
 } from "@/lib/zod";
-import { gstGrandTotal } from "@/lib/gst";
+import { gstGrandTotal, gstIssues } from "@/lib/gst";
 
 /** Validation shared by the expense form (client) and the expense actions (server). Client-safe. */
 
@@ -55,9 +55,7 @@ export const expenseFormSchema = z
       ctx.addIssue({ code: "custom", path: ["paymentMethod"], message: "Stock expenses are created by assigning inventory" });
     }
     const g = v.gst;
-    if ((g.igst ?? 0) > 0 && ((g.cgst ?? 0) > 0 || (g.sgst ?? 0) > 0)) {
-      ctx.addIssue({ code: "custom", path: ["gst", "igst"], message: "Use IGST or CGST + SGST, not both" });
-    }
+    for (const issue of gstIssues(g)) ctx.addIssue({ code: "custom", path: ["gst", issue.field], message: issue.message });
     if ((g.taxableAmount ?? 0) > 0) {
       const expected = gstGrandTotal(g);
       if (Math.abs(expected - v.amount) > 1) {

@@ -3,12 +3,15 @@ import { Page, PageHeader } from "@/components/shared/page";
 import { getLedgerItems, getLedgerProjects, getRecentOperations } from "@/features/inventory/ledger/queries";
 import { ReturnView } from "@/features/inventory/ledger/components/return-view";
 import { RecentOperations } from "@/features/inventory/ledger/components/recent-operations";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Return from Project" };
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function ReturnStockPage({ searchParams }: PageProps<"/inventory/return">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const sp = await searchParams;
   const [items, projects, recent] = await Promise.all([getLedgerItems(), getLedgerProjects(), getRecentOperations("return")]);
 

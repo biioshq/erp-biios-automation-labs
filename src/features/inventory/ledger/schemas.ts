@@ -1,9 +1,14 @@
 import { z } from "zod";
 import { PROJECT_STAGES, valuesOf } from "@/lib/constants";
 import { dateInput, gstin, money, objectId, optionalDateInput, optionalMoney, optionalObjectId, optionalText, quantity } from "@/lib/zod";
-import { gstGrandTotal } from "@/lib/gst";
+import { gstGrandTotal, gstIssues } from "@/lib/gst";
 
 /** Validation shared by the stock operation forms (client) and their actions (server). Client-safe. */
+
+/** At most 3 decimals: the ledger rounds quantities to 3 decimals, so the form must not accept
+ * more, or its preview would price a quantity other than the one recorded. */
+export const hasQtyDecimals = (n: number) => Math.abs(n * 1000 - Math.round(n * 1000)) < 1e-6;
+export const stockQuantity = quantity.refine(hasQtyDecimals, "Use at most 3 decimals");
 
 const pickId = (what: string) => z.string({ error: `Pick ${what}` }).regex(/^[a-f\d]{24}$/i, `Pick ${what}`);
 
@@ -22,7 +27,7 @@ const invoiceSchema = z.object({
 export const purchaseFormSchema = z
   .object({
     itemId: pickId("an item"),
-    quantity,
+    quantity: stockQuantity,
     unitPrice: money,
     vendor: optionalText(200),
     date: dateInput,
@@ -31,14 +36,8 @@ export const purchaseFormSchema = z
     note: optionalText(1000),
   })
   .superRefine((v, ctx) => {
-    const g = v.invoice;
-    if ((g.igst ?? 0) > 0 && ((g.cgst ?? 0) > 0 || (g.sgst ?? 0) > 0)) {
-      ctx.addIssue({ code: "custom", path: ["invoice", "igst"], message: "Use IGST or CGST + SGST, not both" });
-    }
-    const taxes = (g.cgst ?? 0) + (g.sgst ?? 0) + (g.igst ?? 0) + (g.cess ?? 0);
-    if (taxes > 0 && !((g.taxableAmount ?? 0) > 0)) {
-      ctx.addIssue({ code: "custom", path: ["invoice", "taxableAmount"], message: "Enter the taxable amount the tax applies to" });
-    }
+    // The same tax rules as expenses: both go into the GST register and the input-credit totals.
+    for (const issue of gstIssues(v.invoice)) ctx.addIssue({ code: "custom", path: ["invoice", issue.field], message: issue.message });
   });
 export type PurchaseFormInput = z.input<typeof purchaseFormSchema>;
 export type PurchaseFormValues = z.output<typeof purchaseFormSchema>;
@@ -51,7 +50,7 @@ export const assignFormSchema = z.object({
   itemId: pickId("an item"),
   projectId: pickId("a project"),
   stage: z.enum(valuesOf(PROJECT_STAGES), { error: "Pick the stage this stock is used in" }),
-  quantity,
+  quantity: stockQuantity,
   date: dateInput,
   note: optionalText(1000),
 });
@@ -61,7 +60,7 @@ export type AssignFormValues = z.output<typeof assignFormSchema>;
 export const returnFormSchema = z.object({
   projectId: pickId("a project"),
   itemId: pickId("an item"),
-  quantity,
+  quantity: stockQuantity,
   date: dateInput,
   note: optionalText(1000),
 });

@@ -134,4 +134,24 @@ async function runMigrations(db: NonNullable<typeof mongoose.connection.db>) {
     await mark(verified);
     if (result.modifiedCount) console.log(`[setup] marked ${result.modifiedCount} admin-created account email(s) as verified`);
   }
+
+  // Older writes added quantities as plain doubles and left drift such as 5.55e-17 or
+  // 0.19999999999999998 in the stock balances. The ledger now keeps 3 decimals; round what is
+  // stored the same way (the `+ 0` turns -0 into 0) so the Mongo status filters, the low-stock
+  // list and the ledger forms agree. quantity is rebuilt from its rounded parts so it stays
+  // available + allocated. Plain driver updates: updatedAt is left alone.
+  const quantities = "2026-11-round-stock-quantities";
+  if (!(await done(quantities))) {
+    // A missing field (quantityReturned on early assignments) becomes its schema default, 0, not null.
+    const r3 = (value: unknown) => ({ $add: [{ $round: [{ $ifNull: [value, 0] }, 3] }, 0] });
+    const items = await db
+      .collection(models.InventoryItem.collection.collectionName)
+      .updateMany({}, [{ $set: { available: r3("$available"), allocated: r3("$allocated") } }, { $set: { quantity: r3({ $add: ["$available", "$allocated"] }) } }]);
+    const allocations = await db
+      .collection(models.InventoryAllocation.collection.collectionName)
+      .updateMany({}, [{ $set: { quantity: r3("$quantity"), quantityAssigned: r3("$quantityAssigned"), quantityReturned: r3("$quantityReturned") } }]);
+    await mark(quantities);
+    const changed = items.modifiedCount + allocations.modifiedCount;
+    if (changed) console.log(`[setup] rounded stock quantities to 3 decimals on ${items.modifiedCount} item(s) and ${allocations.modifiedCount} assignment(s)`);
+  }
 }

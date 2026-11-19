@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { ArrowUpFromLine, CircleX, Gauge, TriangleAlert } from "lucide-react";
 import { DateField, NumberField, SelectField, TextareaField } from "@/components/forms/fields";
+import { useOnLiveChange } from "@/components/live-updates";
 import { Money } from "@/components/shared/money";
 import { StatusBadge, StockStatusBadge } from "@/components/shared/status-badge";
 import { applyFieldErrors } from "@/lib/action-result";
@@ -21,6 +22,7 @@ import type { LedgerItem, LedgerProject, ProjectImpact } from "../types";
 import { ItemCard, StatusDot } from "./item-card";
 import { ContextPlaceholder, ImpactRow, OperationForm, OperationLayout, SubmitBar } from "./operation-layout";
 import { PickerField, type PickerOption } from "./picker-field";
+import { formValidation } from "@/components/forms/form-options";
 
 const FORM_ID = "assign-stock-form";
 
@@ -75,7 +77,7 @@ export function AssignView({
   const form = useForm<AssignFormInput, unknown, AssignFormValues>({
     resolver: zodResolver(schema),
     defaultValues: defaultsFor(blockedPrefill ? undefined : initialItem?.id, initialProject?.id),
-    mode: "onTouched",
+    ...formValidation,
   });
   const { control } = form;
 
@@ -100,6 +102,9 @@ export function AssignView({
       cancelled = true;
     };
   }, [projectId, impactVersion]);
+  // Other people's changes move the project's spend: reload the budget preview (the form is not
+  // reset, so typing is kept). Also fires after this tab's own save.
+  useOnLiveChange(() => setImpactVersion((v) => v + 1));
   const projectImpact = impact && impact.projectId === projectId ? impact.data : null;
   const loadingImpact = Boolean(projectId) && !(impact && impact.projectId === projectId);
 
@@ -147,7 +152,6 @@ export function AssignView({
       emitDataChanged();
       // Several items often go to the same project and stage, so those stay selected.
       form.reset({ ...defaultsFor(undefined, values.projectId, values.stage), itemId: "" });
-      setImpactVersion((v) => v + 1);
     });
   });
 
@@ -303,6 +307,7 @@ function previewAssign(item: LedgerItem, quantity: number, impact: ProjectImpact
     spent,
     spentAfter: round2(spent + cost),
     stageSpent: stage ? (impact?.byStage[stage] ?? 0) : 0,
+    salariesHidden: impact?.salariesHidden ?? false,
     remainingBefore,
     remainingAfter,
     hasBudget: budget > 0,
@@ -358,6 +363,9 @@ function ImpactPanel({
               ) : (
                 <p className="py-2 text-sm text-muted-foreground">This project has no budget set.</p>
               )}
+              {preview.salariesHidden ? (
+                <p className="py-2 text-xs text-muted-foreground">Spend excludes salaries, which only admins can see.</p>
+              ) : null}
             </>
           )
         ) : (

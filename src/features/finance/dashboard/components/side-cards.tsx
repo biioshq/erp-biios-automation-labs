@@ -3,6 +3,7 @@ import { ArrowUpRight, BadgeIndianRupee, FolderKanban, PackagePlus, Percent, Rec
 import { Section } from "@/components/shared/page";
 import { Money } from "@/components/shared/money";
 import { formatDate, formatNumber, formatPercent } from "@/lib/format";
+import { reportQueryString } from "@/features/reports/schemas";
 import type { FinanceDashboardData } from "../types";
 
 const ACTIONS = [
@@ -38,12 +39,15 @@ export function QuickActions() {
 export function GstSummary({ data }: { data: FinanceDashboardData }) {
   const { gstPaid, expenses } = data.kpis;
   const share = expenses > 0 ? gstPaid / expenses : null;
+  // Open the GST report itself, on the same period as the card.
+  const qs = reportQueryString(data.periodDates ?? {});
+  const reportHref = `/finance/reports?report=gst${qs ? `&${qs}` : ""}`;
   return (
     <Section
       title="GST summary"
       description={data.periodLabel}
       actions={
-        <Link href="/finance/reports" className="inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline">
+        <Link href={reportHref} className="inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline">
           GST report <ArrowUpRight className="size-3" aria-hidden />
         </Link>
       }
@@ -58,6 +62,8 @@ export function GstSummary({ data }: { data: FinanceDashboardData }) {
           <p className="mt-1 text-xs text-muted-foreground">
             {gstPaid > 0 && share !== null ? `${formatPercent(share)} of expenses ${data.periodPhrase}.` : "No GST invoices recorded on expenses in this period."}
           </p>
+          {/* The GST report's input tax credit also counts stock purchase invoices, so it can be higher than this card. */}
+          <p className="mt-1 text-xs text-muted-foreground">GST on stock purchases is not included here. The GST report counts both.</p>
         </div>
       </div>
     </Section>

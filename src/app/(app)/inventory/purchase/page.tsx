@@ -4,12 +4,15 @@ import { getVendorNames } from "@/server/lookups";
 import { getLedgerItems, getRecentOperations } from "@/features/inventory/ledger/queries";
 import { PurchaseView } from "@/features/inventory/ledger/components/purchase-view";
 import { RecentOperations } from "@/features/inventory/ledger/components/recent-operations";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Purchase Stock" };
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function PurchaseStockPage({ searchParams }: PageProps<"/inventory/purchase">) {
+  // Every page checks the session itself: client navigations can skip the layout's check.
+  await requireUser();
   const sp = await searchParams;
   const [items, vendors, recent] = await Promise.all([getLedgerItems(), getVendorNames(), getRecentOperations("purchase")]);
   const quantity = Number(one(sp.quantity));

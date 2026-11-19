@@ -74,7 +74,9 @@ export async function POST(request: NextRequest) {
   try {
     const bytes = await readStoredFile(storageKey);
     // Loaded here, not at the top, so a reader that cannot start never breaks storing receipts.
-    const { extractInvoice } = await import("@/server/ocr/extract");
+    const { extractInvoice } = await import("@/server/ocr/extract").catch((error: unknown) => {
+      throw Object.assign(new Error("The receipt reader could not start on this server.", { cause: error }), { name: "OcrUnavailableError" });
+    });
     const ocr = await extractInvoice(bytes, mimeType);
     return NextResponse.json({
       file,
@@ -82,10 +84,13 @@ export async function POST(request: NextRequest) {
     } satisfies OcrResponse);
   } catch (error) {
     console.error("[ocr] reading failed", error);
+    const name = error instanceof Error ? error.name : "";
     const reason =
-      error instanceof UploadError || (error instanceof Error && error.name === "OcrTimeoutError")
-        ? error.message
-        : "The receipt reader failed on this file.";
+      error instanceof UploadError || name === "OcrTimeoutError"
+        ? (error as Error).message
+        : name === "OcrUnavailableError"
+          ? "The receipt reader could not start on this server. An admin can open /api/health?check=ocr to see why."
+          : "The receipt reader could not make sense of this file.";
     return NextResponse.json({ file, ocr: null, error: reason } satisfies OcrResponse);
   }
 }

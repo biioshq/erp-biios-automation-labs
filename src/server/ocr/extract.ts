@@ -33,6 +33,11 @@ export class OcrTimeoutError extends Error {
   override name = "OcrTimeoutError";
 }
 
+/** The reader itself could not start (missing files, no memory), as opposed to failing on one receipt. */
+export class OcrUnavailableError extends Error {
+  override name = "OcrUnavailableError";
+}
+
 const globalForOcr = globalThis as unknown as { __ocrWorker?: Promise<Worker> };
 
 /** One long-lived worker per server process: loading the model takes a second or two. */
@@ -68,7 +73,9 @@ function discardWorker() {
 }
 
 async function ocrImage(image: Buffer): Promise<{ text: string; lines: TextLine[] }> {
-  const worker = await getWorker();
+  const worker = await getWorker().catch((error: unknown) => {
+    throw new OcrUnavailableError("The receipt reader could not start on this server.", { cause: error });
+  });
   let data: Awaited<ReturnType<Worker["recognize"]>>["data"];
   try {
     ({ data } = await worker.recognize(image, {}, { text: true, blocks: true }));

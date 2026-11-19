@@ -14,6 +14,20 @@ const securityHeaders = [
   ...(isProd ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" }] : []),
 ];
 
+/** Everything Tesseract and its worker thread load at runtime (checked with @vercel/nft). */
+const OCR_FILES = [
+  "./node_modules/@tesseract.js-data/eng/4.0.0/**/*",
+  "./node_modules/tesseract.js/src/**/*",
+  "./node_modules/tesseract.js-core/**/*",
+  "./node_modules/regenerator-runtime/**/*",
+  "./node_modules/wasm-feature-detect/**/*",
+  "./node_modules/bmp-js/**/*",
+  "./node_modules/is-url/**/*",
+  "./node_modules/zlibjs/**/*",
+  // node-fetch brings its own whatwg-url, tr46 and webidl-conversions in a nested node_modules.
+  "./node_modules/node-fetch/**/*",
+];
+
 const nextConfig: NextConfig = {
   // The review server builds into its own folder so a local build never replaces files under it.
   distDir: process.env.NEXT_DIST_DIR || ".next",
@@ -35,13 +49,12 @@ const nextConfig: NextConfig = {
     "cloudinary",
     "@aws-sdk/client-s3",
   ],
-  // The OCR route reads the bundled English model and Tesseract's worker files from disk.
+  // Routes that read receipts need the English model and Tesseract's worker on disk. The worker
+  // runs in its own thread, so the tracer cannot see what it loads: those packages are listed here
+  // too, or serverless hosts (Vercel) ship without them and reading fails with "Cannot find module".
   outputFileTracingIncludes: {
-    "/api/ocr": [
-      "./node_modules/@tesseract.js-data/eng/4.0.0/**/*",
-      "./node_modules/tesseract.js/src/**/*",
-      "./node_modules/tesseract.js-core/**/*",
-    ],
+    "/api/ocr": OCR_FILES,
+    "/api/health": OCR_FILES,
   },
   // Source, docs, scripts and local uploads are never needed by the built server.
   outputFileTracingExcludes: {

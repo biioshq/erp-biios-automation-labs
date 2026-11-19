@@ -117,8 +117,13 @@ const PROJECT_NAMES: [string, string][] = [
   ["clinic", "Wakad Clinic Lighting"],
 ];
 
+/** The shared admin login is the company's account, not a person's. */
+const ADMIN_NAME = "Biios Automation Labs";
+/** Name the admin login had in earlier seeds; renamed once (a name set later by hand is left alone). */
+const OLD_ADMIN_NAME = "Mahir Shah";
+
 const TEAM = [
-  { name: "Mahir Shah", email: ADMIN_EMAIL, role: "admin" },
+  { name: ADMIN_NAME, email: ADMIN_EMAIL, role: "admin" },
   { name: "Aarav Mehta", email: "aarav@biios.in", role: "member" },
   { name: "Priya Kulkarni", email: "priya@biios.in", role: "member" },
   { name: "Rohan Desai", email: "rohan@biios.in", role: "member" },
@@ -143,6 +148,12 @@ async function ensureUsers() {
     }
     console.log(`Admin login moved from ${LEGACY_ADMIN_EMAIL} to ${ADMIN_EMAIL}; demo passwords reset.`);
   }
+
+  const renamed = await User.updateOne(
+    { email: ADMIN_EMAIL, name: OLD_ADMIN_NAME },
+    { $set: { name: ADMIN_NAME, updatedAt: new Date() } },
+  );
+  if (renamed.modifiedCount) console.log(`Admin account renamed from "${OLD_ADMIN_NAME}" to "${ADMIN_NAME}".`);
 
   for (const member of TEAM) {
     const existing = await User.findOne({ email: member.email }).lean();
@@ -363,6 +374,10 @@ async function main() {
   if (RESET) {
     await mongoose.connection.db!.dropDatabase();
     console.log("Database dropped.");
+  } else {
+    // Bring over data from the database's old name first, so demo data never lands on top of it.
+    const { adoptLegacyDatabase } = await import("@/server/setup-db");
+    await adoptLegacyDatabase();
   }
   const users = await ensureUsers();
   const admin = users[ADMIN_EMAIL]!;

@@ -7,10 +7,12 @@ import { mongodbAdapter } from "better-auth/adapters/mongodb";
 import { nextCookies } from "better-auth/next-js";
 import { MongoClient } from "mongodb";
 import { googleEnabled, isAllowedCompanyEmail } from "./google";
+import { DB_NAME } from "@/server/db-name";
 
 const globalForAuth = globalThis as unknown as { __authMongo?: MongoClient };
-const client = (globalForAuth.__authMongo ??= new MongoClient(process.env.MONGODB_URI ?? "mongodb://127.0.0.1:27017/biios_erp"));
-const db = client.db();
+const client = (globalForAuth.__authMongo ??= new MongoClient(process.env.MONGODB_URI ?? "mongodb://127.0.0.1:27017"));
+// Users and sessions live in the same database as everything else.
+const db = client.db(DB_NAME);
 
 /**
  * Lets an admin create team members while public sign-up is closed:

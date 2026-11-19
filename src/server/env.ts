@@ -8,6 +8,11 @@ const isProd = process.env.NODE_ENV === "production";
 
 const schema = z.object({
   MONGODB_URI: z.string().regex(/^mongodb(\+srv)?:\/\//, "must be a mongodb:// or mongodb+srv:// connection string"),
+  MONGODB_DB: z
+    .string()
+    .regex(/^[^/\\. "$*<>:|?]{1,63}$/, "is not a valid MongoDB database name")
+    .optional(),
+  MONGODB_COPY_FROM: z.string().optional(),
   BETTER_AUTH_SECRET: isProd
     ? z.string().min(32, "must be at least 32 characters in production (openssl rand -base64 32)")
     : z.string().min(1),

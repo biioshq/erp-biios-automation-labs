@@ -14,7 +14,7 @@
       "depends_on": ["db"],
       "ready": { "http": "/sign-in" },
       "env": {
-        "MONGODB_URI": "mongodb://127.0.0.1:{ports.db}/biios_erp",
+        "MONGODB_URI": "mongodb://127.0.0.1:{ports.db}",
         "BETTER_AUTH_URL": "{url}",
         "NEXT_DIST_DIR": ".next-review",
         "SEED_DEMO": "1",

@@ -121,6 +121,12 @@ nothing attached; "Project Manager" is shown apart from the logo.
 `features/finance/expenses` + `app/(app)/finance/expenses` is the pattern to copy: schemas, queries, actions,
 table view with drawers, form with sections, detail view, receipt upload + OCR.
 
+## Database
+
+All collections, including Better Auth's `user`, `session` and `account`, live in one database:
+`erp-biios-automation-labs` (`src/server/db-name.ts`, override with `MONGODB_DB`). `adoptLegacyDatabase()` in
+`src/server/setup-db.ts` copies data once from the database names used before.
+
 ## Auth
 
 - Google: `src/server/auth/google.ts` (enabled flag, allowed domains) and `user.validateUserInfo` in

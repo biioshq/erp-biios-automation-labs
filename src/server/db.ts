@@ -1,6 +1,7 @@
 import "server-only";
 
 import mongoose, { type ClientSession } from "mongoose";
+import { DB_NAME } from "./db-name";
 
 const MONGODB_URI = process.env.MONGODB_URI;
 
@@ -17,6 +18,7 @@ export async function connectDB(): Promise<typeof mongoose> {
   if (!MONGODB_URI) throw new Error("MONGODB_URI is not set. Copy .env.example to .env.local.");
   cached.promise ??= mongoose
     .connect(MONGODB_URI, {
+      dbName: DB_NAME,
       bufferCommands: false,
       maxPoolSize: process.env.VERCEL ? 10 : 20,
       serverSelectionTimeoutMS: 8000,

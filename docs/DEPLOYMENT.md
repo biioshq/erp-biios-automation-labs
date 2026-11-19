@@ -39,11 +39,12 @@ git on your computer.
    Save the username and password.
 3. **Network Access** > Add IP Address > **Allow access from anywhere** (`0.0.0.0/0`). Vercel functions have no fixed
    IP addresses; the database user's password protects access. (Atlas' Vercel integration can do this step for you.)
-4. **Connect** > Drivers: copy the connection string, put in the password, and add the database name `biios_pm` before
-   the `?`:
+4. **Connect** > Drivers: copy the connection string and put in the password:
    ```
-   mongodb+srv://<user>:<password>@<cluster>.mongodb.net/biios_pm?retryWrites=true&w=majority
+   mongodb+srv://<user>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority
    ```
+   The app always uses the database **`erp-biios-automation-labs`** (Atlas creates it on first use), whatever the
+   string names. To use another name, set `MONGODB_DB`.
    If the password has symbols such as `@ : / # %`, URL-encode them (for example `#` becomes `%23`).
 
 ### 3. Prepare the database (once, from your computer)
@@ -123,8 +124,9 @@ the schedule in `vercel.json`, for example `"0 * * * *"` for hourly.
 - Every push to `main` deploys to production. Pushes to other branches create preview deployments, which can sign in
   automatically on their own URLs.
 - Give previews their own data so tests never touch real records: in Environment Variables, give the **Preview**
-  environment its own `MONGODB_URI` pointing at a second database (for example `.../biios_pm_preview`, prepared with
-  `npm run db:setup`) and add `CLOUDINARY_FOLDER=biios-pm-preview`.
+  environment `MONGODB_DB=erp-biios-automation-labs-preview` (a second database, prepared with `npm run db:setup`)
+  and `CLOUDINARY_FOLDER=biios-pm-preview`. Changing the database part of `MONGODB_URI` is not enough: the app
+  ignores it.
 
 ### Limits on Vercel
 
@@ -190,8 +192,15 @@ malformed (`src/server/env.ts`).
 
 ## The database
 
-1. Create a database user with `readWrite` on one database, for example `biios_pm`, and put its connection string in
-   `MONGODB_URI` (for Atlas: `mongodb+srv://user:pass@cluster.mongodb.net/biios_pm?retryWrites=true&w=majority`).
+1. Create a database user with `readWrite` on the database `erp-biios-automation-labs` and put its connection string
+   in `MONGODB_URI` (for Atlas: `mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true&w=majority`). The app
+   uses that database name whatever the string says; `MONGODB_DB` changes it.
+
+   Moving from an older version that used the database named in the string (`biios_pm`, `biios_erp`): the first
+   `npm run db:setup` or server start copies every collection into `erp-biios-automation-labs` once, while the new
+   database has no users. The old database is left as it was; drop it after checking. The database user needs read
+   access to the old database for this. On Vercel the copy only happens through `npm run db:setup`, so run it before
+   deploying the new version.
 2. Run `npm run db:setup`. It checks the connection, reports whether transactions are available, and creates all
    collections and indexes:
    `projects, expenses, income, inventory, inventoryCategories, inventoryMovements, inventoryAllocations, tasks,

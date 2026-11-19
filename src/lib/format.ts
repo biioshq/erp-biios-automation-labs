@@ -103,7 +103,7 @@ export function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** Initials for avatars: "Mahir Shah" → "MS" */
+/** Initials for avatars: "Aarav Mehta" → "AM", "Biios Automation Labs" → "BA" */
 export function initials(name: string | null | undefined) {
   return (name ?? "?")
     .split(/\s+/)

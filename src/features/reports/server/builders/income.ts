@@ -4,6 +4,7 @@ import { connectDB } from "@/server/db";
 import { Income } from "@/server/models";
 import { INCOME_CATEGORIES, PAYMENT_METHODS, labelOf, type IncomeCategory, type PaymentMethod } from "@/lib/constants";
 import { searchRegex } from "@/lib/list-params";
+import { round2 } from "@/lib/format";
 import { col, day, describeFilters, projectMatch, rangeOf, sumTotals } from "../common";
 import type { ReportData, ReportFilters, ReportRow } from "../../types";
 
@@ -54,7 +55,7 @@ export async function buildIncomeReport(f: ReportFilters): Promise<ReportData> {
   return {
     type: "income",
     title: "Income report",
-    subtitle: await describeFilters(f, { categories: "income", vendor: false }),
+    subtitle: await describeFilters(f, { categories: "income", vendor: false, passthrough: ["paymentMethod"] }),
     columns,
     rows,
     totals,
@@ -62,7 +63,7 @@ export async function buildIncomeReport(f: ReportFilters): Promise<ReportData> {
       { label: "Receipts", value: rows.length, type: "number" },
       { label: "Total income", value: Number(totals.amount ?? 0), type: "money" },
       { label: "Clients", value: clients, type: "number" },
-      { label: "Average receipt", value: rows.length ? Number(totals.amount ?? 0) / rows.length : 0, type: "money" },
+      { label: "Average receipt", value: rows.length ? round2(Number(totals.amount ?? 0) / rows.length) : 0, type: "money" },
     ],
   };
 }

@@ -5,7 +5,7 @@ import { salaryScope } from "@/server/auth/session";
 import { Expense, InventoryMovement } from "@/server/models";
 import { expenseFilter } from "@/features/finance/expenses/queries";
 import { gstGrandTotal } from "@/lib/gst";
-import { round2 } from "@/lib/format";
+import { formatCurrency, round2 } from "@/lib/format";
 import { col, day, describeFilters, rangeOf, sumTotals } from "../common";
 import type { ReportData, ReportFilters, ReportRow, ReportSection } from "../../types";
 
@@ -128,15 +128,22 @@ export async function buildGstReport(f: ReportFilters): Promise<ReportData> {
 
   // Totals by supplier GSTIN, for the return reconciliation.
   const byGstin = new Map<string, { supplier: string; invoices: number; taxable: number; cgst: number; sgst: number; igst: number; cess: number }>();
+  let noGstin = 0;
+  let noGstinTax = 0;
   for (const r of rows) {
-    const key = String(r.gstin || "Unregistered");
+    // Invoices without a supplier GSTIN are grouped by supplier, never merged across suppliers.
+    if (!r.gstin) {
+      noGstin += 1;
+      noGstinTax = round2(noGstinTax + Number(r.cgst ?? 0) + Number(r.sgst ?? 0) + Number(r.igst ?? 0) + Number(r.cess ?? 0));
+    }
+    const key = r.gstin ? String(r.gstin) : `none:${String(r.supplier ?? "").trim().toLowerCase()}`;
     const cur = byGstin.get(key) ?? { supplier: String(r.supplier ?? ""), invoices: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, cess: 0 };
     cur.invoices += 1;
     for (const k of ["taxable", "cgst", "sgst", "igst", "cess"] as const) cur[k] = round2(cur[k] + Number(r[k] ?? 0));
     byGstin.set(key, cur);
   }
   const gstinRows: ReportRow[] = [...byGstin.entries()]
-    .map(([gstin, v]) => ({ gstin, ...v, tax: round2(v.cgst + v.sgst + v.igst + v.cess) }))
+    .map(([key, v]) => ({ gstin: key.startsWith("none:") ? "No GSTIN" : key, ...v, tax: round2(v.cgst + v.sgst + v.igst + v.cess) }))
     .sort((a, b) => b.tax - a.tax);
   const gstinSection: ReportSection = {
     title: "Input credit by GSTIN",
@@ -165,6 +172,9 @@ export async function buildGstReport(f: ReportFilters): Promise<ReportData> {
     subtitle: [
       subtitle,
       !includePurchases && f.project.length ? "Stock purchases are not tied to a project and are left out" : "",
+      noGstin
+        ? `${noGstin} ${noGstin === 1 ? "invoice has" : "invoices have"} no supplier GSTIN (tax ${formatCurrency(noGstinTax, { exact: true })}); check before claiming that credit`
+        : "",
       salariesHidden ? "Salaries are hidden for your role" : "",
     ]
       .filter(Boolean)

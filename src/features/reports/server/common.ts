@@ -2,10 +2,10 @@ import "server-only";
 
 import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
-import { InventoryCategory, Project } from "@/server/models";
+import { InventoryCategory, InventoryItem, Project } from "@/server/models";
 import { dateRangeFilter, fromDateInput, toDateInput } from "@/lib/dates";
 import { formatDate, round2 } from "@/lib/format";
-import { INCOME_CATEGORIES, labelOf } from "@/lib/constants";
+import { EXPENSE_SOURCES, INCOME_CATEGORIES, MOVEMENT_TYPES, PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import type { ReportColumn, ReportFilters, ReportRow, ReportTotals, ColumnType } from "../types";
 
@@ -81,7 +81,14 @@ const list = (values: string[], max = 4) =>
 /** The period and filters in words, for the report subtitle. */
 export async function describeFilters(
   f: ReportFilters,
-  opts: { period?: boolean; categories?: "expense" | "income" | "inventory" | null; vendor?: boolean; project?: boolean } = {},
+  opts: {
+    period?: boolean;
+    categories?: "expense" | "income" | "inventory" | null;
+    vendor?: boolean;
+    project?: boolean;
+    /** The list filters this report applies, named in the subtitle so a filtered file says so. */
+    passthrough?: ("stage" | "paymentMethod" | "source" | "movementType" | "item")[];
+  } = {},
 ): Promise<string> {
   await connectDB();
   const parts: string[] = [];
@@ -96,6 +103,16 @@ export async function describeFilters(
       const label = opts.categories === "income" ? (c: string) => labelOf(INCOME_CATEGORIES, c as never) : await getExpenseCategoryLabeler();
       parts.push(`Categories: ${list(f.category.map((c) => label(c)))}`);
     }
+  }
+  const pass = new Set(opts.passthrough ?? []);
+  const named = <T extends string>(options: readonly { value: T; label: string }[], values: string[]) => list(values.map((v) => labelOf(options, v as T)));
+  if (pass.has("stage") && f.stage.length) parts.push(`Stage: ${named(PROJECT_STAGES, f.stage)}`);
+  if (pass.has("paymentMethod") && f.paymentMethod.length) parts.push(`Payment: ${named(PAYMENT_METHODS, f.paymentMethod)}`);
+  if (pass.has("source") && f.source.length) parts.push(`Source: ${named(EXPENSE_SOURCES, f.source)}`);
+  if (pass.has("movementType") && f.movementType.length) parts.push(`Type: ${named(MOVEMENT_TYPES, f.movementType)}`);
+  if (pass.has("item") && f.item.length) {
+    const items = await InventoryItem.find({ _id: { $in: objectIds(f.item) } }, { name: 1 }).lean();
+    parts.push(`Items: ${list(items.map((i) => i.name))}`);
   }
   if (f.q) parts.push(`Search: "${f.q}"`);
   return parts.join(" · ");

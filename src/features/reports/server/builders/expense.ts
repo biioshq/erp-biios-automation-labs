@@ -91,7 +91,7 @@ export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> 
   return {
     type: "expense",
     title: "Expense report",
-    subtitle: [await describeFilters(f, { categories: "expense" }), salariesHidden ? "Salaries are hidden for your role" : ""].filter(Boolean).join(" · "),
+    subtitle: [await describeFilters(f, { categories: "expense", passthrough: ["stage", "paymentMethod", "source"] }), salariesHidden ? "Salaries are hidden for your role" : ""].filter(Boolean).join(" · "),
     columns,
     rows,
     totals,

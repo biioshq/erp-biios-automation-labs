@@ -16,8 +16,11 @@ export const CONTENT_TYPES: Record<ReportFormat, string> = {
 /** biios-expense-report-2026-04-01-to-2026-11-19.xlsx */
 export function reportFileName(type: ReportType, format: ReportFormat, filters: Pick<ReportFilters, "from" | "to" | "movements">): string {
   const name = type === "inventory" && filters.movements ? "inventory-movements" : type;
+  const today = toDateInput(new Date());
+  // The project report (lifetime figures) and the stock valuation (as of now) do not use the dates.
+  if (type === "project" || (type === "inventory" && !filters.movements)) return `biios-${name}-report-${today}.${format}`;
   const from = filters.from ?? "start";
-  const to = filters.to ?? toDateInput(new Date());
+  const to = filters.to ?? today;
   return `biios-${name}-report-${from}-to-${to}.${format}`;
 }
 

@@ -41,6 +41,7 @@ async function buildValuation(f: ReportFilters): Promise<ReportData> {
     if (!group) return;
     rows.push({
       item: `Subtotal: ${group.name} (${group.count} ${group.count === 1 ? "item" : "items"})`,
+      category: group.name,
       value: round2(group.value),
       allocatedValue: round2(group.allocated),
       _kind: "subtotal",
@@ -169,7 +170,7 @@ async function buildMovements(f: ReportFilters): Promise<ReportData> {
   return {
     type: "inventory",
     title: "Stock movement report",
-    subtitle: await describeFilters(f, { categories: "inventory" }),
+    subtitle: await describeFilters(f, { categories: "inventory", passthrough: ["movementType", "item"] }),
     columns: movementColumns,
     rows,
     totals,

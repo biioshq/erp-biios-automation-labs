@@ -12,9 +12,11 @@ import type { ReportData, ReportFilters, ReportRow, ReportSection } from "../../
 
 type Group = { _id: string; total: number; count: number };
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Sep 2026": a fixed spelling (Intl writes "Sept"), so every month reads the same in Excel. */
 const monthLabel = (key: string) => {
   const [y, m] = key.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(y, m - 1, 1)));
+  return `${MONTHS[m - 1]} ${y}`;
 };
 
 /** P&L for the period: income and expenses by category, the result, and a month-by-month table. */
@@ -57,7 +59,8 @@ export async function buildFinanceReport(f: ReportFilters): Promise<ReportData> 
   const income = round2(incCat.reduce((s, r) => s + r.total, 0));
   const expenses = round2(expCat.reduce((s, r) => s + r.total, 0));
   const profit = round2(income - expenses);
-  const margin = income > 0 ? profit / income : 0;
+  // Without income there is no margin to state (0% next to a loss would mislead).
+  const margin: number | string = income > 0 ? profit / income : "n/a";
 
   const categoryRows = (groups: Group[], labelFor: (value: string) => string, total: number): ReportRow[] =>
     [...groups]

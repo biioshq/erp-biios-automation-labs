@@ -37,7 +37,8 @@ export function renderCsv(report: ReportData): Buffer {
     if (index > 0) lines.push("");
     if (sections.length > 1) lines.push(line([section.title]));
     lines.push(line(section.columns.map((c) => c.header)));
-    for (const row of section.rows) lines.push(line(section.columns.map((c) => cellText(c, row[c.key]))));
+    // Data rows only: subtotal lines would be counted again by anyone summing a column (the totals line stays last).
+    for (const row of section.rows) if (row._kind !== "subtotal") lines.push(line(section.columns.map((c) => cellText(c, row[c.key]))));
     if (section.totals) lines.push(line(section.columns.map((c) => cellText(c, section.totals![c.key]))));
   });
   return Buffer.concat([Buffer.from("﻿", "utf8"), Buffer.from(lines.join("\r\n") + "\r\n", "utf8")]);

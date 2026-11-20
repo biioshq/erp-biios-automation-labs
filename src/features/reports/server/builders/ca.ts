@@ -39,7 +39,8 @@ export async function buildCaReport(filters: ReportFilters): Promise<ReportData>
   const registerF = { $and: [expenseFBase, scope, COMPANY_EXPENSES] };
   // Same rule as the GST register: purchases have no project, and count as "inventory" spend.
   const includePurchases = f.project.length === 0 && (f.category.length === 0 || f.category.includes("inventory"));
-  const purchaseQuery: Record<string, unknown> = { type: "purchase" };
+  // Stock with no cost (opening stock entered at ₹0) paid no vendor, so it stays out of the vendor totals.
+  const purchaseQuery: Record<string, unknown> = { type: "purchase", $or: [{ "invoice.total": { $gt: 0 } }, { totalCost: { $gt: 0 } }] };
   const range = rangeOf(f);
   if (range) purchaseQuery.date = range;
   if (f.vendor.length) purchaseQuery.vendor = { $in: f.vendor };
@@ -111,7 +112,9 @@ export async function buildCaReport(filters: ReportFilters): Promise<ReportData>
   const expenseTotal = round2(registerTotal + salaryTotal);
   const itc = (k: string) => Number(gst.totals?.[k] ?? 0);
   const itcTotal = round2(itc("cgst") + itc("sgst") + itc("igst") + itc("cess"));
-  const profitLabel = salariesHidden ? "Profit (salaries excluded)" : "Profit";
+  // Income has no vendor or expense category: with those filters it stays whole, so "profit" would mix bases.
+  const incomeUnfiltered = f.vendor.length > 0 || f.category.length > 0;
+  const profitLabel = incomeUnfiltered ? "Income less these expenses" : salariesHidden ? "Profit (salaries excluded)" : "Profit";
 
   // Expenses and stock purchases from the same supplier make one row.
   const byVendor = new Map<string, VendorGroup>();
@@ -199,6 +202,7 @@ export async function buildCaReport(filters: ReportFilters): Promise<ReportData>
     subtitle: [
       await describeFilters(f, { categories: "expense" }),
       salaryLine ? "Salaries appear as one company total, not as rows" : salariesHidden ? "Salaries are hidden for your role" : "",
+      incomeUnfiltered ? "Income is all income for the period: it has no vendor or expense category to filter by" : "",
       assignedTotal || purchaseTotal ? "Vendor totals count stock when it is bought, at invoice value, not when it is used on a project" : "",
     ]
       .filter(Boolean)

@@ -11,6 +11,8 @@ const inventoryItemSchema = new Schema(
     name: { type: String, required: true, trim: true, maxlength: 160 },
     sku: { type: String, required: true, trim: true, uppercase: true, unique: true, maxlength: 64 },
     category: { type: Schema.Types.ObjectId, ref: "InventoryCategory", index: true },
+    /** A finer group inside the category ("Relay Driver Module"), free text; optional. */
+    subcategory: { type: String, trim: true, maxlength: 80 },
     unit: { type: String, enum: valuesOf(INVENTORY_UNITS), default: "pcs" },
     quantity: { type: Number, default: 0, min: 0 },
     available: { type: Number, default: 0, min: 0 },
@@ -48,6 +50,23 @@ const inventoryItemSchema = new Schema(
     purchaseDate: { type: Date },
     description: { type: String, trim: true, maxlength: 2000 },
     location: { type: String, trim: true, maxlength: 120 },
+    /**
+     * The item's own details beyond these fields, as label and value ("Value / Rating": "110 ohm",
+     * "Mounting type": "THT"), in the order shown. Optional; missing on items added before details.
+     * Stored as a list, not a map: labels from sheets may hold dots and other characters keys cannot.
+     */
+    attributes: {
+      type: [
+        new Schema(
+          {
+            label: { type: String, required: true, trim: true, maxlength: 60 },
+            value: { type: String, required: true, trim: true, maxlength: 1000 },
+          },
+          { _id: false },
+        ),
+      ],
+      default: undefined,
+    },
     /** Photo of the item (a stored file); optional. */
     photoFileId: { type: Schema.Types.ObjectId, ref: "File", default: null },
     archivedAt: { type: Date, default: null },

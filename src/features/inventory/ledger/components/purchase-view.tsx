@@ -141,7 +141,7 @@ export function PurchaseView({
       items.map((i) => ({
         value: i.id,
         label: i.name,
-        description: `${i.sku} · ${formatNumber(i.available)} ${i.unit} available`,
+        description: [i.sku, i.variant, `${formatNumber(i.available)} ${i.unit} available`].filter(Boolean).join(" · "),
         leading: <StatusDot status={i.status} />,
         trailing: i.status === "in_stock" ? undefined : <StockStatusBadge status={i.status} />,
       })),

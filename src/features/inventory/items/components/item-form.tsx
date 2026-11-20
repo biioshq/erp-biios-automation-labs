@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useId, useState, useTransition } from "react";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Boxes, NotebookText, PackagePlus, Wand2 } from "lucide-react";
+import { Boxes, ListPlus, NotebookText, PackagePlus, Plus, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
@@ -25,6 +25,7 @@ import { DEFAULT_PURCHASE_PAYMENT_METHOD, PURCHASE_PAYMENT_METHODS } from "../..
 import type { ItemFormRecord } from "../types";
 import { formValidation } from "@/components/forms/form-options";
 import { SimilarItemsNotice, useSimilarItems } from "./similar-items-notice";
+import { MAX_ATTRIBUTES } from "../attributes";
 
 export type CategoryOption = { value: string; label: string; color: string };
 
@@ -40,6 +41,9 @@ function defaultsFromTemplate(template: ItemFormRecord, categories: CategoryOpti
     name: copyName(copyBaseName(template.name), copyNumber(template.name) + 1),
     sku: "",
     categoryId,
+    subcategory: template.subcategory ?? "",
+    // A copy is usually the same part in another value: the details are kept to edit.
+    attributes: template.attributes.map((a) => ({ ...a })),
     unit: template.unit ?? "pcs",
     minStock: template.minStock || undefined,
     vendor: template.vendor ?? "",
@@ -59,6 +63,8 @@ function defaultsFrom(item?: ItemFormRecord | null, categoryId?: string): ItemFo
     name: item?.name ?? "",
     sku: item?.sku ?? "",
     categoryId: item?.categoryId ?? categoryId ?? undefined,
+    subcategory: item?.subcategory ?? "",
+    attributes: (item?.attributes ?? []).map((a) => ({ ...a })),
     unit: item?.unit ?? "pcs",
     minStock: item?.minStock ?? undefined,
     vendor: item?.vendor ?? "",
@@ -73,36 +79,119 @@ function defaultsFrom(item?: ItemFormRecord | null, categoryId?: string): ItemFo
   };
 }
 
-/** Text input with browser suggestions from known vendor names. */
-function VendorField({ control, vendors }: { control: ReturnType<typeof useForm<ItemFormInput, unknown, ItemFormValues>>["control"]; vendors: string[] }) {
+type ItemControl = ReturnType<typeof useForm<ItemFormInput, unknown, ItemFormValues>>["control"];
+
+/** Text input with browser suggestions (known vendors, subcategories already in use). */
+function SuggestField({
+  control,
+  name,
+  label,
+  placeholder,
+  suggestions,
+  description,
+}: {
+  control: ItemControl;
+  name: "vendor" | "subcategory";
+  label: string;
+  placeholder: string;
+  suggestions: string[];
+  description?: string;
+}) {
   const listId = useId();
   return (
     <Controller
       control={control}
-      name="vendor"
+      name={name}
       render={({ field, fieldState }) => (
         <Field data-invalid={fieldState.invalid || undefined} className="gap-1.5">
-          <FieldLabel htmlFor="vendor" className="text-[13px]">
-            Vendor
+          <FieldLabel htmlFor={name} className="text-[13px]">
+            {label}
           </FieldLabel>
           <Input
             {...field}
-            id="vendor"
+            id={name}
             value={(field.value as string | undefined) ?? ""}
             list={listId}
             autoComplete="off"
-            placeholder="Who you buy it from"
+            placeholder={placeholder}
             aria-invalid={fieldState.invalid}
           />
           <datalist id={listId}>
-            {vendors.map((v) => (
+            {suggestions.map((v) => (
               <option key={v} value={v} />
             ))}
           </datalist>
+          {description ? <FieldDescription className="text-xs">{description}</FieldDescription> : null}
           <FieldError errors={fieldState.error ? [fieldState.error] : undefined} className="text-xs" />
         </Field>
       )}
     />
+  );
+}
+
+/**
+ * The item's own details as name and value rows ("Value / Rating": "110 ohm"). A parts list
+ * import fills them from its extra columns; here they can be added, changed or removed.
+ */
+function DetailsEditor({ control }: { control: ItemControl }) {
+  const { fields, append, remove } = useFieldArray({ control, name: "attributes" });
+  return (
+    <div className="space-y-2.5">
+      {fields.length ? (
+        <ul className="space-y-2.5" aria-label="Details">
+          {fields.map((f, index) => (
+            <li key={f.id} className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-start gap-2">
+              <Controller
+                control={control}
+                name={`attributes.${index}.label`}
+                render={({ field, fieldState }) => (
+                  <Field data-invalid={fieldState.invalid || undefined} className="gap-1">
+                    <Input
+                      {...field}
+                      value={(field.value as string | undefined) ?? ""}
+                      placeholder="Value / Rating"
+                      aria-label={`Detail ${index + 1} name`}
+                      aria-invalid={fieldState.invalid}
+                    />
+                    <FieldError errors={fieldState.error ? [fieldState.error] : undefined} className="text-xs" />
+                  </Field>
+                )}
+              />
+              <Controller
+                control={control}
+                name={`attributes.${index}.value`}
+                render={({ field, fieldState }) => (
+                  <Field data-invalid={fieldState.invalid || undefined} className="gap-1">
+                    <Input
+                      {...field}
+                      value={(field.value as string | undefined) ?? ""}
+                      placeholder="110 ohm, 5V DC"
+                      aria-label={`Detail ${index + 1} value`}
+                      aria-invalid={fieldState.invalid}
+                    />
+                    <FieldError errors={fieldState.error ? [fieldState.error] : undefined} className="text-xs" />
+                  </Field>
+                )}
+              />
+              <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} aria-label={`Remove detail ${index + 1}`}>
+                <X />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">None yet. Add things like value or rating, mounting type, size or model.</p>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => append({ label: "", value: "" })}
+        disabled={fields.length >= MAX_ATTRIBUTES}
+      >
+        <Plus /> Add detail
+      </Button>
+    </div>
   );
 }
 
@@ -116,6 +205,7 @@ export function ItemForm({
   template,
   categories,
   vendors,
+  subcategories = [],
   defaultCategoryId,
   onDone,
   onCancel,
@@ -124,6 +214,8 @@ export function ItemForm({
   template?: ItemFormRecord | null;
   categories: CategoryOption[];
   vendors: string[];
+  /** Subcategories already in use, offered as suggestions. */
+  subcategories?: string[];
   defaultCategoryId?: string;
   onDone: (id: string) => void;
   onCancel: () => void;
@@ -134,7 +226,12 @@ export function ItemForm({
   const [skuTouched, setSkuTouched] = useState(isEdit);
   // What the form was filled with, fixed at mount: the item prop can refresh while the form stays
   // open, and the server compares against these to leave a purchase made meanwhile in place.
-  const [loaded] = useState(() => ({ vendor: item?.vendor ?? null, purchaseDate: item?.purchaseDate ?? null }));
+  const [loaded] = useState(() => ({
+    vendor: item?.vendor ?? null,
+    purchaseDate: item?.purchaseDate ?? null,
+    subcategory: item?.subcategory ?? null,
+    attributes: (item?.attributes ?? []).map((a) => ({ ...a })),
+  }));
 
   const form = useForm<ItemFormInput, unknown, ItemFormValues>({
     resolver: zodResolver(itemFormSchema),
@@ -254,6 +351,14 @@ export function ItemForm({
               options={INVENTORY_UNITS.map((u) => ({ value: u.value, label: u.label }))}
             />
           </div>
+          <SuggestField
+            control={control}
+            name="subcategory"
+            label="Subcategory"
+            placeholder="Relay Driver Module"
+            suggestions={subcategories}
+            description="Optional. A finer group inside the category."
+          />
           <div className="space-y-1.5">
             <div className="flex items-end gap-2">
               <TextField
@@ -293,10 +398,18 @@ export function ItemForm({
             <TextField control={control} name="location" label="Storage location" placeholder="Rack B, shelf 3" />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <VendorField control={control} vendors={vendors} />
+            <SuggestField control={control} name="vendor" label="Vendor" placeholder="Who you buy it from" suggestions={vendors} />
             <DateField control={control} name="purchaseDate" label="Purchase date" clearable />
           </div>
           <TextareaField control={control} name="description" label="Description" rows={3} placeholder="Grade, size, finish, supplier notes" />
+        </FormSection>
+
+        <FormSection
+          title="Details"
+          icon={<ListPlus />}
+          description="Specifications of this part. Two items may share a name when a detail such as the value or size tells them apart."
+        >
+          <DetailsEditor control={control} />
         </FormSection>
 
         {isEdit ? (

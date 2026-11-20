@@ -21,6 +21,7 @@ const STATUS: Record<PreviewRow["status"], { label: string; tone: Tone }> = {
 const ACTION: Record<NonNullable<PreviewRow["item"]>["action"], string> = {
   create: "New item",
   purchase: "Adds stock",
+  update: "Fills details",
   skip: "No change",
 };
 
@@ -32,15 +33,22 @@ export function PreviewTable({
   kind,
   rows,
   mappedKeys,
+  detailLabels = [],
   importDuplicates,
 }: {
   kind: CsvImportKind;
   rows: PreviewRow[];
   mappedKeys: string[];
+  /** Items: columns kept as details, shown after the fields under their own headers. */
+  detailLabels?: string[];
   importDuplicates: boolean;
 }) {
   const [shown, setShown] = useState(PAGE);
-  const columns = CSV_FIELDS[kind].filter((f) => mappedKeys.includes(f.key) || (kind === "items" && f.key === "sku"));
+  // Fields in file-independent order, then each detail column ("detail:<header>").
+  const columns = [
+    ...CSV_FIELDS[kind].filter((f) => mappedKeys.includes(f.key) || (kind === "items" && f.key === "sku")).map((f) => ({ key: f.key, label: f.label })),
+    ...detailLabels.map((label) => ({ key: `detail:${label}`, label })),
+  ];
   const visible = rows.slice(0, shown);
 
   if (!rows.length) {
@@ -141,7 +149,7 @@ export function PreviewTable({
   );
 }
 
-const MONEY = new Set(["amount", "taxableAmount", "cgst", "sgst", "igst", "cess", "unitPrice", "quantity", "minStock"]);
+const MONEY = new Set(["amount", "taxableAmount", "cgst", "sgst", "igst", "cess", "gstTotal", "unitPrice", "quantity", "minStock"]);
 const isMoney = (key: string) => MONEY.has(key);
 
 function Th({ className, children }: { className?: string; children: React.ReactNode }) {

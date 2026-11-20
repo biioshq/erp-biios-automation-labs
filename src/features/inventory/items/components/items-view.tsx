@@ -63,11 +63,14 @@ export function ItemsView({
   data,
   categories,
   vendors,
+  subcategories = [],
   layout,
 }: {
   data: Paginated<ItemRow>;
   categories: CategoryOption[];
   vendors: string[];
+  /** Subcategories in use, for the filter and the form's suggestions. */
+  subcategories?: string[];
   layout: Layout;
 }) {
   const router = useRouter();
@@ -190,9 +193,18 @@ export function ItemsView({
         title: "Category",
         options: [{ value: "none", label: "Uncategorized" }, ...categories.map((c) => ({ value: c.value, label: c.label }))],
       },
+      ...(subcategories.length
+        ? [
+            {
+              key: "subcategory",
+              title: "Subcategory",
+              options: [{ value: "none", label: "No subcategory" }, ...subcategories.map((s) => ({ value: s, label: s }))],
+            },
+          ]
+        : []),
       { key: "vendor", title: "Vendor", options: vendors.map((v) => ({ value: v, label: v })) },
     ],
-    [categories, vendors],
+    [categories, vendors, subcategories],
   );
 
   const layoutToggle = (
@@ -265,7 +277,10 @@ export function ItemsView({
             <ItemThumb src={row.original.photoUrl} name={row.original.name} size="xs" />
             <div className="min-w-0">
               <p className="truncate font-medium">{row.original.name}</p>
-              <p className="truncate font-mono text-[11px] text-muted-foreground">{row.original.sku}</p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                <span className="font-mono">{row.original.sku}</span>
+                {row.original.variant ? <span> · {row.original.variant}</span> : null}
+              </p>
             </div>
           </div>
         ),
@@ -276,15 +291,19 @@ export function ItemsView({
         meta: { label: "Category" },
         header: "Category",
         enableSorting: false,
-        cell: ({ row }) =>
-          row.original.category ? (
-            <span className="flex min-w-28 items-center gap-2 text-sm">
-              <span className="size-2 shrink-0 rounded-full" style={{ background: row.original.category.color }} />
-              <span className="truncate">{row.original.category.name}</span>
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">Uncategorized</span>
-          ),
+        cell: ({ row }) => (
+          <div className="min-w-28 max-w-56">
+            {row.original.category ? (
+              <span className="flex items-center gap-2 text-sm">
+                <span className="size-2 shrink-0 rounded-full" style={{ background: row.original.category.color }} />
+                <span className="truncate">{row.original.category.name}</span>
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">Uncategorized</span>
+            )}
+            {row.original.subcategory ? <p className="truncate pl-4 text-[11px] text-muted-foreground">{row.original.subcategory}</p> : null}
+          </div>
+        ),
       },
       {
         id: "available",
@@ -447,6 +466,7 @@ export function ItemsView({
             template={fromId ? template : null}
             categories={categories}
             vendors={vendors}
+            subcategories={subcategories}
             onDone={() => setPanel(null)}
             onCancel={() => setPanel(null)}
           />
@@ -466,6 +486,7 @@ export function ItemsView({
             item={record}
             categories={categories}
             vendors={vendors}
+            subcategories={subcategories}
             onDone={() => {
               setRecord(null);
               setPanel(null);
@@ -505,7 +526,14 @@ function ItemMobileRow({ item }: { item: ItemRow }) {
                 <span className="truncate">{item.category.name}</span>
               </>
             ) : null}
+            {item.subcategory ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="truncate">{item.subcategory}</span>
+              </>
+            ) : null}
           </p>
+          {item.variant ? <p className="truncate text-[11px] text-muted-foreground">{item.variant}</p> : null}
         </div>
         <StockStatusBadge status={item.status} />
       </div>

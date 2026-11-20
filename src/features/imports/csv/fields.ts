@@ -3,6 +3,9 @@
  * templates. Client-safe and pure: the import panel and the server share it.
  */
 
+import { INVENTORY_UNITS } from "@/lib/constants";
+import { UNIT_ALIASES, matchChoice, parseDateCell, parseMoneyCell, parseNumberCell } from "./values";
+
 export const CSV_IMPORT_KINDS = ["expenses", "income", "items"] as const;
 export type CsvImportKind = (typeof CSV_IMPORT_KINDS)[number];
 
@@ -16,7 +19,25 @@ export type CsvField = {
   hint?: string;
   /** The value in the template's example row. */
   example: string;
+  /** Headers matching this are never auto-mapped to the field ("GST %" or "GST rate" is not an amount). */
+  skipHeader?: RegExp;
+  /**
+   * What a cell of this field looks like. A column whose header matches but whose cells mostly do
+   * not ("Units" holding "V, mm" in a parts list) is not mapped to the field by its header alone.
+   */
+  accepts?: (cell: string) => boolean;
 };
+
+const isNumber = (cell: string) => parseNumberCell(cell).value !== undefined;
+const isMoney = (cell: string) => parseMoneyCell(cell).value !== undefined;
+const isDate = (cell: string) => parseDateCell(cell).value !== undefined;
+const isUnit = (cell: string) => matchChoice(cell, INVENTORY_UNITS, UNIT_ALIASES as Record<string, (typeof INVENTORY_UNITS)[number]["value"]>) !== undefined;
+
+/**
+ * Items only: a column with no field of its own is kept on each item as a detail named by its
+ * header ("Mounting Type": "THT"), so nothing in a parts list is lost.
+ */
+export const DETAIL_COLUMN = "__detail";
 
 /** "Amount (₹)" → "amount", "Invoice No." → "invoice no", "HSN/SAC" → "hsn sac". */
 export function normalizeHeader(header: string): string {
@@ -88,6 +109,15 @@ const EXPENSE_FIELDS: CsvField[] = [
   { key: "sgst", label: "SGST", aliases: ["sgst amount", "state tax", "utgst"], example: "900" },
   { key: "igst", label: "IGST", aliases: ["igst amount", "integrated tax"], example: "" },
   { key: "cess", label: "Cess", aliases: ["cess amount"], example: "" },
+  {
+    // One combined tax column, as many bills and sheets have: split like the expense form does.
+    key: "gstTotal",
+    label: "GST total",
+    aliases: ["gst", "gst amount", "total gst", "gst value", "tax", "tax amount", "total tax"],
+    example: "",
+    skipHeader: /%|\brate\b|\bslab\b/i,
+    accepts: isMoney,
+  },
   { key: "hsnSac", label: "HSN/SAC", aliases: ["hsn", "sac", "hsn sac", "hsn code", "sac code", "hsn sac code"], example: "7308" },
   { key: "notes", label: "Notes", aliases: ["note", "remarks", "remark", "comment", "comments"], example: "" },
 ];
@@ -141,17 +171,91 @@ const INCOME_FIELDS: CsvField[] = [
 ];
 
 const ITEM_FIELDS: CsvField[] = [
-  { key: "name", label: "Name", required: true, aliases: ["item", "item name", "product", "product name", "material", "material name"], example: "MCB 32A double pole" },
-  { key: "sku", label: "SKU", aliases: ["code", "item code", "product code", "part number", "part no", "sku code"], hint: "Left empty, one is made from the name", example: "" },
-  { key: "category", label: "Category", aliases: ["item category", "group", "item group"], hint: "An inventory category name", example: "Electrical" },
-  { key: "unit", label: "Unit", aliases: ["uom", "units", "unit of measure"], hint: "pcs, set, box, kg, g, m, ft, l, roll, sheet, pair", example: "pcs" },
-  { key: "minStock", label: "Min stock", aliases: ["minimum stock", "min qty", "minimum quantity", "reorder level", "reorder point", "reorder qty"], example: "5" },
+  {
+    key: "name",
+    label: "Name",
+    required: true,
+    aliases: ["item", "item name", "product", "product name", "material", "material name", "component", "component name", "part", "part name", "particulars"],
+    example: "MCB 32A double pole",
+  },
+  {
+    key: "sku",
+    label: "SKU",
+    aliases: [
+      "code",
+      "item code",
+      "product code",
+      "part number",
+      "part no",
+      "sku code",
+      "component id",
+      "component code",
+      "part id",
+      "part code",
+      "item id",
+      "id",
+      "mpn",
+      "manufacturer part number",
+    ],
+    hint: "Left empty, one is made from the name",
+    example: "",
+  },
+  { key: "category", label: "Category", aliases: ["item category", "group", "item group", "component category"], hint: "An inventory category name", example: "Electrical" },
+  {
+    key: "subcategory",
+    label: "Subcategory",
+    aliases: ["sub category", "sub-category", "sub group", "subgroup", "item subcategory", "sub type", "subtype"],
+    hint: "A finer group inside the category",
+    example: "Circuit breaker",
+  },
+  {
+    key: "unit",
+    label: "Unit",
+    aliases: ["uom", "units", "unit of measure"],
+    hint: "pcs, set, box, kg, g, m, ft, l, roll, sheet, pair",
+    example: "pcs",
+    accepts: isUnit,
+  },
+  {
+    key: "minStock",
+    label: "Min stock",
+    aliases: ["minimum stock", "min qty", "minimum quantity", "reorder level", "reorder point", "reorder qty"],
+    example: "5",
+    accepts: isNumber,
+  },
   { key: "vendor", label: "Vendor", aliases: ["supplier", "supplier name", "party", "party name", "vendor name"], example: "Sharma Hardware" },
   { key: "location", label: "Location", aliases: ["bin", "rack", "store", "shelf", "storage", "warehouse"], example: "Rack A2" },
-  { key: "description", label: "Description", aliases: ["details", "specification", "specs", "notes"], example: "" },
-  { key: "quantity", label: "Quantity", aliases: ["qty", "opening stock", "opening quantity", "opening qty", "stock", "in stock", "quantity bought"], example: "10" },
-  { key: "unitPrice", label: "Unit price", aliases: ["price", "rate", "cost", "unit cost", "price per unit", "cost per unit", "purchase price"], hint: "Per unit, ₹", example: "450" },
-  { key: "purchaseDate", label: "Purchase date", aliases: ["date", "bought on", "bill date", "purchased on", "date of purchase"], hint: "Empty means today", example: "05/11/2026" },
+  {
+    key: "description",
+    label: "Description",
+    aliases: ["details", "specification", "specifications", "specs", "spec", "notes", "features", "technical details", "technical specifications"],
+    hint: "Specifications or notes",
+    example: "",
+  },
+  {
+    key: "quantity",
+    label: "Quantity",
+    aliases: ["qty", "opening stock", "opening quantity", "opening qty", "stock", "in stock", "quantity bought", "qty in stock", "stock qty", "available qty"],
+    hint: "With no Unit price column: stock on hand at ₹0, no expense",
+    example: "10",
+    accepts: isNumber,
+  },
+  {
+    key: "unitPrice",
+    label: "Unit price",
+    aliases: ["price", "rate", "cost", "unit cost", "price per unit", "cost per unit", "purchase price"],
+    hint: "Per unit, ₹",
+    example: "450",
+    accepts: isMoney,
+  },
+  {
+    key: "purchaseDate",
+    label: "Purchase date",
+    aliases: ["date", "bought on", "bill date", "purchased on", "date of purchase"],
+    hint: "Empty means today",
+    example: "05/11/2026",
+    accepts: isDate,
+  },
   {
     key: "paymentMethod",
     label: "Payment method",
@@ -184,7 +288,7 @@ export const IMPORT_BATCH: Record<CsvImportKind, number> = { expenses: 50, incom
  * The field each column maps to, from its header: exact key, label or alias first. A field is
  * given to one column only (the first that matches), so duplicate headers do not overwrite.
  */
-export function autoMapColumns(kind: CsvImportKind, headers: string[]): (string | null)[] {
+export function autoMapColumns(kind: CsvImportKind, headers: string[], rows?: string[][]): (string | null)[] {
   const fields = CSV_FIELDS[kind];
   const names = new Map<string, string>();
   for (const f of fields) {
@@ -194,16 +298,46 @@ export function autoMapColumns(kind: CsvImportKind, headers: string[]): (string 
     }
   }
   const used = new Set<string>();
-  return headers.map((h) => {
+  return headers.map((h, col) => {
     const n = normalizeHeader(h);
     let key = names.get(n) ?? names.get(n.replace(/\s/g, ""));
     // "Amount Rs", "GST No." and the like: drop a trailing currency word and try again.
     if (!key) key = names.get(n.replace(/\s+(rs|inr|rupees)$/, ""));
+    const field = key ? fields.find((f) => f.key === key) : undefined;
+    if (field?.skipHeader?.test(h)) key = undefined;
+    else if (field?.accepts && rows && !mostlyAccepted(rows, col, field.accepts)) key = undefined;
     if (!key || used.has(key)) return null;
     used.add(key);
     return key;
   });
 }
+
+/** Whether most filled cells of a column (the first 30) look like the field's values. */
+function mostlyAccepted(rows: string[][], col: number, accepts: (cell: string) => boolean): boolean {
+  const cells: string[] = [];
+  for (const r of rows) {
+    const c = (r[col] ?? "").trim();
+    if (c) cells.push(c);
+    if (cells.length >= 30) break;
+  }
+  if (!cells.length) return true;
+  return cells.filter(accepts).length / cells.length >= 0.6;
+}
+
+/**
+ * The mapping a file starts with: columns matched by header and content, and for items every
+ * other named column kept as a detail on the item.
+ */
+export function initialMapping(kind: CsvImportKind, headers: string[], rows: string[][]): (string | null)[] {
+  const mapped = autoMapColumns(kind, headers, rows);
+  if (kind !== "items") return mapped;
+  // Details are visible to everyone who can see inventory, so money and contact columns start
+  // as "Do not import" (the admin can still keep them).
+  return mapped.map((key, i) => key ?? (headers[i]?.trim() && !PRIVATE_HEADER.test(headers[i]!) ? DETAIL_COLUMN : null));
+}
+
+const PRIVATE_HEADER =
+  /\b(price|prices|cost|costs|rate|rates|margin|markup|amount|total|discount|mrp|salary|contact|phone|mobile|email|e-mail|whatsapp|address|gst|tax|pan|bank|account)\b/i;
 
 /** The template file: the header row and one example row. */
 export function templateRows(kind: CsvImportKind): string[][] {
@@ -213,6 +347,7 @@ export function templateRows(kind: CsvImportKind): string[][] {
 
 /** A field's column name for messages ("amount" → "Amount"); keys that are not columns are shown as they are. */
 export function fieldLabel(kind: CsvImportKind, key: string): string {
-  const named: Record<string, string> = { projectId: "Project", categoryId: "Category", gst: "GST", invoice: "Invoice", row: "Row" };
+  const named: Record<string, string> = { projectId: "Project", categoryId: "Category", gst: "GST", invoice: "Invoice", row: "Row", attributes: "Details" };
+  if (key.startsWith("detail:")) return key.slice(7);
   return CSV_FIELDS[kind].find((f) => f.key === key)?.label ?? named[key] ?? key;
 }

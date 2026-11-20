@@ -18,7 +18,18 @@ import { formatCurrency, formatFileSize, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { startOfMonthIST, toDateInput } from "@/lib/dates";
 import { importCsvBatch, previewCsvImport } from "../actions";
-import { CSV_FIELDS, IMPORT_BATCH, KIND_LABELS, MAX_CSV_ROWS, PREVIEW_CHUNK, autoMapColumns, fieldLabel, templateRows, type CsvImportKind } from "../fields";
+import {
+  CSV_FIELDS,
+  DETAIL_COLUMN,
+  IMPORT_BATCH,
+  KIND_LABELS,
+  MAX_CSV_ROWS,
+  PREVIEW_CHUNK,
+  fieldLabel,
+  initialMapping,
+  templateRows,
+  type CsvImportKind,
+} from "../fields";
 import { parseCsv, toCsv } from "../parse";
 import { newCategories, notImportedCsv, notImportedReasons, reviewRows, summarize, willImport } from "../review";
 import type { CsvOptionsInput, CsvRowInput, ImportRowResult, PreviewRow } from "../schemas";
@@ -29,6 +40,8 @@ export type { CsvImportKind } from "../fields";
 
 /** Larger files are refused before reading: 2,000 rows of text fit well inside this. */
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
+/** Excel files are read on the server, so they stay below Vercel's 4.5 MB request limit. */
+const MAX_XLSX_BYTES = 4 * 1024 * 1024;
 
 /**
  * One request stays well under Vercel's request body limit (about 4.5 MB): rows go in a chunk until
@@ -64,7 +77,37 @@ const LIST_HREF: Record<CsvImportKind, string> = {
   items: "/inventory/items",
 };
 
-type LoadedFile = { name: string; size: number; headers: string[]; rows: { line: number; cells: string[] }[] };
+type LoadedFile = {
+  name: string;
+  size: number;
+  headers: string[];
+  rows: { line: number; cells: string[] }[];
+  /** Excel only: the workbook's sheets and the one being imported. */
+  sheets?: string[];
+  sheet?: string;
+};
+
+/** The label a detail column gets on items: its header, or "Column 3" when the header is empty. */
+const detailLabel = (header: string, index: number) => header.trim().replace(/\s+/g, " ") || `Column ${index + 1}`;
+
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/** Reads an Excel workbook on the server (ExcelJS) into the same shape as a parsed CSV. */
+async function readExcel(f: File, kind: CsvImportKind, sheet?: string): Promise<{ headers: string[]; rows: { line: number; cells: string[] }[]; sheets: string[]; sheet: string }> {
+  const form = new FormData();
+  form.append("file", f);
+  form.append("kind", kind);
+  if (sheet) form.append("sheet", sheet);
+  let res: Response;
+  try {
+    res = await fetch("/api/imports/excel", { method: "POST", body: form });
+  } catch {
+    throw new Error("Network error while reading the Excel file. Check your connection and try again.");
+  }
+  const body = (await res.json().catch(() => null)) as ({ error?: string } & Partial<Awaited<ReturnType<typeof readExcel>>>) | null;
+  if (!res.ok || !body?.headers || !body.rows) throw new Error(body?.error ?? `The Excel file could not be read (error ${res.status}).`);
+  return body as Awaited<ReturnType<typeof readExcel>>;
+}
 type Filter = "all" | PreviewRow["status"];
 type Run = { total: number; done: number; results: ImportRowResult[]; createdCategories: string[]; finished: boolean; stopped: boolean; error?: string };
 
@@ -97,10 +140,14 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
   const [preview, setPreview] = useState<PreviewRow[] | null>(null);
   const [createCategories, setCreateCategories] = useState(false);
   const [recordAsPurchases, setRecordAsPurchases] = useState(true);
+  const [renameReusedIds, setRenameReusedIds] = useState(true);
   const [importDuplicates, setImportDuplicates] = useState(false);
   // Item rows from an earlier month would book stock purchase expenses into that month. Old stock
   // may already have been paid and recorded back then, so this needs an explicit yes.
   const [confirmEarlier, setConfirmEarlier] = useState(false);
+  const [readingExcel, setReadingExcel] = useState(false);
+  /** The picked file, kept to read another sheet of the same workbook. */
+  const sourceRef = useRef<File | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
@@ -111,8 +158,16 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
 
   const labels = KIND_LABELS[kind];
   const reviewed = useMemo(
-    () => (preview ? reviewRows(kind, preview, { createCategories, recordAsPurchases }) : null),
-    [kind, preview, createCategories, recordAsPurchases],
+    () => (preview ? reviewRows(kind, preview, { createCategories, recordAsPurchases, renameReusedIds }) : null),
+    [kind, preview, createCategories, recordAsPurchases, renameReusedIds],
+  );
+  /** Rows whose ID another part already has (in the file or in inventory): the tick box only shows then. */
+  const reusedIds = useMemo(
+    () =>
+      kind === "items" && preview
+        ? reviewRows(kind, preview, { createCategories: true, recordAsPurchases, renameReusedIds: true }).filter((r) => r.item?.renamedFrom).length
+        : 0,
+    [kind, preview, recordAsPurchases],
   );
   const monthStart = useMemo(() => toDateInput(startOfMonthIST()), []);
   const today = useMemo(() => toDateInput(new Date()), []);
@@ -123,7 +178,12 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
   const needsEarlierConfirm = kind === "items" && recordAsPurchases && Boolean(summary?.earlier);
   const toCreate = useMemo(() => (preview ? newCategories(preview) : []), [preview]);
   const filtered = useMemo(() => (reviewed ? (filter === "all" ? reviewed : reviewed.filter((r) => r.status === filter)) : []), [reviewed, filter]);
-  const mappedKeys = mapping.filter((m): m is string => Boolean(m));
+  const mappedKeys = mapping.filter((m): m is string => Boolean(m) && m !== DETAIL_COLUMN);
+  /** Items: the headers of the columns kept as details, in file order. */
+  const detailLabels = useMemo(
+    () => (file && kind === "items" ? file.headers.map((h, i) => (mapping[i] === DETAIL_COLUMN ? detailLabel(h, i) : null)).filter((h): h is string => Boolean(h)) : []),
+    [file, kind, mapping],
+  );
   const missingRequired = CSV_FIELDS[kind].filter((f) => f.required && !mappedKeys.includes(f.key));
   const samples = useMemo(
     () => (file ? file.headers.map((_, i) => file.rows.slice(0, 20).find((r) => r.cells[i])?.cells[i] ?? "") : []),
@@ -142,6 +202,7 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
     setImportDuplicates(false);
     setConfirmEarlier(false);
     setCreateCategories(false);
+    setRenameReusedIds(true);
     if (!keepKind) setKind(kinds[0] ?? "expenses");
     if (inputRef.current) inputRef.current.value = "";
   }
@@ -149,7 +210,7 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
   function changeKind(next: CsvImportKind) {
     if (next === kind) return;
     setKind(next);
-    if (file) setMapping(autoMapColumns(next, file.headers));
+    if (file) setMapping(initialMapping(next, file.headers, file.rows.map((r) => r.cells)));
     setPreview(null);
     setCheckError(null);
     setRun(null);
@@ -157,21 +218,25 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
     setImportDuplicates(false);
   }
 
-  async function readFile(f: File | undefined | null) {
+  async function readFile(f: File | undefined | null, sheet?: string) {
     if (!f) return;
     setFileError(null);
     setPreview(null);
     setRun(null);
-    if (/\.(xlsx?|ods|numbers)$/i.test(f.name)) {
-      setFileError("This is a spreadsheet file. Save it as CSV first (File, then Save as or Download, then CSV) and pick that file.");
+    const isExcel = /\.xlsx$/i.test(f.name) || f.type === XLSX_TYPE;
+    if (!isExcel && /\.(xls|xlsm|xlsb|ods|numbers)$/i.test(f.name)) {
+      setFileError("This spreadsheet format cannot be read. Save it as an Excel workbook (.xlsx) or as CSV and pick that file.");
       return;
     }
-    if (f.size > MAX_FILE_BYTES) {
-      setFileError(`This file is ${formatFileSize(f.size)}. Files up to ${formatFileSize(MAX_FILE_BYTES)} can be imported; split it into smaller files.`);
+    const limit = isExcel ? MAX_XLSX_BYTES : MAX_FILE_BYTES;
+    if (f.size > limit) {
+      setFileError(`This file is ${formatFileSize(f.size)}. Files up to ${formatFileSize(limit)} can be imported; split it into smaller files.`);
       return;
     }
     try {
-      const parsed = parseCsv(await f.text());
+      if (isExcel) setReadingExcel(true);
+      const parsed = isExcel ? await readExcel(f, kind, sheet) : { ...parseCsv(await f.text()), sheets: undefined, sheet: undefined };
+      sourceRef.current = f;
       if (!parsed.headers.length || parsed.headers.every((h) => !h)) {
         setFileError("This file is empty. The first line should hold the column names.");
         return;
@@ -184,11 +249,14 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
         setFileError(`This file has ${formatNumber(parsed.rows.length)} rows. Import at most ${formatNumber(MAX_CSV_ROWS)} at a time; split it into smaller files.`);
         return;
       }
-      setFile({ name: f.name, size: f.size, headers: parsed.headers, rows: parsed.rows });
-      setMapping(autoMapColumns(kind, parsed.headers));
-    } catch {
-      setFileError("This file could not be read. Check that it is a CSV file saved as UTF-8.");
+      setFile({ name: f.name, size: f.size, headers: parsed.headers, rows: parsed.rows, sheets: parsed.sheets, sheet: parsed.sheet });
+      setMapping(initialMapping(kind, parsed.headers, parsed.rows.map((r) => r.cells)));
+    } catch (error) {
+      setFileError(
+        isExcel && error instanceof Error ? error.message : "This file could not be read. Check that it is a CSV file saved as UTF-8, or an Excel workbook (.xlsx).",
+      );
     } finally {
+      setReadingExcel(false);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -199,12 +267,16 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
       .filter((r) => !lines || lines.has(r.line))
       .map((r) => {
         const values: Record<string, string> = {};
+        const extras: { label: string; value: string }[] = [];
         mapping.forEach((key, i) => {
           // Clipped to what a request takes: the field's own limit (4,000 or less) then names the problem on the row.
           const cell = r.cells[i]?.slice(0, 5000);
-          if (key && cell) values[key] = cell;
+          if (!key || !cell) return;
+          if (key === DETAIL_COLUMN) {
+            if (cell.trim() && extras.length < 60) extras.push({ label: detailLabel(file.headers[i] ?? "", i).slice(0, 200), value: cell });
+          } else values[key] = cell;
         });
-        return { line: r.line, values };
+        return kind === "items" && extras.length ? { line: r.line, values, extras } : { line: r.line, values };
       });
   }
 
@@ -214,8 +286,29 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
     return [...new Set(skus)];
   }
 
+  /** Items: each category name in the file and how often it appears, so the server reads a misspelt one as the usual one. */
+  function fileCategories(rows: CsvRowInput[]): { name: string; count: number }[] {
+    const counts = new Map<string, { name: string; count: number }>();
+    for (const r of rows) {
+      const name = r.values.category?.trim().replace(/\s+/g, " ").slice(0, 200);
+      if (!name) continue;
+      const key = name.toLowerCase();
+      counts.set(key, { name: counts.get(key)?.name ?? name, count: (counts.get(key)?.count ?? 0) + 1 });
+    }
+    return [...counts.values()].slice(0, 2000);
+  }
+
   function options(extra: Partial<CsvOptionsInput> = {}): CsvOptionsInput {
-    return { defaultPaymentMethod: defaultPayment, recordAsPurchases, createCategories, importDuplicates, reservedSkus: [], ...extra };
+    return {
+      defaultPaymentMethod: defaultPayment,
+      recordAsPurchases,
+      createCategories,
+      importDuplicates,
+      renameReusedIds,
+      priceColumn: mappedKeys.includes("unitPrice"),
+      reservedSkus: [],
+      ...extra,
+    };
   }
 
   async function check() {
@@ -226,12 +319,17 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
     setFilter("all");
     setChecking({ done: 0, total: rows.length });
     const explicit = fileSkus(rows);
+    const categoryCounts = fileCategories(rows);
     const out: PreviewRow[] = [];
     let done = 0;
     try {
       for (const chunk of chunkRows(rows, PREVIEW_CHUNK)) {
         const suggested = out.filter((r) => r.item?.action === "create" && !r.item.skuGiven).map((r) => r.item!.sku);
-        const result = await previewCsvImport({ kind, rows: chunk, options: options({ reservedSkus: [...explicit, ...suggested].slice(0, 4000) }) });
+        const result = await previewCsvImport({
+          kind,
+          rows: chunk,
+          options: options({ reservedSkus: [...explicit, ...suggested].slice(0, 4000), fileCategories: kind === "items" ? categoryCounts : [] }),
+        });
         if (!result.ok) {
           setCheckError(result.error);
           return;
@@ -253,12 +351,15 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
   async function startImport() {
     if (!reviewed || !file) return;
     const lines = new Set(reviewed.filter((r) => willImport(r, importDuplicates)).map((r) => r.line));
-    const rows = rowsFor(lines);
+    // A part given a new code in the review (its ID belongs to another part) is saved with that code.
+    const renamed = new Map(reviewed.filter((r) => r.item?.renamedFrom).map((r) => [r.line, r.item!.sku]));
+    const rows = rowsFor(lines).map((r) => (renamed.has(r.line) ? { ...r, values: { ...r.values, sku: renamed.get(r.line)! } } : r));
+    const categoryCounts = kind === "items" ? fileCategories(rowsFor()) : [];
     if (!rows.length) return;
     stopRef.current = false;
     setStopping(false);
     const chunks = chunkRows(rows, IMPORT_BATCH[kind]);
-    const reservedSkus = kind === "items" ? fileSkus(rows).slice(0, 4000) : [];
+    const reservedSkus = kind === "items" ? fileSkus(rowsFor()).concat([...renamed.values()]).slice(0, 4000) : [];
     let state: Run = { total: rows.length, done: 0, results: [], createdCategories: [], finished: false, stopped: false };
     setRun(state);
     for (let ci = 0; ci < chunks.length; ci++) {
@@ -269,7 +370,7 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
       const chunk = chunks[ci];
       let failed: { message: string; maybeSaved: boolean } | null = null;
       try {
-        const result = await importCsvBatch({ kind, rows: chunk, options: options({ reservedSkus }) });
+        const result = await importCsvBatch({ kind, rows: chunk, options: options({ reservedSkus, fileCategories: categoryCounts }) });
         if (result.ok) {
           state = {
             ...state,
@@ -447,10 +548,17 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
       {/* Step 1: kind, template and file. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         {kindPicker ?? <span />}
-        <Button type="button" variant="outline" size="sm" onClick={() => download(`${kind}-template.csv`, toCsv(templateRows(kind)))}>
-          <Download />
-          {kinds.length > 1 ? `${labels.title} template` : "Template"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" asChild>
+            <a href={`/api/imports/excel?kind=${kind}`} download>
+              <Download />
+              {kinds.length > 1 ? `${labels.title} template (Excel)` : "Template (Excel)"}
+            </a>
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => download(`${kind}-template.csv`, toCsv(templateRows(kind)))}>
+            CSV template
+          </Button>
+        </div>
       </div>
 
       {!file ? (
@@ -476,13 +584,19 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
             <span className="flex size-10 items-center justify-center rounded-full border bg-card shadow-card transition-transform group-hover:-translate-y-0.5">
               <Upload className="size-4.5 text-muted-foreground group-hover:text-brand-ink" />
             </span>
-            <span className="text-sm font-medium">Choose a CSV file or drop it here</span>
+            <span className="text-sm font-medium">{readingExcel ? "Reading the Excel file…" : "Choose a CSV or Excel file, or drop it here"}</span>
             <span className="max-w-md text-xs text-muted-foreground">
               Up to {formatNumber(MAX_CSV_ROWS)} {labels.many}. Needs {CSV_FIELDS[kind].filter((f) => f.required).map((f) => f.label.toLowerCase()).join(", ")}
               {kind === "items" ? "; quantity and unit price add stock" : ""}.
             </span>
           </button>
-          <input ref={inputRef} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={(e) => void readFile(e.target.files?.[0])} />
+          <input
+            ref={inputRef}
+            type="file"
+            accept={`.csv,.xlsx,text/csv,text/plain,${XLSX_TYPE}`}
+            className="hidden"
+            onChange={(e) => void readFile(e.target.files?.[0])}
+          />
           {fileError ? <p className="text-sm text-danger" role="alert">{fileError}</p> : null}
         </div>
       ) : (
@@ -496,9 +610,29 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
               {plural(file.rows.length, "row", "rows")} · {plural(file.headers.length, "column", "columns")} · {formatFileSize(file.size)}
             </p>
           </div>
+          {file.sheets && file.sheets.length > 1 ? (
+            <Select value={file.sheet} onValueChange={(s) => void readFile(sourceRef.current, s)} disabled={Boolean(checking) || readingExcel}>
+              <SelectTrigger size="sm" className="w-auto max-w-56" aria-label="Sheet to import">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {file.sheets.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    Sheet: {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
           <Button type="button" variant="ghost" size="sm" onClick={() => reset()} disabled={Boolean(checking)}>
             Choose another file
           </Button>
+          {/* A failed sheet switch keeps the current sheet; say why. */}
+          {fileError ? (
+            <p className="w-full text-sm text-danger" role="alert">
+              {fileError}
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -532,7 +666,7 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
 
           {checkError ? <p className="text-sm text-danger" role="alert">{checkError}</p> : null}
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" onClick={() => void check()} disabled={Boolean(checking) || missingRequired.length > 0}>
+            <Button type="button" onClick={() => void check()} disabled={Boolean(checking) || readingExcel || missingRequired.length > 0}>
               {checking ? <Spinner /> : null}
               {checking ? `Checking ${formatNumber(checking.done)} of ${formatNumber(checking.total)}…` : `Check ${plural(file.rows.length, "row", "rows")}`}
             </Button>
@@ -572,7 +706,14 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
             {kind === "items" ? <FilterItem value="skip" label="Nothing to add" count={summary.skip} /> : null}
           </ToggleGroup>
 
-          <PreviewTable key={filter} kind={kind} rows={filtered} mappedKeys={mappedKeys} importDuplicates={importDuplicates} />
+          <PreviewTable
+            key={filter}
+            kind={kind}
+            rows={filtered}
+            mappedKeys={mappedKeys}
+            detailLabels={detailLabels}
+            importDuplicates={importDuplicates}
+          />
 
           <div className="space-y-3 rounded-lg border bg-surface/40 p-3">
             {kind === "items" ? (
@@ -586,6 +727,18 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
                     </span>
                   </span>
                 </label>
+                {reusedIds ? (
+                  <label className="flex items-start gap-3 text-sm">
+                    <Checkbox checked={renameReusedIds} onCheckedChange={(c) => setRenameReusedIds(c === true)} className="mt-0.5" />
+                    <span>
+                      <span className="font-medium">Give reused IDs a new code ({formatNumber(reusedIds)})</span>
+                      <span className="block text-xs text-muted-foreground">
+                        These parts have an ID that another part already has. The first part keeps it; each later one is saved with the new code shown
+                        in its SKU column. Off: they are left out until the file gives each part its own ID.
+                      </span>
+                    </span>
+                  </label>
+                ) : null}
                 {toCreate.length ? (
                   <label className="flex items-start gap-3 text-sm">
                     <Checkbox checked={createCategories} onCheckedChange={(c) => setCreateCategories(c === true)} className="mt-0.5" />
@@ -622,9 +775,9 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
               {summary.ready + (importDuplicates ? summary.duplicate : 0) === 0
                 ? "No rows are ready to import."
                 : kind === "items"
-                  ? `${plural(summary.creates, "new item", "new items")} and ${plural(summary.purchases, "stock purchase", "stock purchases")}. ${
-                      summary.amount ? `This adds ${formatCurrency(summary.amount)} of expenses.` : "This adds no expenses."
-                    }`
+                  ? `${plural(summary.creates, "new item", "new items")} and ${plural(summary.purchases, "stock purchase", "stock purchases")}${
+                      summary.updates ? `; ${plural(summary.updates, "item gets", "items get")} details it lacked` : ""
+                    }. ${summary.amount ? `This adds ${formatCurrency(summary.amount)} of expenses.` : "This adds no expenses."}`
                   : `${plural(summary.ready + (importDuplicates ? summary.duplicate : 0), labels.one, labels.many)} totalling ${formatCurrency(summary.amount)}.`}
             </p>
             {summary.earlier ? (

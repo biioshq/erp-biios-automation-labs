@@ -8,7 +8,7 @@ import { parseListParams } from "@/lib/list-params";
 import { formatNumber } from "@/lib/format";
 import { getInventoryCategoryOptions } from "@/server/lookups";
 import { inventorySnapshot } from "@/server/services/metrics";
-import { getItemVendors, listItems } from "@/features/inventory/items/queries";
+import { getItemSubcategories, getItemVendors, listItems } from "@/features/inventory/items/queries";
 import { ITEM_FILTER_KEYS, ITEM_SORT_KEYS } from "@/features/inventory/items/schemas";
 import { ItemsView } from "@/features/inventory/items/components/items-view";
 import { requireUser } from "@/server/auth/session";
@@ -25,10 +25,11 @@ export default async function ItemsPage({ searchParams }: PageProps<"/inventory/
     defaultSort: { id: "name", desc: false },
   });
   const layout = sp.layout === "cards" ? "cards" : "table";
-  const [data, categories, vendors, snapshot] = await Promise.all([
+  const [data, categories, vendors, subcategories, snapshot] = await Promise.all([
     listItems(params),
     getInventoryCategoryOptions(),
     getItemVendors(),
+    getItemSubcategories(),
     inventorySnapshot(),
   ]);
 
@@ -59,7 +60,7 @@ export default async function ItemsPage({ searchParams }: PageProps<"/inventory/
           </>
         }
       />
-      <ItemsView data={data} categories={categories} vendors={vendors} layout={layout} />
+      <ItemsView data={data} categories={categories} vendors={vendors} subcategories={subcategories} layout={layout} />
     </Page>
   );
 }

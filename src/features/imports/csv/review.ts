@@ -8,8 +8,9 @@
 import type { CsvImportKind } from "./fields";
 import type { ImportRowResult, PreviewRow } from "./schemas";
 import { toCsv } from "./parse";
+import { partDifference } from "@/features/inventory/items/attributes";
 
-export type ReviewOptions = { createCategories: boolean; recordAsPurchases: boolean };
+export type ReviewOptions = { createCategories: boolean; recordAsPurchases: boolean; renameReusedIds: boolean };
 
 /** A preview row with the in-file checks and the options applied. */
 export function reviewRows(kind: CsvImportKind, rows: PreviewRow[], options: ReviewOptions): PreviewRow[] {
@@ -31,60 +32,100 @@ function reviewFinance(rows: PreviewRow[]): PreviewRow[] {
 }
 
 function reviewItems(rows: PreviewRow[], options: ReviewOptions): PreviewRow[] {
-  const byName = new Map<string, { line: number; sku: string }>();
-  const bySku = new Map<string, { line: number; nameKey: string }>();
+  type Part = { line: number; sku: string; fileSku: string; traits: NonNullable<PreviewRow["item"]>["traits"] };
+  /** New parts the file creates, by name: two with one name are different parts when a detail differs. */
+  const parts = new Map<string, Part[]>();
+  /** SKUs given to new parts so far, with the row and name that has each. */
+  const bySku = new Map<string, { line: number; name: string }>();
   /** Stock added by earlier rows (item, day, quantity, price), as the import skips a repeat of it. */
   const stock = new Map<string, number>();
   return rows.map((row) => {
     const item = row.item;
     if (!item) return row;
     let out: PreviewRow = { ...row, item: { ...item }, errors: [...row.errors], notes: { ...row.notes }, shown: { ...row.shown } };
+    /** The part this row's stock goes to, so two different parts with one name never look like the same stock. */
+    let partRef = item.existing?.id;
     if (row.status !== "error" && item.action === "create") {
-      const first = byName.get(item.nameKey);
-      const skuOwner = item.skuGiven ? bySku.get(item.sku) : undefined;
-      if (first && item.skuGiven && item.sku !== first.sku) {
+      const fileSku = item.skuGiven ? item.sku : "";
+      const same = (parts.get(item.nameKey) ?? []).filter((p) => !partDifference(item.traits, p.traits));
+      const first = same[0];
+      if (same.length > 1) {
+        // The import would not know which one this row means.
+        out.status = "error";
+        out.errors.push({ field: "name", message: `Rows ${same.map((p) => p.line).join(" and ")} are parts named this way. Add a SKU or the detail that tells them apart.` });
+      } else if (first && fileSku && fileSku !== first.sku) {
         // The import would find the item by name and refuse the other SKU, so say so now.
         out.status = "error";
-        out.errors.push({ field: "sku", message: `The item in row ${first.line} has SKU ${first.sku}` });
+        out.errors.push({ field: "sku", message: `The same part in row ${first.line} has SKU ${first.sku}` });
       } else if (first) {
-        // The earlier row creates this item; this one adds its stock to it (or has nothing to add).
+        partRef = `row:${first.line}`;
+        // The earlier row creates this part; this one adds its stock to it (or has nothing to add).
         out.item!.sku = first.sku;
         out.shown.sku = first.sku;
         delete out.notes.sku;
-        if (item.quantity > 0) {
+        if (item.quantity > 0 && item.noPrice) {
+          out.status = "error";
+          out.errors.push({ field: "quantity", message: `Same part as row ${first.line}. Without a unit price this quantity cannot be added; add it to row ${first.line}.` });
+        } else if (item.quantity > 0) {
           out.item!.action = "purchase";
           out.reason = `Adds stock to the item created in row ${first.line}`;
         } else {
           out = { ...out, status: "skip", reason: `Same item as row ${first.line}, with no quantity to add` };
           out.item!.action = "skip";
         }
-      } else if (skuOwner && skuOwner.nameKey !== item.nameKey) {
-        out.status = "error";
-        out.errors.push({ field: "sku", message: `SKU ${item.sku} is also given to another item in row ${skuOwner.line}` });
       } else {
-        byName.set(item.nameKey, { line: row.line, sku: item.sku });
-        if (item.sku) bySku.set(item.sku, { line: row.line, nameKey: item.nameKey });
+        // A new part. Its SKU may be one another part has: in inventory (found by the check) or in an earlier row.
+        const owner = fileSku ? bySku.get(fileSku) : undefined;
+        const takenBy = item.skuTakenBy ?? (owner ? `${owner.name} in row ${owner.line}` : undefined);
+        if (takenBy) {
+          const alt = options.renameReusedIds ? item.altSkus.find((s) => !bySku.has(s)) : undefined;
+          if (alt) {
+            out.item!.sku = alt;
+            out.item!.renamedFrom = fileSku;
+            out.shown.sku = alt;
+            out.notes.sku = `New code: ${fileSku} is ${takenBy}`;
+          } else {
+            out.status = "error";
+            out.errors.push({
+              field: "sku",
+              message: options.renameReusedIds
+                ? `SKU ${fileSku} is ${takenBy}. Give this part its own SKU.`
+                : `SKU ${fileSku} is ${takenBy}. Give this part its own SKU, or tick "Give reused IDs a new code".`,
+            });
+          }
+        }
+        partRef = `row:${row.line}`;
+        if (out.status !== "error") {
+          parts.set(item.nameKey, [...(parts.get(item.nameKey) ?? []), { line: row.line, sku: out.item!.sku, fileSku, traits: item.traits }]);
+          if (out.item!.sku) bySku.set(out.item!.sku, { line: row.line, name: row.shown.name || "another part" });
+          // The file's own SKU stays with the first part that has it.
+          if (fileSku && !bySku.has(fileSku)) bySku.set(fileSku, { line: row.line, name: row.shown.name || "another part" });
+        }
       }
     }
     if (item.newCategory && out.item!.action === "create" && !options.createCategories && out.status !== "error") {
       out.status = "error";
       out.errors.push({ field: "category", message: `No category named ${item.newCategory}. Tick "Create the new categories" or add it on the Categories page.` });
     }
+    // The check keys new items by name; key them by the part instead (see partRef).
+    if (partRef && !item.existing) out.dupKeys = out.dupKeys.map((k) => k.replace(`p|new:${item.nameKey}|`, `p|${partRef}|`));
     const a = out.item!.action;
-    if (out.status === "ready" && a !== "skip") {
+    if (out.status === "ready" && (a === "create" || a === "purchase")) {
       const earlier = out.dupKeys.map((k) => stock.get(k)).find((l) => l !== undefined);
       if (earlier !== undefined) {
         out.status = "duplicate";
         out.reason = `Same stock as row ${earlier} of this file (same item, day, quantity and price)`;
       }
     }
-    if ((out.status === "ready" || out.status === "duplicate") && a !== "skip") {
+    if ((out.status === "ready" || out.status === "duplicate") && (a === "create" || a === "purchase")) {
       for (const k of out.dupKeys) if (!stock.has(k)) stock.set(k, row.line);
     }
-    // A purchase always books its cost; a new item's opening stock only when booked as a purchase.
-    out.amount = a === "purchase" ? item.cost : a === "create" && options.recordAsPurchases ? item.cost : 0;
-    if (a === "create" && item.quantity > 0 && !options.recordAsPurchases) out.notes.quantity = "Stock on hand, no expense";
-    else delete out.notes.quantity;
+    // A purchase always books its cost; a new item's opening stock only when booked as a purchase
+    // and priced (stock without a price is on hand at ₹0).
+    out.amount = a === "purchase" ? item.cost : a === "create" && options.recordAsPurchases && !item.noPrice ? item.cost : 0;
+    if (a === "create" && item.quantity > 0 && item.noPrice) out.notes.quantity = "Stock on hand at ₹0, no expense";
+    else if (a === "create" && item.quantity > 0 && !options.recordAsPurchases) out.notes.quantity = "Stock on hand, no expense";
+    else if (out.notes.quantity !== "Not added: no unit price") delete out.notes.quantity;
     return out;
   });
 }
@@ -107,6 +148,8 @@ export type ReviewSummary = {
   amount: number;
   creates: number;
   purchases: number;
+  /** Items already in inventory that get details they lacked. */
+  updates: number;
   /** Rows to import that book money on a day before `monthStart`, so they change those months' totals. */
   earlier: number;
   /** Rows to import dated after `today`, often a typo in the year. */
@@ -115,7 +158,7 @@ export type ReviewSummary = {
 
 /** Counts for the preview, and the money the rows to import record. */
 export function summarize(rows: PreviewRow[], importDuplicates: boolean, monthStart = "", today = ""): ReviewSummary {
-  const s: ReviewSummary = { ready: 0, error: 0, duplicate: 0, skip: 0, amount: 0, creates: 0, purchases: 0, earlier: 0, later: 0 };
+  const s: ReviewSummary = { ready: 0, error: 0, duplicate: 0, skip: 0, amount: 0, creates: 0, purchases: 0, updates: 0, earlier: 0, later: 0 };
   for (const r of rows) {
     s[r.status]++;
     if (willImport(r, importDuplicates)) {
@@ -124,6 +167,7 @@ export function summarize(rows: PreviewRow[], importDuplicates: boolean, monthSt
       if (r.date && today && r.date > today) s.later++;
       if (r.item?.action === "create") s.creates++;
       if (r.item?.action === "purchase") s.purchases++;
+      if (r.item?.action === "update") s.updates++;
     }
   }
   s.amount = Math.round(s.amount * 100) / 100;

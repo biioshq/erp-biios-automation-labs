@@ -24,6 +24,10 @@ import {
 import { getItemForm } from "./queries";
 import { copyBaseName, copyName, exactNamePattern, matchItemName, namePrefixPattern, normalizeItemName, normalizeSku } from "./matching";
 import type { ItemFormRecord, SimilarItem } from "./types";
+import { cleanAttributes, partDifference, type ItemAttribute, type PartTraits } from "./attributes";
+
+const sameDetails = (a: ItemAttribute[], b: ItemAttribute[]) =>
+  a.length === b.length && a.every((x, i) => x.label === b[i]!.label && x.value === b[i]!.value);
 import { removeFile } from "@/features/files/server";
 
 /** Anything that touches stock also moves Finance numbers (purchase expenses, inventory value, GST input credit). */
@@ -51,18 +55,23 @@ async function assertSkuFree(sku: string, exceptId?: string) {
 }
 
 /**
- * One active item per name: adding the same item again would split its stock and history in two,
- * so the form points to Buy more instead. Archived items do not count. Checked in code because
- * existing data may already hold duplicates, so there is no unique index on the name.
+ * One active item per part: adding the same item again would split its stock and history in two,
+ * so the form points to Buy more instead. Items may share a name only when a detail tells them
+ * apart (a 110 ohm and a 180K ohm "Metal film resistor": attributes.ts). Archived items do not
+ * count. Checked in code because existing data may already hold duplicates, so there is no
+ * unique index on the name.
  */
-async function assertNameFree(name: string, exceptId?: string) {
-  const clash = await InventoryItem.findOne(
+async function assertNameFree(name: string, traits: PartTraits, exceptId?: string) {
+  const sameName = await InventoryItem.find(
     { name: exactNamePattern(name), archivedAt: null, ...(exceptId ? { _id: { $ne: exceptId } } : {}) },
-    { name: 1, sku: 1 },
+    { name: 1, sku: 1, subcategory: 1, attributes: 1 },
   ).lean();
+  const clash = sameName.find((i) => !partDifference(traits, i));
   if (clash) {
     throw new AppError(
-      `${clash.name} (${clash.sku}) is already in inventory. Use Buy more on that item to add stock instead of adding it again.`,
+      sameName.length > 1 || (traits.attributes ?? []).length || traits.subcategory
+        ? `${clash.name} (${clash.sku}) is already in inventory with the same details. Use Buy more on that item, or set the detail that tells this part apart (such as its value or size).`
+        : `${clash.name} (${clash.sku}) is already in inventory. Use Buy more on that item to add stock instead of adding it again.`,
       "conflict",
       { name: ["Already in inventory"] },
     );
@@ -74,6 +83,7 @@ function descriptiveFields(v: ItemFormValues) {
     name: v.name,
     sku: v.sku,
     category: v.categoryId ? new Types.ObjectId(v.categoryId) : undefined,
+    subcategory: v.subcategory,
     unit: v.unit,
     minStock: v.minStock ?? 0,
     vendor: v.vendor,
@@ -87,9 +97,16 @@ export const createItem = defineAction(
   itemFormSchema,
   async (input, user) => {
     await assertCategory(input.categoryId);
-    await assertNameFree(input.name);
+    await assertNameFree(input.name, input);
     await assertSkuFree(input.sku);
-    const created = await InventoryItem.create({ ...descriptiveFields(input), quantity: 0, available: 0, allocated: 0, unitPrice: 0 });
+    const created = await InventoryItem.create({
+      ...descriptiveFields(input),
+      ...(input.attributes?.length ? { attributes: input.attributes } : {}),
+      quantity: 0,
+      available: 0,
+      allocated: 0,
+      unitPrice: 0,
+    });
     const openingQuantity = input.openingQuantity ?? 0;
     if (openingQuantity > 0) {
       try {
@@ -116,22 +133,38 @@ export const updateItem = defineAction(
     const existing = await InventoryItem.findOne({ _id: input.id, archivedAt: null }).lean();
     if (!existing) throw notFound("The inventory item");
     await assertCategory(input.categoryId);
-    // Only a rename is checked, so items that already share a name keep saving as they are.
-    if (normalizeItemName(input.name) !== normalizeItemName(existing.name)) await assertNameFree(input.name, input.id);
-    if (input.sku !== existing.sku) await assertSkuFree(input.sku, input.id);
-
     // Quantities are deliberately absent: they change only through the ledger.
-    const { vendor, purchaseDate, ...fields } = descriptiveFields(input);
-    // A purchase recorded while the form was open sets the item's vendor and purchase date.
-    // A field the user left at its loaded value keeps what is stored now rather than the older copy.
+    const { vendor, purchaseDate, subcategory, ...fields } = descriptiveFields(input);
+    // A purchase recorded while the form was open sets the item's vendor and purchase date, and an
+    // import can fill its details. A field the user left at its loaded value keeps what is stored now
+    // rather than the older copy; a form that did not load the details leaves them alone.
     const loaded = input.loaded;
     const keepVendor = loaded !== undefined && (vendor ?? null) === (loaded.vendor?.trim() || null);
     const keepPurchaseDate = loaded !== undefined && (input.purchaseDate ?? null) === (loaded.purchaseDate || null);
+    const keepSubcategory = loaded?.subcategory === undefined || (subcategory ?? null) === (loaded.subcategory?.trim() || null);
+    const keepAttributes =
+      input.attributes === undefined || loaded?.attributes === undefined || sameDetails(input.attributes, cleanAttributes(loaded.attributes));
+
+    // Only a rename is checked, so items that already share a name keep saving as they are.
+    if (normalizeItemName(input.name) !== normalizeItemName(existing.name)) {
+      await assertNameFree(
+        input.name,
+        {
+          subcategory: keepSubcategory ? (existing.subcategory ?? null) : (subcategory ?? null),
+          attributes: keepAttributes ? existing.attributes : input.attributes,
+        },
+        input.id,
+      );
+    }
+    if (input.sku !== existing.sku) await assertSkuFree(input.sku, input.id);
     await InventoryItem.updateOne(
       { _id: existing._id },
       {
         $set: {
           ...fields,
+          // Details are replaced only when the form changed them (an empty list clears them).
+          ...(!keepAttributes && input.attributes?.length ? { attributes: input.attributes } : {}),
+          ...(keepSubcategory || !subcategory ? {} : { subcategory }),
           ...(keepVendor ? {} : { vendor }),
           ...(keepPurchaseDate ? {} : { purchaseDate }),
         },
@@ -139,6 +172,8 @@ export const updateItem = defineAction(
           ...(fields.category ? {} : { category: 1 }),
           ...(vendor || keepVendor ? {} : { vendor: 1 }),
           ...(fields.description ? {} : { description: 1 }),
+          ...(keepSubcategory || subcategory ? {} : { subcategory: 1 }),
+          ...(!keepAttributes && input.attributes && !input.attributes.length ? { attributes: 1 } : {}),
           ...(fields.location ? {} : { location: 1 }),
           ...(purchaseDate || keepPurchaseDate ? {} : { purchaseDate: 1 }),
         },

@@ -19,13 +19,13 @@ export default async function InventoryImportPage() {
       <PageHeader
         eyebrow="Inventory"
         title="Import"
-        description="Add many items at once from a CSV file, and attach item photos from a Google Drive folder. Nothing is saved until you review it."
+        description="Add many items at once from a CSV or Excel file, and attach item photos from a Google Drive folder. Nothing is saved until you review it."
       />
       {user.role !== "admin" ? (
         <EmptyState title="Only admins can import" description="Ask an admin to import the file for you." />
       ) : (
         <div className="space-y-6">
-          <Section title="Items from a CSV file" description="One item per row. Items that already exist get the new stock added instead of a duplicate.">
+          <Section title="Items from a CSV or Excel file" description="One item per row, including parts lists (BOM): every column is kept, as a field or as a detail on the item. Items that already exist get the new stock added instead of a duplicate.">
             <CsvImport kinds={["items"]} />
           </Section>
           <Section title="Item photos from Google Drive" description="Images named after an item's SKU or name become that item's photo.">

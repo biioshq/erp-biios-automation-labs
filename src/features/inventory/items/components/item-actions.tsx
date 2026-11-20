@@ -24,7 +24,17 @@ import { AdjustStockDialog } from "./adjust-stock-dialog";
 import { ItemForm, type CategoryOption } from "./item-form";
 
 /** Header actions for the item page: Buy more and the other stock links, adjust dialog, edit sheet, duplicate, archive. */
-export function ItemActions({ item, categories, vendors }: { item: ItemDetail; categories: CategoryOption[]; vendors: string[] }) {
+export function ItemActions({
+  item,
+  categories,
+  vendors,
+  subcategories = [],
+}: {
+  item: ItemDetail;
+  categories: CategoryOption[];
+  vendors: string[];
+  subcategories?: string[];
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -147,6 +157,7 @@ export function ItemActions({ item, categories, vendors }: { item: ItemDetail; c
             item={item}
             categories={categories}
             vendors={vendors}
+            subcategories={subcategories}
             onDone={() => setEditing(false)}
             onCancel={() => setEditing(false)}
           />

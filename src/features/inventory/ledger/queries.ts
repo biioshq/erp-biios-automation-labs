@@ -11,6 +11,7 @@ import { round2 } from "@/lib/format";
 import { getStockStatus } from "@/lib/stock-status";
 import { GST_RATES } from "@/config/company";
 import type { MovementType, ProjectStage } from "@/lib/constants";
+import { variantHint } from "@/features/inventory/items/attributes";
 import type { HeldItem, LastPurchase, LedgerItem, LedgerProject, ProjectImpact, RecentOperation } from "./types";
 
 export async function getLedgerItems(): Promise<LedgerItem[]> {
@@ -33,6 +34,7 @@ export async function getLedgerItems(): Promise<LedgerItem[]> {
     lastPurchasePrice: i.lastPurchasePrice ?? null,
     vendor: i.vendor ?? null,
     status: getStockStatus(roundQty(i.available), i.minStock),
+    variant: variantHint({ attributes: i.attributes, subcategory: null }, 30),
   }));
 }
 

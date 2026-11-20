@@ -3,7 +3,7 @@
 import { TriangleAlert } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { CSV_FIELDS, type CsvImportKind } from "../fields";
+import { CSV_FIELDS, DETAIL_COLUMN, type CsvImportKind } from "../fields";
 
 const SKIP = "__skip";
 
@@ -30,7 +30,8 @@ export function ColumnMapping({
   const missing = fields.filter((f) => f.required && !mapping.includes(f.key));
 
   function set(index: number, key: string | null) {
-    const next = mapping.map((m, i) => (i === index ? key : key && m === key ? null : m));
+    // A field goes to one column only; any number of columns can be details.
+    const next = mapping.map((m, i) => (i === index ? key : key && key !== DETAIL_COLUMN && m === key ? (kind === "items" ? DETAIL_COLUMN : null) : m));
     onChange(next);
   }
 
@@ -50,7 +51,7 @@ export function ColumnMapping({
           const key = mapping[i] ?? null;
           const field = fields.find((f) => f.key === key);
           return (
-            <li key={i} className={cn("min-w-0 rounded-lg border px-3 py-2.5", key ? "bg-card" : "bg-muted/40")}>
+            <li key={i} className={cn("min-w-0 rounded-lg border px-3 py-2.5", key && key !== DETAIL_COLUMN ? "bg-card" : key ? "bg-card/60" : "bg-muted/40")}>
               <div className="flex min-w-0 items-baseline justify-between gap-2">
                 <p className="truncate text-sm font-medium" title={header}>
                   {header || `Column ${i + 1}`}
@@ -66,6 +67,7 @@ export function ColumnMapping({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={SKIP}>Do not import</SelectItem>
+                  {kind === "items" ? <SelectItem value={DETAIL_COLUMN}>Keep as item detail</SelectItem> : null}
                   {fields.map((f) => (
                     <SelectItem key={f.key} value={f.key}>
                       {f.label}
@@ -75,6 +77,9 @@ export function ColumnMapping({
                 </SelectContent>
               </Select>
               {field?.hint ? <p className="mt-1.5 text-[11px] text-muted-foreground">{field.hint}</p> : null}
+              {key === DETAIL_COLUMN ? (
+                <p className="mt-1.5 text-[11px] text-muted-foreground">Saved on each item as &quot;{header.trim() || `Column ${i + 1}`}&quot;</p>
+              ) : null}
             </li>
           );
         })}

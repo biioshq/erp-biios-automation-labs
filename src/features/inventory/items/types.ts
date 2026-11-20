@@ -1,4 +1,5 @@
 import type { InventoryUnit, MovementType, StockStatus } from "@/lib/constants";
+import type { ItemAttribute } from "./attributes";
 
 export type ItemCategoryRef = { id: string; name: string; color: string };
 
@@ -9,6 +10,9 @@ export type ItemRow = {
   sku: string;
   unit: InventoryUnit;
   category: ItemCategoryRef | null;
+  subcategory: string | null;
+  /** The part's value or rating (or subcategory), short, to tell same-named parts apart. */
+  variant: string | null;
   available: number;
   allocated: number;
   quantity: number;
@@ -33,6 +37,8 @@ export type ItemFormRecord = {
   name: string;
   sku: string;
   categoryId: string | null;
+  subcategory: string | null;
+  attributes: ItemAttribute[];
   unit: InventoryUnit;
   minStock: number;
   vendor: string | null;

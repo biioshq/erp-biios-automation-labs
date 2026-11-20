@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { purchasePaymentMethod } from "@/features/inventory/ledger/schemas";
 import { CSV_IMPORT_KINDS, IMPORT_BATCH, PREVIEW_CHUNK } from "./fields";
+import type { ItemAttribute } from "@/features/inventory/items/attributes";
 
 /** What the CSV import actions accept and return. Client-safe. */
 
@@ -9,6 +10,11 @@ const csvRow = z.object({
   line: z.number().int().min(1).max(1_000_000),
   /** Cell text by field key (only mapped columns). */
   values: z.record(z.string().max(40), z.string().max(5000)),
+  /** Items: the cells of columns kept as details, labelled by their header. */
+  extras: z
+    .array(z.object({ label: z.string().max(200), value: z.string().max(5000) }))
+    .max(60)
+    .optional(),
 });
 export type CsvRowInput = z.infer<typeof csvRow>;
 
@@ -23,6 +29,21 @@ export const csvOptionsSchema = z.object({
   importDuplicates: z.boolean().default(false),
   /** Items: SKUs the file already uses or the preview suggested, so a suggestion never repeats one. */
   reservedSkus: z.array(z.string().max(64)).max(4000).default([]),
+  /**
+   * Items: a SKU the file gives to two different parts (or that another item already has) is given
+   * a new code for the later part instead of stopping the row.
+   */
+  renameReusedIds: z.boolean().default(true),
+  /**
+   * Items: the file has a unit price column. Without one (a parts list), quantities are stock on hand
+   * at ₹0; with one, a row with a quantity and a blank price needs a fix.
+   */
+  priceColumn: z.boolean().default(true),
+  /** Items: every category name in the file with how often it appears, to read a misspelt one as the usual spelling. */
+  fileCategories: z
+    .array(z.object({ name: z.string().max(200), count: z.number().int().min(1).max(100_000) }))
+    .max(2000)
+    .default([]),
 });
 export type CsvOptionsInput = z.input<typeof csvOptionsSchema>;
 export type CsvOptions = z.output<typeof csvOptionsSchema>;
@@ -65,8 +86,11 @@ export type PreviewRow = {
   date?: string;
   /** Items only. */
   item?: {
-    /** create: a new item. purchase: stock added to an item already in inventory. */
-    action: "create" | "purchase" | "skip";
+    /**
+     * create: a new item. purchase: stock added to an item already in inventory. update: an item
+     * already in inventory gets the details it lacks (never changing ones it has). skip: nothing to do.
+     */
+    action: "create" | "purchase" | "update" | "skip";
     nameKey: string;
     /** The SKU from the file, or the suggested one for a new item. */
     sku: string;
@@ -79,6 +103,16 @@ export type PreviewRow = {
     quantity: number;
     /** Quantity times unit price: the expense a purchase of this stock books. */
     cost: number;
+    /** Subcategory and details, to tell two same-named parts in the file apart. */
+    traits: { subcategory?: string; attributes: ItemAttribute[] };
+    /** Free codes for this part if its SKU turns out to be taken by another part (first is preferred). */
+    altSkus: string[];
+    /** The item in inventory that already has the file's SKU (this row is another part). */
+    skuTakenBy?: string;
+    /** The review gave this row a new SKU; the import sends it instead of the file's. */
+    renamedFrom?: string;
+    /** The row has a quantity but no unit price: stock on hand at ₹0, no expense. */
+    noPrice?: boolean;
   };
 };
 

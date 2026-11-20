@@ -114,7 +114,10 @@ export function AssignView({
       items.map((i) => ({
         value: i.id,
         label: i.name,
-        description: i.available <= 0 ? OUT_OF_STOCK_HINT : `${i.sku} · ${formatNumber(i.available)} ${i.unit} available`,
+        description:
+          i.available <= 0
+            ? [i.variant, OUT_OF_STOCK_HINT].filter(Boolean).join(" · ")
+            : [i.sku, i.variant, `${formatNumber(i.available)} ${i.unit} available`].filter(Boolean).join(" · "),
         disabled: i.available <= 0,
         leading: <StatusDot status={i.status} />,
         trailing: i.status === "in_stock" ? undefined : <StockStatusBadge status={i.status} />,

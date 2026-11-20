@@ -17,6 +17,7 @@ import { STOCK_STATUSES, type InventoryUnit, type MovementType, type StockStatus
 import { getStockStatus, stockStatusFilter } from "@/lib/stock-status";
 import { round2 } from "@/lib/format";
 import { toDateInput } from "@/lib/dates";
+import { cleanAttributes, variantHint } from "./attributes";
 import type {
   ItemAllocationRow,
   ItemCategoryRef,
@@ -41,6 +42,8 @@ function toRow(i: ItemLean, categories: Map<string, ItemCategoryRef>): ItemRow {
     sku: i.sku,
     unit: (i.unit ?? "pcs") as InventoryUnit,
     category,
+    subcategory: i.subcategory || null,
+    variant: variantHint({ attributes: i.attributes, subcategory: null }),
     // Rounded to the ledger's 3 decimals, as the Assign and Return forms do, so float drift that
     // older writes stored (5.55e-17) shows as 0 and Out of Stock on every screen.
     available: roundQty(i.available),
@@ -71,7 +74,7 @@ export function itemFilter(params: Pick<ListParams, "q" | "filters">): Record<st
   const { q, filters } = params;
   if (q) {
     const re = searchRegex(q);
-    filter.$or = [{ name: re }, { sku: re }, { vendor: re }];
+    filter.$or = [{ name: re }, { sku: re }, { vendor: re }, { subcategory: re }, { "attributes.value": re }, { description: re }];
   }
   const statuses = (filters.status ?? []).filter((s) => STATUS_VALUES.has(s)) as StockStatus[];
   if (statuses.length) filter.$and = [{ $or: statuses.map(stockStatusFilter) }];
@@ -80,6 +83,10 @@ export function itemFilter(params: Pick<ListParams, "q" | "filters">): Record<st
     filter.category = { $in: filters.category.includes("none") ? [...ids, null] : ids };
   }
   if (filters.vendor?.length) filter.vendor = { $in: filters.vendor };
+  if (filters.subcategory?.length) {
+    const named = filters.subcategory.filter((s) => s !== "none");
+    filter.subcategory = filters.subcategory.includes("none") ? { $in: [...named, null, ""] } : { $in: named };
+  }
   return filter;
 }
 
@@ -102,6 +109,13 @@ export async function listItems(params: ListParams): Promise<Paginated<ItemRow>>
   return { rows: docs.map((d) => toRow(d, categories)), total, page: params.page, pageSize: params.pageSize };
 }
 
+/** Distinct subcategories of active items, for the list filter and the item form's suggestions. */
+export async function getItemSubcategories(): Promise<string[]> {
+  await connectDB();
+  const names = (await InventoryItem.distinct("subcategory", { archivedAt: null })) as (string | null)[];
+  return names.filter((v): v is string => Boolean(v)).sort((a, b) => a.localeCompare(b));
+}
+
 /** Distinct vendors of active items, for the list filter. */
 export async function getItemVendors(): Promise<string[]> {
   await connectDB();
@@ -115,6 +129,8 @@ function toFormRecord(i: ItemLean): ItemFormRecord {
     name: i.name,
     sku: i.sku,
     categoryId: i.category ? String(i.category) : null,
+    subcategory: i.subcategory || null,
+    attributes: cleanAttributes(i.attributes),
     unit: (i.unit ?? "pcs") as InventoryUnit,
     minStock: i.minStock,
     vendor: i.vendor ?? null,

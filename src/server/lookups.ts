@@ -6,6 +6,7 @@ import { salaryScope } from "@/server/auth/session";
 import { getStockStatus } from "@/lib/stock-status";
 import type { ProjectStatus, StockStatus } from "@/lib/constants";
 import { roundQty } from "@/server/services/inventory-ledger";
+import { variantHint } from "@/features/inventory/items/attributes";
 
 /** Option lists for pickers and filters, shared by every module. */
 
@@ -65,7 +66,8 @@ export async function getInventoryItemOptions(): Promise<ItemOption[]> {
     return {
       value: String(i._id),
       label: i.name,
-      description: `${i.sku} · ${available} ${i.unit} available`,
+      // The value or rating tells same-named parts apart (a 110 ohm and a 180K ohm resistor).
+      description: [i.sku, variantHint({ attributes: i.attributes, subcategory: null }, 30), `${available} ${i.unit} available`].filter(Boolean).join(" · "),
       sku: i.sku,
       unit: i.unit ?? "pcs",
       available,

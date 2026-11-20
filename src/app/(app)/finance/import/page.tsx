@@ -19,13 +19,13 @@ export default async function FinanceImportPage() {
       <PageHeader
         eyebrow="Finance"
         title="Import"
-        description="Add many expenses or income records from a CSV file, or turn a Google Drive folder of bills into draft expenses. Nothing is saved until you review it."
+        description="Add many expenses or income records from a CSV or Excel file, or turn a Google Drive folder of bills into draft expenses. Nothing is saved until you review it."
       />
       {user.role !== "admin" ? (
         <EmptyState title="Only admins can import" description="Ask an admin to import the file for you." />
       ) : (
         <div className="space-y-6">
-          <Section title="From a CSV file" description="Expenses or income, one row each. Download a template to see the columns.">
+          <Section title="From a CSV or Excel file" description="Expenses or income, one row each. Download a template to see the columns.">
             <CsvImport kinds={["expenses", "income"]} />
           </Section>
           <Section title="Bills from Google Drive" description="Every image or PDF in a shared folder is read and becomes a draft expense to check and save.">

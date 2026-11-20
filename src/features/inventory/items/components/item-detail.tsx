@@ -67,7 +67,17 @@ function SummaryPill({ label, value, tone }: { label: string; value: string; ton
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "-" : ""}${formatNumber(Math.abs(n))}`;
 
 /** The item page: levels, status callouts, movement history, allocations and purchase prices. */
-export function ItemDetailView({ item, categories, vendors }: { item: ItemDetail; categories: CategoryOption[]; vendors: string[] }) {
+export function ItemDetailView({
+  item,
+  categories,
+  vendors,
+  subcategories = [],
+}: {
+  item: ItemDetail;
+  categories: CategoryOption[];
+  vendors: string[];
+  subcategories?: string[];
+}) {
   const unit = labelOf(INVENTORY_UNITS, item.unit).toLowerCase();
   const tone = item.status === "in_stock" ? "success" : item.status === "low_stock" ? "warning" : "danger";
   const { summary } = item;
@@ -89,7 +99,10 @@ export function ItemDetailView({ item, categories, vendors }: { item: ItemDetail
               <span className="inline-flex items-center gap-1.5">
                 <span className="size-2 rounded-full" style={{ background: item.category.color }} />
                 {item.category.name}
+                {item.subcategory ? <span className="text-muted-foreground">/ {item.subcategory}</span> : null}
               </span>
+            ) : item.subcategory ? (
+              <span>{item.subcategory}</span>
             ) : null}
             {item.vendor ? (
               <span className="inline-flex items-center gap-1.5">
@@ -103,7 +116,7 @@ export function ItemDetailView({ item, categories, vendors }: { item: ItemDetail
             ) : null}
           </span>
         }
-        actions={<ItemActions item={item} categories={categories} vendors={vendors} />}
+        actions={<ItemActions item={item} categories={categories} vendors={vendors} subcategories={subcategories} />}
       />
 
       {item.status === "low_stock" ? (
@@ -163,6 +176,16 @@ export function ItemDetailView({ item, categories, vendors }: { item: ItemDetail
           <Fact label="Added">{formatRelative(item.createdAt)}</Fact>
         </div>
         {item.description ? <p className="max-w-3xl text-sm text-pretty text-muted-foreground">{item.description}</p> : null}
+        {item.attributes.length ? (
+          <dl className="grid max-w-4xl gap-x-6 gap-y-3 border-t pt-5 sm:grid-cols-2" aria-label="Details">
+            {item.attributes.map((a) => (
+              <div key={a.label} className="min-w-0">
+                <dt className="text-xs text-muted-foreground">{a.label}</dt>
+                <dd className="text-sm text-pretty break-words">{a.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
       </Section>
 
       <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">

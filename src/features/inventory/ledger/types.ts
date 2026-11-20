@@ -21,6 +21,8 @@ export type LedgerItem = {
   lastPurchasePrice: number | null;
   vendor: string | null;
   status: StockStatus;
+  /** The part's value or rating, to tell same-named parts apart in pickers. */
+  variant: string | null;
 };
 
 /**

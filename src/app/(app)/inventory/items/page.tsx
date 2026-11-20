@@ -13,7 +13,7 @@ import { ITEM_FILTER_KEYS, ITEM_SORT_KEYS } from "@/features/inventory/items/sch
 import { ItemsView } from "@/features/inventory/items/components/items-view";
 import { requireUser } from "@/server/auth/session";
 
-export const metadata: Metadata = { title: "All Inventory" };
+export const metadata: Metadata = { title: "All items" };
 
 export default async function ItemsPage({ searchParams }: PageProps<"/inventory/items">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
@@ -36,7 +36,7 @@ export default async function ItemsPage({ searchParams }: PageProps<"/inventory/
     <Page>
       <PageHeader
         eyebrow="Inventory"
-        title="All Inventory"
+        title="All items"
         description={
           <>
             <span className="tabular">{formatNumber(snapshot.items)}</span> items ·{" "}

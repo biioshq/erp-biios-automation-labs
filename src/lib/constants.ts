@@ -43,6 +43,11 @@ export type ProjectDocumentType = (typeof PROJECT_DOCUMENT_TYPES)[number]["value
 
 /* Finance */
 
+/**
+ * The built-in expense categories. Admins can rename or hide them and add their own (stored in
+ * expenseCategories): show and pick categories through src/lib/expense-categories.ts, not this list.
+ * Never change a value here: expenses store it.
+ */
 export const EXPENSE_CATEGORIES = options([
   { value: "materials", label: "Materials" },
   { value: "inventory", label: "Inventory" },
@@ -69,6 +74,8 @@ export const PAYMENT_METHODS = options([
   { value: "cash", label: "Cash" },
   { value: "cheque", label: "Cheque" },
   { value: "credit", label: "On credit" },
+  /** Paid (or received) through the group company. */
+  { value: "biios_startup_llp", label: "Biios Startup LLP" },
   /** Generated expenses for stock taken from inventory (already paid at purchase). */
   { value: "stock", label: "From stock" },
   { value: "other", label: "Other" },

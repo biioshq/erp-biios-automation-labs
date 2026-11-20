@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { BiiosStacked, BiiosSymbol, PRODUCT_NAME } from "@/components/brand/logo";
-import { MODULES, isItemActive } from "@/config/navigation";
+import { MODULES, findActive } from "@/config/navigation";
 import { UserMenu } from "./user-menu";
 import type { SessionUser } from "@/server/auth/session";
 
@@ -30,6 +30,8 @@ export function AppSidebar({ user }: { user: SessionUser }) {
   const pathname = usePathname();
   const { setOpenMobile, isMobile } = useSidebar();
   const closeOnMobile = () => isMobile && setOpenMobile(false);
+  // One entry lights up: the one the page belongs to, including its tab pages and detail pages.
+  const activeItem = findActive(pathname).item;
 
   // The drawer (phones and tablets) closes on every navigation, however it was triggered.
   React.useEffect(() => {
@@ -79,7 +81,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
                     <CollapsibleContent className="data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down overflow-hidden">
                       <SidebarMenuSub className="mr-0 gap-0.5 py-1 pr-0">
                         {mod.items.map((item) => {
-                          const active = isItemActive(item, pathname);
+                          const active = item === activeItem;
                           return (
                             <SidebarMenuSubItem key={item.href}>
                               <SidebarMenuSubButton asChild isActive={active} className="h-8 data-active:shadow-[inset_2px_0_0_var(--brand)] max-lg:h-10">

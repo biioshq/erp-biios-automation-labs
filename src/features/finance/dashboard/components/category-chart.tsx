@@ -15,7 +15,10 @@ const OTHER_COLOR = "var(--muted-foreground)";
 export function CategoryChart({ data }: { data: CategoryStack }) {
   const phone = useIsMobile();
   const config: ChartConfig = Object.fromEntries(
-    data.series.map((s, i) => [s.key, { label: s.label, color: s.key === OTHER_KEY ? OTHER_COLOR : (COLORS[i] ?? OTHER_COLOR) }]),
+    data.series.map((s, i) => [
+      s.key,
+      s.color ? { label: s.label, theme: s.color } : { label: s.label, color: s.key === OTHER_KEY ? OTHER_COLOR : (COLORS[i] ?? OTHER_COLOR) },
+    ]),
   );
   const summary = `Monthly expenses by category for the last ${data.rows.length} months. Categories: ${data.series.map((s) => s.label).join(", ")}.`;
   const top = data.series.length - 1;

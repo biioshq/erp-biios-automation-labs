@@ -9,8 +9,9 @@ import { projectSpend } from "@/server/services/metrics";
 import { iso } from "@/server/serialize";
 import { round2 } from "@/lib/format";
 import { getStockStatus } from "@/lib/stock-status";
+import { GST_RATES } from "@/config/company";
 import type { MovementType, ProjectStage } from "@/lib/constants";
-import type { HeldItem, LedgerItem, LedgerProject, ProjectImpact, RecentOperation } from "./types";
+import type { HeldItem, LastPurchase, LedgerItem, LedgerProject, ProjectImpact, RecentOperation } from "./types";
 
 export async function getLedgerItems(): Promise<LedgerItem[]> {
   await connectDB();
@@ -31,6 +32,39 @@ export async function getLedgerItems(): Promise<LedgerItem[]> {
     vendor: i.vendor ?? null,
     status: getStockStatus(roundQty(i.available), i.minStock),
   }));
+}
+
+type StoredInvoice = { gstin?: string | null; hsnSac?: string | null; taxableAmount?: number | null; cgst?: number | null; sgst?: number | null; igst?: number | null };
+
+/** The standard GST rate a bill was taxed at, or null when there is no tax base or it matches no standard rate. */
+export function gstRateOf(invoice: StoredInvoice | null | undefined): number | null {
+  const taxable = invoice?.taxableAmount ?? 0;
+  if (!(taxable > 0)) return null;
+  const percent = (((invoice?.cgst ?? 0) + (invoice?.sgst ?? 0) + (invoice?.igst ?? 0)) / taxable) * 100;
+  // Within a quarter percent: suppliers round each head to the rupee or paisa.
+  const rate = GST_RATES.find((r) => Math.abs(r - percent) <= 0.25);
+  return rate ?? null;
+}
+
+/** Each item's most recent purchase (latest date, then latest entry), for the purchase form to fill from. */
+export async function getLastPurchases(): Promise<Record<string, LastPurchase>> {
+  await connectDB();
+  const rows = await InventoryMovement.aggregate<{ _id: Types.ObjectId; date: Date; vendor?: string | null; invoice?: StoredInvoice | null }>([
+    { $match: { type: "purchase" } },
+    { $sort: { item: 1, date: -1, _id: -1 } },
+    { $group: { _id: "$item", date: { $first: "$date" }, vendor: { $first: "$vendor" }, invoice: { $first: "$invoice" } } },
+  ]);
+  const out: Record<string, LastPurchase> = {};
+  for (const r of rows) {
+    out[String(r._id)] = {
+      date: iso(r.date)!,
+      vendor: r.vendor?.trim() || null,
+      gstin: r.invoice?.gstin?.trim() || null,
+      hsnSac: r.invoice?.hsnSac?.trim() || null,
+      rate: gstRateOf(r.invoice),
+    };
+  }
+  return out;
 }
 
 export async function getLedgerProjects(): Promise<LedgerProject[]> {

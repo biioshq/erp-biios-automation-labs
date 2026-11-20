@@ -17,6 +17,18 @@ export type LedgerItem = {
   status: StockStatus;
 };
 
+/**
+ * What the purchase form fills in when an item is picked, from that item's most recent purchase.
+ * `rate` is the GST rate that purchase was taxed at (one of the standard rates), or null.
+ */
+export type LastPurchase = {
+  date: string;
+  vendor: string | null;
+  gstin: string | null;
+  hsnSac: string | null;
+  rate: number | null;
+};
+
 export type LedgerProject = {
   id: string;
   name: string;

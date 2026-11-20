@@ -67,6 +67,12 @@ export const adjustStockSchema = z.object({
 
 export const suggestSkuSchema = z.object({ name: z.string().trim().max(160), categoryId: optionalObjectId });
 
+/** Duplicate: the name of the item being copied. */
+export const copyNameSchema = z.object({ name: z.string().trim().min(1).max(200) });
+
+/** Add item: what has been typed so far, to look for the same item already in inventory. */
+export const similarItemsSchema = z.object({ name: z.string().max(200), sku: z.string().max(80).optional() });
+
 /** Filter keys accepted in the URL of the items list. */
 export const ITEM_FILTER_KEYS = ["status", "category", "vendor"] as const;
 export const ITEM_SORT_KEYS = ["name", "sku", "available", "allocated", "minStock", "unitPrice", "value", "vendor", "updatedAt"] as const;

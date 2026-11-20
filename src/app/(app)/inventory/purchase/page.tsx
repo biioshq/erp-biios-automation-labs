@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Page, PageHeader } from "@/components/shared/page";
 import { getVendorNames } from "@/server/lookups";
-import { getLedgerItems, getRecentOperations } from "@/features/inventory/ledger/queries";
+import { getLastPurchases, getLedgerItems, getRecentOperations } from "@/features/inventory/ledger/queries";
 import { PurchaseView } from "@/features/inventory/ledger/components/purchase-view";
 import { RecentOperations } from "@/features/inventory/ledger/components/recent-operations";
 import { requireUser } from "@/server/auth/session";
@@ -14,7 +14,12 @@ export default async function PurchaseStockPage({ searchParams }: PageProps<"/in
   // Every page checks the session itself: client navigations can skip the layout's check.
   await requireUser();
   const sp = await searchParams;
-  const [items, vendors, recent] = await Promise.all([getLedgerItems(), getVendorNames(), getRecentOperations("purchase")]);
+  const [items, vendors, recent, lastPurchases] = await Promise.all([
+    getLedgerItems(),
+    getVendorNames(),
+    getRecentOperations("purchase"),
+    getLastPurchases(),
+  ]);
   const quantity = Number(one(sp.quantity));
 
   return (
@@ -27,6 +32,7 @@ export default async function PurchaseStockPage({ searchParams }: PageProps<"/in
       <PurchaseView
         key={`${one(sp.item) ?? ""}:${one(sp.quantity) ?? ""}`}
         items={items}
+        lastPurchases={lastPurchases}
         vendors={vendors}
         defaultItemId={one(sp.item)}
         defaultQuantity={Number.isFinite(quantity) && quantity > 0 ? quantity : undefined}

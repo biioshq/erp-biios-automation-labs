@@ -8,7 +8,8 @@ import { getFiles } from "@/features/files/server";
 import { salaryScope } from "@/server/auth/session";
 import { dateRangeFilter } from "@/lib/dates";
 import { mongoSort, searchRegex, type ListParams, type Paginated } from "@/lib/list-params";
-import type { ExpenseCategory, ExpenseSource, PaymentMethod, ProjectStage } from "@/lib/constants";
+import type { ExpenseSource, PaymentMethod, ProjectStage } from "@/lib/constants";
+import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { totalTax } from "@/lib/gst";
 import type { ExpenseDetail, ExpenseRow, ExpenseSummary } from "./types";
 
@@ -22,14 +23,17 @@ function refOf(value: unknown): { id: string; name: string } | null {
   return r?._id ? { id: String(r._id), name: r.name } : null;
 }
 
-function toRow(e: ExpenseDoc & { project?: unknown }): ExpenseRow {
+type Labeler = (value: string | null | undefined) => string;
+
+function toRow(e: ExpenseDoc & { project?: unknown }, labelOf: Labeler): ExpenseRow {
   const project = e.project as PopulatedProject;
   return {
     id: String(e._id),
     number: e.number,
     vendor: e.vendor,
     description: e.description ?? null,
-    category: e.category as ExpenseCategory,
+    category: e.category,
+    categoryLabel: labelOf(e.category),
     amount: e.amount,
     date: iso(e.date)!,
     paymentMethod: e.paymentMethod as PaymentMethod,
@@ -73,7 +77,7 @@ export async function listExpenses(params: ListParams): Promise<Paginated<Expens
   await connectDB();
   const scope = await salaryScope();
   const filter = (Object.keys(scope).length ? { $and: [expenseFilter(params), scope] } : expenseFilter(params)) as ReturnType<typeof expenseFilter>;
-  const [docs, total, summary] = await Promise.all([
+  const [docs, total, summary, labelOf] = await Promise.all([
     Expense.find(filter)
       .sort(mongoSort(params.sort ?? { id: "date", desc: true }))
       .skip((params.page - 1) * params.pageSize)
@@ -93,9 +97,10 @@ export async function listExpenses(params: ListParams): Promise<Paginated<Expens
         },
       },
     ]),
+    getExpenseCategoryLabeler(),
   ]);
   return {
-    rows: docs.map(toRow),
+    rows: docs.map((d) => toRow(d, labelOf)),
     total,
     page: params.page,
     pageSize: params.pageSize,
@@ -115,12 +120,12 @@ export async function getExpense(id: string): Promise<ExpenseDetail | null> {
     .lean();
   if (!e) return null;
   if (e.category === "salaries" && Object.keys(await salaryScope()).length) return null;
-  const [receipt] = e.receipt ? await getFiles([e.receipt]) : [null];
+  const [[receipt], labelOf] = await Promise.all([e.receipt ? getFiles([e.receipt]) : Promise.resolve([null]), getExpenseCategoryLabeler()]);
   const item = e.item as unknown as { _id: Types.ObjectId; name: string; sku: string } | null;
   const creator = e.createdBy as unknown as { _id: Types.ObjectId; name?: string } | null;
   const g = e.gst;
   return {
-    ...toRow(e),
+    ...toRow(e, labelOf),
     vendorAddress: e.vendorAddress ?? null,
     notes: e.notes ?? null,
     gst: g

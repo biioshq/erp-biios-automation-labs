@@ -11,13 +11,14 @@ import { round2 } from "@/lib/format";
 import { mongoSort, searchRegex, type ListParams, type Paginated } from "@/lib/list-params";
 import { monthlyEquivalent, upcomingOccurrences } from "@/lib/recurrence";
 import type { ExpenseCategory, PaymentMethod, ProjectStage, RecurringFrequency, RecurringStatus } from "@/lib/constants";
+import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { GROUP_CATEGORIES } from "./schemas";
 import type { PostedExpense, RecurringDetail, RecurringRow, RecurringSummary } from "./types";
 
 type PopulatedProject = { _id: Types.ObjectId; name: string; code: string; color?: string } | null;
 type PopulatedEmployee = { _id: Types.ObjectId; name: string } | null;
 
-function toRow(t: RecurringExpenseDoc & { project?: unknown; employee?: unknown }): RecurringRow {
+function toRow(t: RecurringExpenseDoc & { project?: unknown; employee?: unknown }, labelOf: (value: string) => string): RecurringRow {
   const project = t.project as PopulatedProject;
   const employee = t.employee as PopulatedEmployee;
   const frequency = t.frequency as RecurringFrequency;
@@ -26,7 +27,8 @@ function toRow(t: RecurringExpenseDoc & { project?: unknown; employee?: unknown 
     code: t.code,
     name: t.name,
     vendor: t.vendor,
-    category: t.category as ExpenseCategory,
+    category: t.category,
+    categoryLabel: labelOf(t.category),
     amount: t.amount,
     gstRate: t.gstRate ?? 0,
     frequency,
@@ -73,7 +75,7 @@ export async function listRecurring(params: ListParams): Promise<Paginated<Recur
   await connectDB();
   const scope = await salaryScope();
   const filter = (Object.keys(scope).length ? { $and: [recurringFilter(params), scope] } : recurringFilter(params)) as ReturnType<typeof recurringFilter>;
-  const [docs, total] = await Promise.all([
+  const [docs, total, labelOf] = await Promise.all([
     RecurringExpense.find(filter)
       .sort(mongoSort(params.sort ?? { id: "nextRunDate", desc: false }))
       .skip((params.page - 1) * params.pageSize)
@@ -82,8 +84,9 @@ export async function listRecurring(params: ListParams): Promise<Paginated<Recur
       .populate("employee", "name")
       .lean(),
     RecurringExpense.countDocuments(filter),
+    getExpenseCategoryLabeler(),
   ]);
-  return { rows: docs.map(toRow), total, page: params.page, pageSize: params.pageSize };
+  return { rows: docs.map((d) => toRow(d, labelOf)), total, page: params.page, pageSize: params.pageSize };
 }
 
 /**
@@ -154,16 +157,17 @@ export async function getRecurring(id: string): Promise<RecurringDetail | null> 
   if (!t) return null;
   if (t.category === "salaries" && Object.keys(await salaryScope()).length) return null;
 
-  const [postedDocs, totals] = await Promise.all([
+  const [postedDocs, totals, labelOf] = await Promise.all([
     Expense.find({ recurring: t._id }, { number: 1, date: 1, amount: 1 }).sort({ date: -1, _id: -1 }).limit(60).lean(),
     Expense.aggregate<{ total: number; count: number }>([
       { $match: { recurring: t._id } },
       { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
     ]),
+    getExpenseCategoryLabeler(),
   ]);
   const posted: PostedExpense[] = postedDocs.map((e) => ({ id: String(e._id), number: e.number, date: iso(e.date)!, amount: e.amount }));
   const creator = t.createdBy as unknown as { _id: Types.ObjectId; name?: string } | null;
-  const row = toRow(t);
+  const row = toRow(t, labelOf);
   const upcoming =
     t.status === "ended"
       ? []

@@ -4,12 +4,18 @@ import { ProjectDocumentsTab } from "@/features/finance/projects/components/docu
 import { ProjectExpensesTab } from "@/features/finance/projects/components/expenses-tab";
 import type { ProjectDetail } from "@/features/finance/projects/types";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getExpenseCategories } from "@/server/expense-categories";
 
 /** Tabs that need a client component with their own data: fetched here so each tab streams on its own. */
 
 export async function ExpensesTabLoader({ project }: { project: ProjectDetail }) {
-  const [rows, projects, vendors] = await Promise.all([listProjectExpenses(project.id), getProjectOptions(), getVendorNames()]);
-  return <ProjectExpensesTab projectId={project.id} projectName={project.name} rows={rows} projects={projects} vendors={vendors} />;
+  const [rows, projects, vendors, categories] = await Promise.all([
+    listProjectExpenses(project.id),
+    getProjectOptions(),
+    getVendorNames(),
+    getExpenseCategories(),
+  ]);
+  return <ProjectExpensesTab projectId={project.id} projectName={project.name} rows={rows} projects={projects} vendors={vendors} categories={categories} />;
 }
 
 export async function DocumentsTabLoader({ project }: { project: ProjectDetail }) {

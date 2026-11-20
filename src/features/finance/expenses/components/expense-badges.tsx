@@ -1,7 +1,7 @@
 import { Boxes, Repeat } from "lucide-react";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { EXPENSE_CATEGORIES, labelOf, type ExpenseSource } from "@/lib/constants";
+import type { ExpenseSource } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
 import type { ExpenseRow } from "../types";
 
@@ -48,7 +48,7 @@ export function ExpenseMobileCard({ row, showProject = true }: { row: ExpenseRow
         ) : null}
         <ExpenseSourceBadge source={row.source} className="h-5 px-2 text-[11px]" />
         <StatusBadge tone="neutral" dot={false} className="h-5 px-2 text-[11px]">
-          {labelOf(EXPENSE_CATEGORIES, row.category)}
+          {row.categoryLabel}
         </StatusBadge>
       </div>
     </div>

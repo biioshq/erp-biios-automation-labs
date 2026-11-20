@@ -3,7 +3,8 @@ import "server-only";
 import { connectDB } from "@/server/db";
 import { salaryScope } from "@/server/auth/session";
 import { Expense, Income } from "@/server/models";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, labelOf } from "@/lib/constants";
+import { INCOME_CATEGORIES, labelOf, type IncomeCategory } from "@/lib/constants";
+import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { round2 } from "@/lib/format";
 import { col, coversWholeMonths, describeFilters, projectMatch, rangeOf } from "../common";
 import type { ReportData, ReportFilters, ReportRow, ReportSection } from "../../types";
@@ -42,11 +43,12 @@ export async function buildFinanceReport(f: ReportFilters): Promise<ReportData> 
       },
     },
   ];
-  const [incCat, expCat, incMonth, expMonth] = await Promise.all([
+  const [incCat, expCat, incMonth, expMonth, expenseLabel] = await Promise.all([
     Income.aggregate<Group>(byCategory(match)),
     Expense.aggregate<Group>(byCategory(expenseMatch)),
     Income.aggregate<Group>(byMonth(match)),
     Expense.aggregate<Group>(byMonth(expenseMatch)),
+    getExpenseCategoryLabeler(),
   ]);
 
   const income = round2(incCat.reduce((s, r) => s + r.total, 0));
@@ -54,11 +56,11 @@ export async function buildFinanceReport(f: ReportFilters): Promise<ReportData> 
   const profit = round2(income - expenses);
   const margin = income > 0 ? profit / income : 0;
 
-  const categoryRows = (groups: Group[], dict: readonly { value: string; label: string }[], total: number): ReportRow[] =>
+  const categoryRows = (groups: Group[], labelFor: (value: string) => string, total: number): ReportRow[] =>
     [...groups]
       .sort((a, b) => b.total - a.total)
       .map((g) => ({
-        category: labelOf(dict as never, (g._id ?? "other") as never),
+        category: labelFor(g._id ?? "other"),
         // A member sees the salary total but not how many payments make it up (that count, with a
         // total, can point at one person's pay).
         entries: member && g._id === "salaries" ? null : g.count,
@@ -88,8 +90,8 @@ export async function buildFinanceReport(f: ReportFilters): Promise<ReportData> 
     totals: { month: "Total", income, expenses, profit },
   };
 
-  const incRows = categoryRows(incCat, INCOME_CATEGORIES, income);
-  const expRows = categoryRows(expCat, EXPENSE_CATEGORIES, expenses);
+  const incRows = categoryRows(incCat, (v) => labelOf(INCOME_CATEGORIES, v as IncomeCategory), income);
+  const expRows = categoryRows(expCat, expenseLabel, expenses);
   const statement: ReportSection = {
     title: "Profit and loss",
     columns: [col("line", "Line", "text", 34), col("amount", "Amount", "money", 18)],

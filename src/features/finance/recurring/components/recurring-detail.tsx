@@ -64,7 +64,7 @@ export function RecurringDetailView({
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs text-muted-foreground">{schedule.code}</span>
-            <CategoryBadge category={schedule.category} />
+            <CategoryBadge label={schedule.categoryLabel} />
             <RecurringStatusBadge status={schedule.status} />
           </div>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">

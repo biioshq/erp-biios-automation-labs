@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -16,12 +16,37 @@ import { applyFieldErrors } from "@/lib/action-result";
 import { INVENTORY_UNITS, labelOf } from "@/lib/constants";
 import { emitDataChanged } from "@/lib/events";
 import { round2 } from "@/lib/format";
-import { createItem, suggestSku, updateItem } from "../actions";
+import { createItem, suggestCopyName, suggestSku, updateItem } from "../actions";
+import { copyBaseName, copyName, copyNumber } from "../matching";
 import { itemFormSchema, type ItemFormInput, type ItemFormValues } from "../schemas";
 import type { ItemFormRecord } from "../types";
 import { formValidation } from "@/components/forms/form-options";
+import { SimilarItemsNotice, useSimilarItems } from "./similar-items-notice";
 
 export type CategoryOption = { value: string; label: string; color: string };
+
+/**
+ * A new item started from an existing one (Duplicate): its descriptive details only. Stock, prices,
+ * purchase date and history stay with the original, and the SKU is suggested fresh.
+ */
+function defaultsFromTemplate(template: ItemFormRecord, categories: CategoryOption[]): ItemFormInput {
+  const categoryId = template.categoryId && categories.some((c) => c.value === template.categoryId) ? template.categoryId : undefined;
+  return {
+    // Replaced after mount by the first free "(copy N)" name when this one is taken.
+    // A copy of a copy starts one number up, so the form never opens on the source's own name.
+    name: copyName(copyBaseName(template.name), copyNumber(template.name) + 1),
+    sku: "",
+    categoryId,
+    unit: template.unit ?? "pcs",
+    minStock: template.minStock || undefined,
+    vendor: template.vendor ?? "",
+    purchaseDate: undefined,
+    description: template.description ?? "",
+    location: template.location ?? "",
+    openingQuantity: undefined,
+    openingUnitPrice: undefined,
+  };
+}
 
 function defaultsFrom(item?: ItemFormRecord | null, categoryId?: string): ItemFormInput {
   return {
@@ -75,9 +100,11 @@ function VendorField({ control, vendors }: { control: ReturnType<typeof useForm<
 /**
  * Create or edit an item. Editing never touches quantities: stock changes go
  * through Purchase, Assign, Return or Adjust so every change has a movement.
+ * `template` starts a new item from an existing one; it is never saved over.
  */
 export function ItemForm({
   item,
+  template,
   categories,
   vendors,
   defaultCategoryId,
@@ -85,6 +112,7 @@ export function ItemForm({
   onCancel,
 }: {
   item?: ItemFormRecord | null;
+  template?: ItemFormRecord | null;
   categories: CategoryOption[];
   vendors: string[];
   defaultCategoryId?: string;
@@ -101,11 +129,15 @@ export function ItemForm({
 
   const form = useForm<ItemFormInput, unknown, ItemFormValues>({
     resolver: zodResolver(itemFormSchema),
-    defaultValues: defaultsFrom(item, defaultCategoryId),
+    defaultValues: !item && template ? defaultsFromTemplate(template, categories) : defaultsFrom(item, defaultCategoryId),
     ...formValidation,
   });
   const { control, setValue, getValues } = form;
   const unit = useWatch({ control, name: "unit" });
+  const typedName = useWatch({ control, name: "name" });
+  const typedSku = useWatch({ control, name: "sku" });
+  // Adding only: an item being edited is already the one in inventory.
+  const similar = useSimilarItems(typedName, typedSku, !isEdit);
   const openingQuantity = useWatch({ control, name: "openingQuantity" });
   const openingUnitPrice = useWatch({ control, name: "openingUnitPrice" });
   const unitLabel = labelOf(INVENTORY_UNITS, unit).toLowerCase();
@@ -121,6 +153,38 @@ export function ItemForm({
     setSuggesting(false);
     if (result.ok) setValue("sku", result.data.sku, { shouldValidate: true, shouldDirty: true });
   }
+
+  // Duplicate: select "<name> (copy)" for retyping and propose a SKU of its own. The SKU is built
+  // from the original name (the suffix " (copy)" would add a COP part) and made unique by suggestSku.
+  // When "<name> (copy)" is already an item, the name moves on to the first free "(copy N)".
+  const templateId = !item && template ? template.id : null;
+  useEffect(() => {
+    if (!templateId || !template) return;
+    const frame = window.requestAnimationFrame(() => form.setFocus("name", { shouldSelect: true }));
+    let cancelled = false;
+    let reselect = 0;
+    const startName = getValues("name");
+    void suggestCopyName({ name: template.name }).then((result) => {
+      // Never over a name the user has started to change.
+      if (cancelled || !result.ok || result.data.name === startName || getValues("name") !== startName) return;
+      const input = document.activeElement;
+      const wasSelected = input instanceof HTMLInputElement && input.name === "name";
+      setValue("name", result.data.name, { shouldValidate: true, shouldDirty: true });
+      // Select once the new value is on screen (selecting before React writes it would be lost).
+      if (wasSelected) reselect = window.requestAnimationFrame(() => form.setFocus("name", { shouldSelect: true }));
+    });
+    void suggestSku({ name: template.name, categoryId: getValues("categoryId") }).then((result) => {
+      // Never over a SKU the user typed meanwhile.
+      if (cancelled || !result.ok || getValues("sku")) return;
+      setValue("sku", result.data.sku, { shouldValidate: true, shouldDirty: true });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(reselect);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId]);
 
   const onSubmit = form.handleSubmit((values) => {
     startTransition(async () => {
@@ -149,6 +213,7 @@ export function ItemForm({
             autoFocus
             placeholder="Steel rods, 12 mm"
           />
+          <SimilarItemsNotice matches={similar} />
           <div className="grid gap-4 sm:grid-cols-2">
             <SelectField
               control={control}

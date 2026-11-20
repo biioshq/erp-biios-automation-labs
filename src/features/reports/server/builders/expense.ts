@@ -4,7 +4,8 @@ import "server-only";
 import { connectDB } from "@/server/db";
 import { Expense } from "@/server/models";
 import { expenseFilter } from "@/features/finance/expenses/queries";
-import { EXPENSE_CATEGORIES, PAYMENT_METHODS, PROJECT_STAGES, labelOf, type ExpenseCategory, type PaymentMethod, type ProjectStage } from "@/lib/constants";
+import { PAYMENT_METHODS, PROJECT_STAGES, labelOf, type PaymentMethod, type ProjectStage } from "@/lib/constants";
+import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { round2 } from "@/lib/format";
 import { col, day, describeFilters, sumTotals } from "../common";
 import type { ReportData, ReportFilters, ReportRow } from "../../types";
@@ -50,7 +51,10 @@ export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> 
   const filter = (Object.keys(scope).length ? { $and: [filterBase, scope] } : filterBase) as typeof filterBase;
   // Say so when it changes the result, since the Finance report and CA pack do show members a company salary total.
   const salariesHidden = Object.keys(scope).length > 0 && (f.category.length === 0 || f.category.includes("salaries"));
-  const docs = await Expense.find(filter).sort({ date: 1, _id: 1 }).populate("project", "name").lean();
+  const [docs, categoryLabel] = await Promise.all([
+    Expense.find(filter).sort({ date: 1, _id: 1 }).populate("project", "name").lean(),
+    getExpenseCategoryLabeler(),
+  ]);
 
   const rows: ReportRow[] = docs.map((e) => {
     const g = e.gst;
@@ -60,7 +64,7 @@ export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> 
       vendor: e.vendor,
       project: (e.project as unknown as PopulatedProject)?.name ?? "Overhead",
       stage: e.stage ? labelOf(PROJECT_STAGES, e.stage as ProjectStage) : "",
-      category: labelOf(EXPENSE_CATEGORIES, e.category as ExpenseCategory),
+      category: categoryLabel(e.category),
       payment: labelOf(PAYMENT_METHODS, e.paymentMethod as PaymentMethod),
       taxable: g ? (g.taxableAmount ?? 0) : null,
       cgst: g ? (g.cgst ?? 0) : null,

@@ -11,7 +11,7 @@ import { getLowStockItems } from "@/features/inventory/low-stock/queries";
 import { LowStockList } from "@/features/inventory/low-stock/components/low-stock-list";
 import { requireUser } from "@/server/auth/session";
 
-export const metadata: Metadata = { title: "Low Stock" };
+export const metadata: Metadata = { title: "Low stock" };
 
 const VIEWS = [
   { value: "all", label: "All" },
@@ -47,7 +47,7 @@ export default async function LowStockPage({ searchParams }: PageProps<"/invento
             <p className="text-sm text-muted-foreground">Every item is above its minimum level. Items that fall to their minimum show up here with a suggested order.</p>
           </div>
           <Button asChild variant="outline" className="relative mt-1">
-            <Link href="/inventory/items">View all inventory</Link>
+            <Link href="/inventory/items">View all items</Link>
           </Button>
         </div>
       ) : (

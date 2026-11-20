@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
-import { MODULES, QUICK_ACTIONS } from "@/config/navigation";
+import { MODULES, QUICK_ACTIONS, modulePages } from "@/config/navigation";
 import { globalSearch, type SearchGroups } from "@/features/search/actions";
 
 const GROUPS: { key: keyof SearchGroups; heading: string; icon: typeof Receipt }[] = [
@@ -122,7 +122,7 @@ export function CommandMenu() {
           <CommandSeparator />
           {MODULES.map((m) => (
             <CommandGroup key={m.id} heading={m.title}>
-              {m.items.map((item) => (
+              {modulePages(m).map((item) => (
                 <CommandItem
                   key={item.href}
                   value={`${m.title} ${item.title} ${(item.keywords ?? []).join(" ")}`}

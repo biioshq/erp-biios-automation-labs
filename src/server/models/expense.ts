@@ -1,6 +1,5 @@
 import { Schema, model, models, type InferSchemaType, type Model, type Types } from "mongoose";
 import {
-  EXPENSE_CATEGORIES,
   EXPENSE_SOURCES,
   PAYMENT_METHODS,
   PROJECT_STAGES,
@@ -33,7 +32,8 @@ const expenseSchema = new Schema(
     project: { type: Schema.Types.ObjectId, ref: "Project", index: true },
     /** Every project expense belongs to exactly one stage. */
     stage: { type: String, enum: valuesOf(PROJECT_STAGES) },
-    category: { type: String, enum: valuesOf(EXPENSE_CATEGORIES), required: true, index: true },
+    /** A built-in value (EXPENSE_CATEGORIES) or a custom one (expenseCategories). The actions check it, not an enum, so custom values save. */
+    category: { type: String, required: true, index: true },
     description: { type: String, trim: true, maxlength: 1000 },
     /** The amount paid, GST included (equals gst.grandTotal when GST is recorded). */
     amount: { type: Number, required: true, min: 0 },

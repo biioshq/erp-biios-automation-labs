@@ -11,7 +11,7 @@ import { MOVEMENT_FILTER_KEYS, MOVEMENT_SORT_KEYS } from "@/features/inventory/m
 import { MovementsView } from "@/features/inventory/movements/components/movements-view";
 import { requireUser } from "@/server/auth/session";
 
-export const metadata: Metadata = { title: "Stock Movement" };
+export const metadata: Metadata = { title: "Movements" };
 
 export default async function MovementsPage({ searchParams }: PageProps<"/inventory/movements">) {
   // Every page checks the session itself: client navigations can skip the layout's check.

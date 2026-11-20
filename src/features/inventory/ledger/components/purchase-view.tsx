@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { ArrowDownToLine, PackagePlus, Percent, ReceiptText, StickyNote } from "lucide-react";
+import { ArrowDownToLine, History, PackagePlus, Percent, ReceiptText, StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -15,16 +15,18 @@ import { StockStatusBadge } from "@/components/shared/status-badge";
 import { applyFieldErrors } from "@/lib/action-result";
 import { toDateInput } from "@/lib/dates";
 import { emitDataChanged } from "@/lib/events";
-import { formatCurrency, formatNumber, round2 } from "@/lib/format";
+import { formatCurrency, formatDate, formatNumber, round2 } from "@/lib/format";
 import { gstGrandTotal, isInterState, splitGst } from "@/lib/gst";
 import { getStockStatus } from "@/lib/stock-status";
+import { cn } from "@/lib/utils";
 import { GST_RATES } from "@/config/company";
 import { FileDropzone } from "@/features/files/components/file-dropzone";
 import { FileTile } from "@/features/files/components/file-preview";
 import { ACCEPT_RECEIPTS, type FileDTO } from "@/features/files/types";
 import { discardPurchaseReceipt, purchaseStockAction } from "../actions";
 import { purchaseFormSchema, type PurchaseFormInput, type PurchaseFormValues } from "../schemas";
-import type { LedgerItem } from "../types";
+import { withoutUnusedInvoiceFill } from "../purchase-fill";
+import type { LastPurchase, LedgerItem } from "../types";
 import { ItemCard, StatusDot } from "./item-card";
 import { ContextPlaceholder, ImpactRow, OperationForm, OperationLayout, SubmitBar } from "./operation-layout";
 import { PickerField, type PickerOption } from "./picker-field";
@@ -33,23 +35,43 @@ import { formValidation } from "@/components/forms/form-options";
 
 const FORM_ID = "purchase-stock-form";
 
-function defaultsFor(item?: LedgerItem, quantity?: number): PurchaseFormInput {
+/** Text fields the form fills by itself when an item is picked. */
+type AutoField = "vendor" | "invoice.gstin" | "invoice.hsnSac";
+type AutoValues = Partial<Record<AutoField, string>> & { tax?: { cgst: number; sgst: number; igst: number } };
+
+/**
+ * What picking `item` fills in: the vendor, supplier GSTIN and HSN/SAC of its most recent purchase
+ * (the vendor falls back to the item's own). Invoice number and dates are never copied.
+ */
+function fillFor(item: LedgerItem | undefined, last: LastPurchase | undefined): Record<AutoField, string> {
+  return {
+    vendor: last?.vendor ?? item?.vendor ?? "",
+    "invoice.gstin": last?.gstin ?? "",
+    "invoice.hsnSac": last?.hsnSac ?? "",
+  };
+}
+
+/** The last purchase came with a GST invoice worth filling from. */
+const hadInvoice = (last: LastPurchase | undefined) => Boolean(last && (last.gstin || last.hsnSac || last.rate !== null));
+
+function defaultsFor(item?: LedgerItem, quantity?: number, last?: LastPurchase): PurchaseFormInput {
+  const fill = fillFor(item, last);
   return {
     itemId: item?.id as string,
     quantity: quantity as number,
     unitPrice: (item ? (item.lastPurchasePrice ?? item.unitPrice) || undefined : undefined) as number,
-    vendor: item?.vendor ?? "",
+    vendor: fill.vendor,
     date: toDateInput(new Date()),
     invoice: {
       invoiceNumber: "",
       invoiceDate: undefined,
-      gstin: "",
+      gstin: fill["invoice.gstin"],
       taxableAmount: undefined,
       cgst: undefined,
       sgst: undefined,
       igst: undefined,
       cess: undefined,
-      hsnSac: "",
+      hsnSac: fill["invoice.hsnSac"],
     },
     receiptFileId: undefined,
     note: "",
@@ -58,12 +80,15 @@ function defaultsFor(item?: LedgerItem, quantity?: number): PurchaseFormInput {
 
 export function PurchaseView({
   items,
+  lastPurchases = {},
   vendors,
   defaultItemId,
   defaultQuantity,
   recent,
 }: {
   items: LedgerItem[];
+  /** Each item's most recent purchase, by item id. */
+  lastPurchases?: Record<string, LastPurchase>;
   vendors: string[];
   defaultItemId?: string;
   defaultQuantity?: number;
@@ -72,11 +97,21 @@ export function PurchaseView({
   const [pending, startTransition] = useTransition();
   const [receipt, setReceipt] = useState<FileDTO | null>(null);
   const initialItem = items.find((i) => i.id === defaultItemId);
-  const [showInvoice, setShowInvoice] = useState(false);
+  // Fixed at mount: the props refresh on live updates, the form must not.
+  const [initialLast] = useState(() => (initialItem ? lastPurchases[initialItem.id] : undefined));
+  const [initialFill] = useState(() => fillFor(initialItem, initialLast));
+  const [showInvoice, setShowInvoice] = useState(() => hadInvoice(initialLast));
+  /** What the form filled by itself (so picking another item may replace it; typed values stay). */
+  const auto = useRef<AutoValues>(initialItem ? { ...initialFill } : {});
+  /** The GST rate of the last purchase, applied once there is a taxable amount. */
+  const [lastRate, setLastRate] = useState<number | null>(initialLast?.rate ?? null);
+  const [filledFrom, setFilledFrom] = useState<string | null>(() =>
+    initialLast && (initialLast.vendor || initialLast.gstin || initialLast.hsnSac || initialLast.rate !== null) ? initialLast.date : null,
+  );
 
   const form = useForm<PurchaseFormInput, unknown, PurchaseFormValues>({
     resolver: zodResolver(purchaseFormSchema),
-    defaultValues: defaultsFor(initialItem, defaultQuantity),
+    defaultValues: defaultsFor(initialItem, defaultQuantity, initialLast),
     ...formValidation,
   });
   const { control, setValue, getValues } = form;
@@ -106,13 +141,71 @@ export function PurchaseView({
     [items],
   );
 
+  /**
+   * Fills the vendor, GSTIN and HSN/SAC from the picked item's last purchase. A field counts as free
+   * when it is empty or still holds what the form filled for the previous item; typed values stay.
+   * Invoice fields are filled only into the GST section shown, so a hidden GSTIN never records an invoice.
+   */
+  function fillFromLastPurchase(picked: LedgerItem, invoiceOn: boolean) {
+    const last = lastPurchases[picked.id];
+    const fill = fillFor(picked, last);
+    let filled = false;
+    const fields: AutoField[] = ["vendor", "invoice.gstin", "invoice.hsnSac"];
+    for (const field of fields) {
+      if (field !== "vendor" && !invoiceOn) continue;
+      const current = (getValues(field) ?? "").trim();
+      if (current && current !== auto.current[field]) continue;
+      if (current !== fill[field]) setValue(field, fill[field], { shouldDirty: true, shouldValidate: Boolean(fill[field]) });
+      auto.current[field] = fill[field];
+      if (fill[field] && (field !== "vendor" || last?.vendor)) filled = true;
+    }
+    return { last, filled };
+  }
+
   function onItemSelected(id: string | undefined) {
     const picked = items.find((i) => i.id === id);
     if (!picked) return;
-    const last = picked.lastPurchasePrice ?? picked.unitPrice;
-    if (last > 0) setValue("unitPrice", last, { shouldDirty: true });
-    if (picked.vendor && !getValues("vendor")) setValue("vendor", picked.vendor, { shouldDirty: true });
+    const lastPrice = picked.lastPurchasePrice ?? picked.unitPrice;
+    if (lastPrice > 0) setValue("unitPrice", lastPrice, { shouldDirty: true });
+    const last = lastPurchases[picked.id];
+    // The last purchase had a GST invoice: show the section so its details can be filled and seen.
+    const invoiceOn = showInvoice || hadInvoice(last);
+    if (invoiceOn && !showInvoice) setShowInvoice(true);
+    const { filled } = fillFromLastPurchase(picked, invoiceOn);
+    // Tax the form worked out at the previous item's rate goes when this item has no rate of its own
+    // (with a rate, the effect below recalculates it).
+    const prevTax = auto.current.tax;
+    if (prevTax && (last?.rate ?? null) === null) {
+      const same = (["cgst", "sgst", "igst"] as const).every((h) => (getValues(`invoice.${h}`) ?? 0) === prevTax[h]);
+      if (same) {
+        for (const h of ["cgst", "sgst", "igst"] as const) setValue(`invoice.${h}`, undefined, { shouldDirty: true });
+      }
+      delete auto.current.tax;
+    }
+    setLastRate(last?.rate ?? null);
+    setFilledFrom(last && (filled || last.rate !== null) ? last.date : null);
   }
+
+  // The last purchase's GST rate, split by the supplier GSTIN as the quick-fill buttons do. It waits for a
+  // taxable amount, and never replaces tax the user entered (only what it filled itself, or nothing).
+  const watchedTaxable = invoice?.taxableAmount;
+  const watchedGstin = invoice?.gstin;
+  useEffect(() => {
+    if (!showInvoice || lastRate === null) return;
+    const t = watchedTaxable ?? 0;
+    if (!(t > 0)) return;
+    const current = { cgst: getValues("invoice.cgst") ?? 0, sgst: getValues("invoice.sgst") ?? 0, igst: getValues("invoice.igst") ?? 0 };
+    const prev = auto.current.tax;
+    const empty = !current.cgst && !current.sgst && !current.igst;
+    const ours = prev && current.cgst === prev.cgst && current.sgst === prev.sgst && current.igst === prev.igst;
+    if (!empty && !ours) return;
+    const split = splitGst(t, lastRate, isInterState(watchedGstin));
+    if (split.cgst === current.cgst && split.sgst === current.sgst && split.igst === current.igst) return;
+    setValue("invoice.cgst", split.cgst || undefined, { shouldDirty: true });
+    setValue("invoice.sgst", split.sgst || undefined, { shouldDirty: true });
+    setValue("invoice.igst", split.igst || undefined, { shouldDirty: true });
+    auto.current.tax = split;
+  }, [showInvoice, lastRate, watchedTaxable, watchedGstin, getValues, setValue]);
 
   function applyRate(rate: number) {
     const t = getValues("invoice.taxableAmount") ?? 0;
@@ -128,7 +221,16 @@ export function PurchaseView({
 
   function toggleInvoice(on: boolean) {
     setShowInvoice(on);
-    if (!on) setValue("invoice", defaultsFor().invoice, { shouldDirty: true });
+    if (!on) {
+      setValue("invoice", defaultsFor().invoice, { shouldDirty: true });
+      auto.current = { vendor: auto.current.vendor };
+      return;
+    }
+    // Turned on by hand: offer the last purchase's GSTIN and HSN/SAC too.
+    if (item) {
+      const { last, filled } = fillFromLastPurchase(item, true);
+      if (last && (filled || last.rate !== null)) setFilledFrom(last.date);
+    }
   }
 
   function dropReceipt() {
@@ -138,9 +240,12 @@ export function PurchaseView({
     setValue("receiptFileId", undefined, { shouldDirty: true });
   }
 
-  const onSubmit = form.handleSubmit((values) => {
+  // Built on submit rather than during render: the success path clears the auto-fill record (a ref).
+  const onSubmit = (event?: React.BaseSyntheticEvent) => form.handleSubmit(recordPurchase)(event);
+  function recordPurchase(values: PurchaseFormValues) {
+    const payload = withoutUnusedInvoiceFill(values, auto.current);
     startTransition(async () => {
-      const result = await purchaseStockAction(values);
+      const result = await purchaseStockAction(payload);
       if (!result.ok) {
         applyFieldErrors(result, form.setError);
         toast.error(result.error);
@@ -152,10 +257,13 @@ export function PurchaseView({
       );
       emitDataChanged();
       form.reset({ ...defaultsFor(), itemId: "" });
+      auto.current = {};
+      setLastRate(null);
+      setFilledFrom(null);
       setReceipt(null);
       setShowInvoice(false);
     });
-  });
+  }
 
   // What the item looks like once this purchase is recorded (weighted average, as the ledger computes it).
   const after = item && quantity > 0 ? previewPurchase(item, quantity, price) : null;
@@ -237,6 +345,14 @@ export function PurchaseView({
             </Field>
             <DateField control={control} name="date" label="Purchase date" required />
           </div>
+          {filledFrom && item ? (
+            <p className="-mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
+              <History className="mt-0.5 size-3.5 shrink-0" />
+              Filled from the last purchase on {formatDate(filledFrom)}
+              {showInvoice && lastRate !== null ? ` (GST ${lastRate}%, applied once the taxable amount is in)` : ""}. Change anything that
+              differs.
+            </p>
+          ) : null}
 
           <FormSection
             title="GST invoice"
@@ -282,7 +398,15 @@ export function PurchaseView({
                     <p className="text-[13px] font-medium">Quick fill GST rate</p>
                     <div className="flex flex-wrap gap-1">
                       {GST_RATES.map((rate) => (
-                        <Button key={rate} type="button" variant="outline" size="sm" className="tabular h-8 px-2.5" onClick={() => applyRate(rate)}>
+                        <Button
+                          key={rate}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className={cn("tabular h-8 px-2.5", rate === lastRate && "border-foreground/40 font-semibold")}
+                          title={rate === lastRate ? "Rate of the last purchase" : undefined}
+                          onClick={() => applyRate(rate)}
+                        >
                           {rate}%
                         </Button>
                       ))}

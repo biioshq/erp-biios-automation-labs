@@ -6,7 +6,6 @@ import { ArrowDownLeft, ArrowUpRight, ReceiptText } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
 import { cn } from "@/lib/utils";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, labelOf, type ExpenseCategory, type IncomeCategory } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
 import type { Transaction } from "../types";
 
@@ -35,7 +34,7 @@ export function RecentTransactions({ items }: { items: Transaction[] }) {
     <ul className="-mx-2 divide-y">
       {items.map((t, i) => {
         const income = t.direction === "income";
-        const category = income ? labelOf(INCOME_CATEGORIES, t.category as IncomeCategory) : labelOf(EXPENSE_CATEGORIES, t.category as ExpenseCategory);
+        const category = t.categoryLabel;
         return (
           <motion.li key={`${t.direction}-${t.id}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: i * 0.03 }}>
             <Link

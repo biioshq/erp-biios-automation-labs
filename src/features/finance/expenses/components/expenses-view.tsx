@@ -23,7 +23,8 @@ import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { useIsAdmin } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
-import { EXPENSE_CATEGORIES, EXPENSE_SOURCES, PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
+import { EXPENSE_SOURCES, PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
+import { DEFAULT_EXPENSE_CATEGORIES, expenseCategoryFilterOptions, type ExpenseCategoryOption } from "@/lib/expense-categories";
 import { formatDate } from "@/lib/format";
 import { emitDataChanged } from "@/lib/events";
 import type { Paginated } from "@/lib/list-params";
@@ -44,10 +45,13 @@ export function ExpensesView({
   data,
   projects,
   vendors,
+  categories = DEFAULT_EXPENSE_CATEGORIES,
 }: {
   data: Paginated<ExpenseRow> & { summary: ExpenseSummary };
   projects: ProjectOption[];
   vendors: string[];
+  /** Built-in and custom categories, hidden ones included (getExpenseCategories). */
+  categories?: ExpenseCategoryOption[];
 }) {
   const isAdmin = useIsAdmin();
   const router = useRouter();
@@ -211,7 +215,7 @@ export function ExpensesView({
         header: ({ column }) => <DataTableColumnHeader column={column} title="Category" />,
         cell: ({ row }) => (
           <StatusBadge tone="neutral" dot={false}>
-            {labelOf(EXPENSE_CATEGORIES, row.original.category)}
+            {row.original.categoryLabel}
           </StatusBadge>
         ),
       },
@@ -308,7 +312,7 @@ export function ExpensesView({
 
   const filters: FilterDef[] = useMemo(
     () => [
-      { key: "category", title: "Category", options: EXPENSE_CATEGORIES.map((o) => ({ ...o })) },
+      { key: "category", title: "Category", options: expenseCategoryFilterOptions(categories) },
       {
         key: "project",
         title: "Project",
@@ -318,7 +322,7 @@ export function ExpensesView({
       { key: "paymentMethod", title: "Payment", options: PAYMENT_METHODS.map((o) => ({ ...o })) },
       { key: "source", title: "Source", options: EXPENSE_SOURCES.map((o) => ({ ...o })) },
     ],
-    [projects],
+    [projects, categories],
   );
 
   const exportHref = (format: string) => {
@@ -399,7 +403,7 @@ export function ExpensesView({
         }
       >
         {panel?.kind === "new" ? (
-          <ExpenseForm projects={projects} vendors={vendors} onDone={() => setPanel(null)} onCancel={() => setPanel(null)} />
+          <ExpenseForm projects={projects} vendors={vendors} categories={categories} onDone={() => setPanel(null)} onCancel={() => setPanel(null)} />
         ) : panel && (loadingDetail || detail?.id !== panel.id) ? (
           <ExpenseDetailSkeleton />
         ) : panel?.kind === "edit" && detail ? (
@@ -409,6 +413,7 @@ export function ExpensesView({
             expense={detail}
             projects={projects}
             vendors={vendors}
+            categories={categories}
             onDone={(id) => {
               setDetail(null);
               setVersion((v) => v + 1);

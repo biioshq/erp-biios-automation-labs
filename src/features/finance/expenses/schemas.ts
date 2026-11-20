@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { EXPENSE_CATEGORIES, PAYMENT_METHODS, PROJECT_STAGES, valuesOf } from "@/lib/constants";
+import { PAYMENT_METHODS, PROJECT_STAGES, valuesOf } from "@/lib/constants";
+import { expenseCategoryLabelSchema, expenseCategoryValueSchema } from "@/lib/expense-categories";
 import {
   dateInput,
   gstin,
@@ -35,7 +36,8 @@ export const expenseFormSchema = z
     vendorAddress: optionalText(500),
     projectId: optionalObjectId,
     stage: z.enum(valuesOf(PROJECT_STAGES)).optional(),
-    category: z.enum(valuesOf(EXPENSE_CATEGORIES), { error: "Pick a category" }),
+    /** Built-in or custom; the actions check it is a known, visible category (or the record's current one). */
+    category: expenseCategoryValueSchema,
     description: optionalText(1000),
     amount: positiveMoney,
     date: dateInput,
@@ -76,3 +78,9 @@ export const expenseIdSchema = z.object({ id: objectId });
 /** Filter keys accepted in the URL of the expenses list. */
 export const EXPENSE_FILTER_KEYS = ["category", "project", "stage", "paymentMethod", "source", "vendor"] as const;
 export const EXPENSE_SORT_KEYS = ["date", "amount", "vendor", "number", "category", "createdAt"] as const;
+
+/** Managing categories (admins, from the Expenses page). */
+export const expenseCategoryCreateSchema = z.object({ label: expenseCategoryLabelSchema });
+export const expenseCategoryRenameSchema = z.object({ value: expenseCategoryValueSchema, label: expenseCategoryLabelSchema });
+export const expenseCategoryHiddenSchema = z.object({ value: expenseCategoryValueSchema, hidden: z.boolean() });
+export const expenseCategoryValueOnlySchema = z.object({ value: expenseCategoryValueSchema });

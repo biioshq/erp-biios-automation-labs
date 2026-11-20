@@ -12,7 +12,9 @@ import {
   monthlyExpensesByCategory,
   monthlyIncomeExpense,
 } from "@/server/services/metrics";
-import { EXPENSE_CATEGORIES, labelOf, type ExpenseCategory, type ProjectStatus } from "@/lib/constants";
+import { INCOME_CATEGORIES, labelOf, type IncomeCategory, type ProjectStatus } from "@/lib/constants";
+import { getExpenseCategoryLabeler } from "@/server/expense-categories";
+import { isBuiltInExpenseCategory } from "@/lib/expense-categories";
 import { round2 } from "@/lib/format";
 import { endOfDayIST, toDateInput } from "@/lib/dates";
 import { monthlyEquivalent } from "@/lib/recurrence";
@@ -28,15 +30,43 @@ function delta(current: number, previous: number | undefined): number | null {
   return (current - previous) / Math.abs(previous);
 }
 
+/**
+ * Colours for categories admins added, light and dark. None of them is one of the five chart colours
+ * the built-ins take by rank, so a custom category keeps its own colour whatever the period.
+ */
+const CUSTOM_CATEGORY_COLORS = [
+  { light: "#8a6d00", dark: "#d6b53a" },
+  { light: "#3d8a2f", dark: "#7cc96b" },
+  { light: "#1f7fa3", dark: "#5cc0e6" },
+  { light: "#8f5a3c", dark: "#cf9877" },
+  { light: "#b23a3a", dark: "#f07b7b" },
+  { light: "#8e3f8f", dark: "#d38bd4" },
+];
+
+/** The same colour for a value every time; if another custom category in the chart has it already, the next free one. */
+function customCategoryColor(value: string, taken: Set<number>) {
+  let hash = 0;
+  for (const ch of value) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  let slot = hash % CUSTOM_CATEGORY_COLORS.length;
+  for (let i = 0; i < CUSTOM_CATEGORY_COLORS.length && taken.has(slot); i++) slot = (slot + 1) % CUSTOM_CATEGORY_COLORS.length;
+  taken.add(slot);
+  return CUSTOM_CATEGORY_COLORS[slot];
+}
+
 /** Top categories by spend over the window, with the rest folded into "Other". */
-function stackCategories(raw: { month: string; category: string; total: number }[], months: string[]): CategoryStack {
+function stackCategories(
+  raw: { month: string; category: string; total: number }[],
+  months: string[],
+  categoryLabel: (value: string) => string,
+): CategoryStack {
   const totals = new Map<string, number>();
   for (const r of raw) totals.set(r.category, (totals.get(r.category) ?? 0) + r.total);
   const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([category]) => category);
   const top = ranked.slice(0, TOP_CATEGORIES);
   const hasOther = ranked.length > TOP_CATEGORIES;
-  const series = [
-    ...top.map((key) => ({ key, label: labelOf(EXPENSE_CATEGORIES, key as ExpenseCategory) })),
+  const taken = new Set<number>();
+  const series: CategoryStack["series"] = [
+    ...top.map((key) => ({ key, label: categoryLabel(key), ...(isBuiltInExpenseCategory(key) ? {} : { color: customCategoryColor(key, taken) }) })),
     ...(hasOther ? [{ key: OTHER_KEY, label: "Other" }] : []),
   ];
   const rows = months.map((month) => {
@@ -58,7 +88,7 @@ const projectOf = (value: unknown): Transaction["project"] => {
 };
 
 async function recentTransactions(limit = 10): Promise<Transaction[]> {
-  const [expenses, income] = await Promise.all([
+  const [expenses, income, expenseLabel] = await Promise.all([
     Expense.find(await salaryScope(), { number: 1, vendor: 1, amount: 1, date: 1, category: 1, project: 1 })
       .sort({ date: -1, _id: -1 })
       .limit(limit)
@@ -69,6 +99,7 @@ async function recentTransactions(limit = 10): Promise<Transaction[]> {
       .limit(limit)
       .populate("project", "name color")
       .lean(),
+    getExpenseCategoryLabeler(),
   ]);
   const merged: (Transaction & { sortKey: number })[] = [
     ...expenses.map((e) => ({
@@ -79,6 +110,7 @@ async function recentTransactions(limit = 10): Promise<Transaction[]> {
       amount: e.amount,
       date: iso(e.date)!,
       category: e.category,
+      categoryLabel: expenseLabel(e.category),
       project: projectOf(e.project),
       href: `/finance/expenses?view=${e._id}`,
       sortKey: new Date(e.date).getTime(),
@@ -91,6 +123,7 @@ async function recentTransactions(limit = 10): Promise<Transaction[]> {
       amount: i.amount,
       date: iso(i.date)!,
       category: i.category ?? "",
+      categoryLabel: labelOf(INCOME_CATEGORIES, (i.category ?? "") as IncomeCategory),
       project: projectOf(i.project),
       href: `/finance/income?view=${i._id}`,
       sortKey: new Date(i.date).getTime(),
@@ -99,7 +132,7 @@ async function recentTransactions(limit = 10): Promise<Transaction[]> {
   return merged
     .sort((a, b) => b.sortKey - a.sortKey)
     .slice(0, limit)
-    .map((t) => ({ id: t.id, direction: t.direction, number: t.number, party: t.party, amount: t.amount, date: t.date, category: t.category, project: t.project, href: t.href }));
+    .map((t) => ({ id: t.id, direction: t.direction, number: t.number, party: t.party, amount: t.amount, date: t.date, category: t.category, categoryLabel: t.categoryLabel, project: t.project, href: t.href }));
 }
 
 const UPCOMING_COUNT = 3;
@@ -150,7 +183,7 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
   const today = endOfDayIST(now);
   const toToday = (to: Date) => new Date(Math.min(to.getTime(), today.getTime()));
 
-  const [totals, current, previous, thisMonth, thisMonthToDate, lastMonth, inventory, statusCounts, monthly, categoryRows, budgetRows, transactions, recurring] =
+  const [totals, current, previous, thisMonth, thisMonthToDate, lastMonth, inventory, statusCounts, monthly, categoryRows, budgetRows, transactions, recurring, expenseLabel] =
     await Promise.all([
       financeTotals({ from: range.from, to: range.to }),
       range.previous && range.to ? financeTotals({ from: range.from, to: toToday(range.to) }) : Promise.resolve(null),
@@ -165,6 +198,7 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
       budgetUsage({ status: ["active", "planning", "on_hold"] }),
       recentTransactions(10),
       recurringCommitments(),
+      getExpenseCategoryLabeler(),
     ]);
 
   const projectCount = (status: ProjectStatus) => statusCounts.find((s) => s._id === status)?.n ?? 0;
@@ -203,7 +237,7 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
       onHoldProjects: projectCount("on_hold"),
     },
     monthly,
-    categories: stackCategories(categoryRows, months),
+    categories: stackCategories(categoryRows, months, expenseLabel),
     budgets,
     transactions,
     recurring,

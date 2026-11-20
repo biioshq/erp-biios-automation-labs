@@ -1,4 +1,4 @@
-import type { ExpenseCategory, PaymentMethod, ProjectStage, RecurringFrequency, RecurringStatus } from "@/lib/constants";
+import type { PaymentMethod, ProjectStage, RecurringFrequency, RecurringStatus } from "@/lib/constants";
 
 /** A row in the recurring expenses table. */
 export type RecurringRow = {
@@ -6,7 +6,10 @@ export type RecurringRow = {
   code: string;
   name: string;
   vendor: string;
-  category: ExpenseCategory;
+  /** The stored value: a built-in (EXPENSE_CATEGORIES) or a custom category. */
+  category: string;
+  /** Its current name, resolved on the server. */
+  categoryLabel: string;
   /** Per occurrence, GST included. */
   amount: number;
   gstRate: number;

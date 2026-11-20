@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { EXPENSE_CATEGORIES, PAYMENT_METHODS, PROJECT_STAGES, RECURRING_FREQUENCIES, valuesOf, type ExpenseCategory, type RecurringFrequency } from "@/lib/constants";
+import { PAYMENT_METHODS, PROJECT_STAGES, RECURRING_FREQUENCIES, valuesOf, type ExpenseCategory, type RecurringFrequency } from "@/lib/constants";
+import { expenseCategoryValueSchema } from "@/lib/expense-categories";
 import { GST_RATES } from "@/config/company";
 import { dateInput, gstin, objectId, optionalDateInput, optionalObjectId, optionalText, positiveMoney, requiredText } from "@/lib/zod";
 
@@ -9,7 +10,8 @@ export const recurringFormSchema = z
   .object({
     name: requiredText("Name", 160),
     vendor: requiredText("Vendor", 200),
-    category: z.enum(valuesOf(EXPENSE_CATEGORIES), { error: "Pick a category" }),
+    /** Built-in or custom; the actions check it is a known, visible category (or the schedule's current one). */
+    category: expenseCategoryValueSchema,
     description: optionalText(1000),
     amount: positiveMoney,
     gstRate: z

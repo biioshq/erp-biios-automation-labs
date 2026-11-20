@@ -12,6 +12,7 @@ import { getEmployeeOptions, getProjectOptions, getVendorNames } from "@/server/
 import { getRecurringSummary, listRecurring } from "@/features/finance/recurring/queries";
 import { RECURRING_FILTER_KEYS, RECURRING_SORT_KEYS } from "@/features/finance/recurring/schemas";
 import { RecurringView } from "@/features/finance/recurring/components/recurring-view";
+import { getExpenseCategories } from "@/server/expense-categories";
 
 export const metadata: Metadata = { title: "Recurring expenses" };
 
@@ -23,13 +24,14 @@ export default async function RecurringPage({ searchParams }: PageProps<"/financ
     sortable: RECURRING_SORT_KEYS,
     defaultSort: { id: "nextRunDate", desc: false },
   });
-  const [data, summary, projects, vendors, employees, user] = await Promise.all([
+  const [data, summary, projects, vendors, employees, user, categories] = await Promise.all([
     listRecurring(params),
     getRecurringSummary(),
     getProjectOptions(),
     getVendorNames(),
     getEmployeeOptions(),
     getCurrentUser(),
+    getExpenseCategories(),
   ]);
   const isAdmin = user?.role === "admin";
 
@@ -90,7 +92,7 @@ export default async function RecurringPage({ searchParams }: PageProps<"/financ
         </p>
       )}
 
-      <RecurringView data={data} summary={summary} projects={projects} vendors={vendors} employees={employees} />
+      <RecurringView data={data} summary={summary} projects={projects} vendors={vendors} employees={employees} categories={categories} />
     </Page>
   );
 }

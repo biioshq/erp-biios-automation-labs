@@ -22,7 +22,8 @@ import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
 import { cn } from "@/lib/utils";
 import { applyFieldErrors } from "@/lib/action-result";
-import { EXPENSE_CATEGORIES, PAYMENT_METHODS, PROJECT_STAGES } from "@/lib/constants";
+import { PAYMENT_METHODS, PROJECT_STAGES } from "@/lib/constants";
+import { DEFAULT_EXPENSE_CATEGORIES, expenseCategoryChoices, type ExpenseCategoryOption } from "@/lib/expense-categories";
 import { toDateInput } from "@/lib/dates";
 import { gstGrandTotal, isInterState, splitGst } from "@/lib/gst";
 import { LOW_CONFIDENCE, type OcrResponse } from "@/lib/ocr";
@@ -80,6 +81,7 @@ export function ExpenseForm({
   expense,
   projects,
   vendors,
+  categories = DEFAULT_EXPENSE_CATEGORIES,
   defaultProjectId,
   onDone,
   onCancel,
@@ -87,6 +89,8 @@ export function ExpenseForm({
   expense?: ExpenseDetail | null;
   projects: ProjectOption[];
   vendors: string[];
+  /** Built-in and custom categories (getExpenseCategories); hidden ones are offered only as the record's current one. */
+  categories?: ExpenseCategoryOption[];
   defaultProjectId?: string;
   onDone: (id: string) => void;
   onCancel: () => void;
@@ -94,10 +98,13 @@ export function ExpenseForm({
   const isEdit = Boolean(expense);
   // Inventory expenses come from assignments; salary payments are recorded by admins only.
   const isAdmin = useIsAdmin();
-  const categoryOptions = useMemo(
-    () => EXPENSE_CATEGORIES.filter((o) => o.value !== "inventory" && (isAdmin || o.value !== "salaries")),
-    [isAdmin],
-  );
+  const currentCategory = expense?.category;
+  const currentLabel = expense?.categoryLabel;
+  const categoryOptions = useMemo(() => {
+    const choices = expenseCategoryChoices(categories, { current: currentCategory, allowSalaries: isAdmin });
+    // A record whose category the list does not know still shows the name its row was given.
+    return choices.map((c) => (c.value === currentCategory && c.label === currentCategory && currentLabel ? { ...c, label: currentLabel } : c));
+  }, [categories, currentCategory, currentLabel, isAdmin]);
   // The rate of the last quick fill, while its taxes are untouched: they are split again if the GSTIN state changes.
   const quickRate = useRef<number | null>(null);
   const [pending, startTransition] = useTransition();

@@ -9,6 +9,7 @@ import {
   Archive,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Eye,
   LayoutGrid,
   MoreHorizontal,
@@ -49,12 +50,13 @@ import type { ItemFormRecord, ItemRow } from "../types";
 import { ItemForm, type CategoryOption } from "./item-form";
 import { ItemCard, OutOfStockHint } from "./item-card";
 
-type Panel = { kind: "new" } | { kind: "edit"; id: string } | null;
+type Panel = { kind: "new"; from: string | null } | { kind: "edit"; id: string } | null;
 type Layout = "table" | "cards";
 
 /**
  * All Inventory: a server-mode table or a card grid (?layout=cards) over the same
  * URL state, with the create / edit sheet driven by ?new=1 and ?edit=<id>.
+ * ?new=1&copy=<id> opens Add item filled with another item's details (Duplicate).
  */
 export function ItemsView({
   data,
@@ -73,12 +75,13 @@ export function ItemsView({
   const [rows, removeRow] = useOptimistic(data.rows, (state, id: string) => state.filter((r) => r.id !== id));
   const [record, setRecord] = useState<ItemFormRecord | null>(null);
   const [loadingRecord, setLoadingRecord] = useState(false);
+  const [template, setTemplate] = useState<ItemFormRecord | null>(null);
   const [removing, setRemoving] = useState<ItemRow | null>(null);
   // Archiving and deleting are admin-only (the action refuses members too).
   const isAdmin = useIsAdmin();
 
   const panel: Panel = useMemo(() => {
-    if (searchParams.get("new") === "1") return { kind: "new" };
+    if (searchParams.get("new") === "1") return { kind: "new", from: searchParams.get("copy") };
     const edit = searchParams.get("edit");
     return edit ? { kind: "edit", id: edit } : null;
   }, [searchParams]);
@@ -93,7 +96,11 @@ export function ItemsView({
     replaceParams((p) => {
       p.delete("new");
       p.delete("edit");
-      if (next?.kind === "new") p.set("new", "1");
+      p.delete("copy");
+      if (next?.kind === "new") {
+        p.set("new", "1");
+        if (next.from) p.set("copy", next.from);
+      }
       if (next?.kind === "edit") p.set("edit", next.id);
     });
   const setLayout = (next: Layout) =>
@@ -129,6 +136,37 @@ export function ItemsView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
+
+  // Duplicate: the source item is loaded fresh each time, like the edit form.
+  const fromId = panel?.kind === "new" ? panel.from : null;
+  const [prevFromId, setPrevFromId] = useState(fromId);
+  if (fromId !== prevFromId) {
+    setPrevFromId(fromId);
+    if (!fromId) setTemplate(null);
+  }
+  useEffect(() => {
+    if (!fromId || template?.id === fromId) return;
+    let cancelled = false;
+    fetchItem(fromId)
+      .then((r) => {
+        if (cancelled) return;
+        if (!r) {
+          toast.error("That item no longer exists. Starting a blank item instead.");
+          setPanel({ kind: "new", from: null });
+          return;
+        }
+        setTemplate(r);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        toast.error("Couldn't load that item. Starting a blank item instead.");
+        setPanel({ kind: "new", from: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromId]);
 
   async function remove(item: ItemRow) {
     startTransition(() => removeRow(item.id));
@@ -192,11 +230,14 @@ export function ItemsView({
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <Link href={`/inventory/purchase?item=${item.id}`}>
-              <PackagePlus /> Purchase stock
+              <PackagePlus /> Buy more
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: item.id })}>
             <Pencil /> Edit
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setPanel({ kind: "new", from: item.id })}>
+            <Copy /> Duplicate
           </DropdownMenuItem>
           {isAdmin ? (
             <>
@@ -335,7 +376,7 @@ export function ItemsView({
       title="No inventory items yet"
       description="Add your first item with its opening stock. Every later purchase, assignment and return builds on it."
       action={
-        <Button onClick={() => setPanel({ kind: "new" })}>
+        <Button onClick={() => setPanel({ kind: "new", from: null })}>
           <Plus /> Add item
         </Button>
       }
@@ -384,11 +425,27 @@ export function ItemsView({
         description={
           editing
             ? (record?.sku ?? undefined)
-            : "Create the item, then record what you hold. Later changes go through Purchase, Assign, Return or Adjust."
+            : fromId
+              ? `Starts from ${template?.name ?? "the item"}: its details are filled in, its stock and history are not. Give it a new name.`
+              : "Create the item, then record what you hold. Later changes go through Purchase, Assign, Return or Adjust."
         }
       >
-        {panel?.kind === "new" ? (
-          <ItemForm categories={categories} vendors={vendors} onDone={() => setPanel(null)} onCancel={() => setPanel(null)} />
+        {panel?.kind === "new" && fromId && template?.id !== fromId ? (
+          <div className="space-y-4 p-6">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-32 w-full" />
+          </div>
+        ) : panel?.kind === "new" ? (
+          // Keyed by the source, so switching from a blank form to a duplicate (or between two) starts over.
+          <ItemForm
+            key={fromId ? `from:${fromId}` : "new"}
+            template={fromId ? template : null}
+            categories={categories}
+            vendors={vendors}
+            onDone={() => setPanel(null)}
+            onCancel={() => setPanel(null)}
+          />
         ) : editing && (loadingRecord || record?.id !== editId) ? (
           <div className="space-y-4 p-6">
             <Skeleton className="h-9 w-full" />

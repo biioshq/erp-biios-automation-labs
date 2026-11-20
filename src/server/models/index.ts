@@ -11,6 +11,7 @@ import "server-only";
  *   inventory >── inventoryCategories
  *   employees ─< projectMembers >── projects
  *   recurringExpenses ─< expenses (posted occurrences); employees ── recurringExpenses (salary)
+ *   expenseCategories (custom categories and renames of built-ins, matched by value on expenses / recurringExpenses)
  *   notifications, reports (export log), counters (document numbers), user (Better Auth)
  *
  * Money is stored in rupees as numbers rounded to paise (see round2).
@@ -33,3 +34,4 @@ export { Report, type ReportDoc } from "./report";
 export { Employee, type EmployeeDoc } from "./employee";
 export { ProjectMember, type ProjectMemberDoc } from "./project-member";
 export { RecurringExpense, type RecurringExpenseDoc } from "./recurring-expense";
+export { ExpenseCategorySetting, type ExpenseCategorySettingDoc } from "./expense-category";

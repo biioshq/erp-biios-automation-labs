@@ -5,7 +5,8 @@ import { connectDB } from "@/server/db";
 import { InventoryCategory, Project } from "@/server/models";
 import { dateRangeFilter, fromDateInput, toDateInput } from "@/lib/dates";
 import { formatDate, round2 } from "@/lib/format";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, labelOf } from "@/lib/constants";
+import { INCOME_CATEGORIES, labelOf } from "@/lib/constants";
+import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import type { ReportColumn, ReportFilters, ReportRow, ReportTotals, ColumnType } from "../types";
 
 export const col = (key: string, header: string, type: ColumnType, width: number): ReportColumn => ({ key, header, type, width });
@@ -92,8 +93,8 @@ export async function describeFilters(
       const cats = await InventoryCategory.find({ _id: { $in: objectIds(f.category) } }, { name: 1 }).lean();
       parts.push(`Categories: ${list(cats.map((c) => c.name))}`);
     } else {
-      const dict = opts.categories === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-      parts.push(`Categories: ${list(f.category.map((c) => labelOf(dict, c as never)))}`);
+      const label = opts.categories === "income" ? (c: string) => labelOf(INCOME_CATEGORIES, c as never) : await getExpenseCategoryLabeler();
+      parts.push(`Categories: ${list(f.category.map((c) => label(c)))}`);
     }
   }
   if (f.q) parts.push(`Search: "${f.q}"`);

@@ -1,6 +1,5 @@
 import { Schema, model, models, type InferSchemaType, type Model, type Types } from "mongoose";
 import {
-  EXPENSE_CATEGORIES,
   PAYMENT_METHODS,
   PROJECT_STAGES,
   RECURRING_FREQUENCIES,
@@ -20,7 +19,8 @@ const recurringExpenseSchema = new Schema(
     code: { type: String, required: true, unique: true },
     name: { type: String, required: true, trim: true, maxlength: 160 },
     vendor: { type: String, required: true, trim: true, maxlength: 200 },
-    category: { type: String, enum: valuesOf(EXPENSE_CATEGORIES), required: true },
+    /** A built-in value (EXPENSE_CATEGORIES) or a custom one (expenseCategories). The actions check it, not an enum, so custom values save. */
+    category: { type: String, required: true },
     description: { type: String, trim: true, maxlength: 1000 },
     /** Amount per occurrence, GST included. */
     amount: { type: Number, required: true, min: 0 },

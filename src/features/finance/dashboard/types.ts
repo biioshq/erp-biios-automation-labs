@@ -1,4 +1,4 @@
-import type { ExpenseCategory, ProjectStatus } from "@/lib/constants";
+import type { ProjectStatus } from "@/lib/constants";
 import type { DashboardPeriod } from "./periods";
 
 export type DashboardKpis = {
@@ -26,7 +26,12 @@ export type MonthlyPoint = { month: string; income: number; expenses: number; pr
 
 export type CategoryStack = {
   /** Series keys in stacking order (bottom first), with display labels. */
-  series: { key: string; label: string }[];
+  series: {
+    key: string;
+    label: string;
+    /** Set for categories admins added: a fixed colour per category. Built-ins take chart colours by rank. */
+    color?: { light: string; dark: string };
+  }[];
   /** One row per month; each series key holds that month's total. */
   rows: ({ month: string } & Record<string, number | string>)[];
   total: number;
@@ -51,7 +56,10 @@ export type Transaction = {
   party: string;
   amount: number;
   date: string;
-  category: ExpenseCategory | string;
+  /** The stored value: an expense category (built-in or custom) or an income category. */
+  category: string;
+  /** Its current name, resolved on the server. */
+  categoryLabel: string;
   project: { id: string; name: string; color: string } | null;
   href: string;
 };

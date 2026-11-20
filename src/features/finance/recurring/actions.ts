@@ -7,6 +7,7 @@ import { Expense, RecurringExpense } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
 import { occurrenceKey, postNextOccurrenceNow } from "@/server/services/recurring";
 import { getCurrentUser } from "@/server/auth/session";
+import { assertExpenseCategoryAllowed } from "@/server/expense-categories";
 import { addDays, fromDateInput, startOfDayIST, startOfMonthIST, toDateInput } from "@/lib/dates";
 import { iso } from "@/server/serialize";
 import { round2 } from "@/lib/format";
@@ -92,6 +93,7 @@ const endedBeforeNext = () =>
 export const createRecurring = defineAction(
   recurringFormSchema,
   async (input, user) => {
+    await assertExpenseCategoryAllowed(input.category);
     const doc = toDocument(input);
     const nextRunDate = firstOccurrence(doc.startDate, doc.frequency, doc.dayOfMonth);
     if (doc.endDate && nextRunDate.getTime() > doc.endDate.getTime()) throw endedBeforeNext();
@@ -115,6 +117,8 @@ export const updateRecurring = defineAction(
   async (input) => {
     const existing = await RecurringExpense.findById(input.id).lean();
     if (!existing) throw notFound("The schedule");
+    // Keeping the current category always saves, even if it was hidden since.
+    await assertExpenseCategoryAllowed(input.category, existing.category);
     const doc = toDocument(input);
     if (existing.status !== "ended") await assertOneSalarySchedule(doc, existing._id);
 

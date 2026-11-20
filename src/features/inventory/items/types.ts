@@ -38,6 +38,16 @@ export type ItemFormRecord = {
   updatedAt: string;
 };
 
+/** An active item that looks like the one being added: same or very similar name, or the same SKU. */
+export type SimilarItem = {
+  id: string;
+  name: string;
+  sku: string;
+  unit: InventoryUnit;
+  available: number;
+  match: "exact" | "similar" | "sku";
+};
+
 export type ItemMovementRow = {
   id: string;
   type: MovementType;

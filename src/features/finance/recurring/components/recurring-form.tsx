@@ -15,7 +15,8 @@ import { ComboboxField, DateField, FormSection, NumberField, SelectField, TextFi
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
 import { applyFieldErrors } from "@/lib/action-result";
-import { EXPENSE_CATEGORIES, PAYMENT_METHODS, PROJECT_STAGES, RECURRING_FREQUENCIES } from "@/lib/constants";
+import { PAYMENT_METHODS, PROJECT_STAGES, RECURRING_FREQUENCIES } from "@/lib/constants";
+import { DEFAULT_EXPENSE_CATEGORIES, expenseCategoryChoices, type ExpenseCategoryOption } from "@/lib/expense-categories";
 import { addDays, fromDateInput, startOfDayIST, startOfMonthIST, toDateInput } from "@/lib/dates";
 import { emitDataChanged } from "@/lib/events";
 import { formatDate, round2 } from "@/lib/format";
@@ -31,14 +32,19 @@ import type { RecurringDetail } from "../types";
 import { formValidation } from "@/components/forms/form-options";
 
 const PAYMENT_OPTIONS = PAYMENT_METHODS.filter((m) => m.value !== "stock");
-const CATEGORY_OPTIONS = EXPENSE_CATEGORIES.filter((c) => c.value !== "inventory");
 const DAY_OPTIONS = [...Array.from({ length: 28 }, (_, i) => ({ value: i + 1, label: `${ordinal(i + 1)} of the month` })), { value: 31, label: "Last day of the month" }];
 
-function defaultsFrom(schedule?: RecurringDetail | null, template?: RecurringTemplate | null): RecurringFormInput {
+function defaultsFrom(
+  schedule: RecurringDetail | null | undefined,
+  template: RecurringTemplate | null | undefined,
+  offered: (value: string) => boolean,
+): RecurringFormInput {
+  // A quick start whose category an admin has hidden leaves the category for the person to pick.
+  const templateCategory = template && offered(template.category) ? template.category : undefined;
   return {
     name: schedule?.name ?? template?.name ?? "",
     vendor: schedule?.vendor ?? "",
-    category: schedule?.category ?? template?.category ?? (undefined as unknown as RecurringFormInput["category"]),
+    category: schedule?.category ?? templateCategory ?? (undefined as unknown as RecurringFormInput["category"]),
     description: schedule?.description ?? template?.description ?? "",
     amount: schedule?.amount ?? (undefined as unknown as number),
     gstRate: schedule?.gstRate ?? template?.gstRate ?? 0,
@@ -86,6 +92,7 @@ export function RecurringForm({
   projects,
   vendors,
   employees,
+  categories = DEFAULT_EXPENSE_CATEGORIES,
   onDone,
   onCancel,
 }: {
@@ -94,16 +101,29 @@ export function RecurringForm({
   projects: ProjectOption[];
   vendors: string[];
   employees: EmployeeOption[];
+  /** Built-in and custom categories (getExpenseCategories); hidden ones are offered only as the schedule's current one. */
+  categories?: ExpenseCategoryOption[];
   onDone: (id: string) => void;
   onCancel: () => void;
 }) {
   const isEdit = Boolean(schedule);
+  // Schedules are admin-only, so salaries are always offered; "inventory" never is (stock assignments write it).
+  const currentCategory = schedule?.category;
+  const currentLabel = schedule?.categoryLabel;
+  const categoryOptions = useMemo(
+    () =>
+      expenseCategoryChoices(categories, { current: currentCategory }).map((c) =>
+        c.value === currentCategory && c.label === currentCategory && currentLabel ? { ...c, label: currentLabel } : c,
+      ),
+    [categories, currentCategory, currentLabel],
+  );
+  const offered = (value: string) => categoryOptions.some((c) => c.value === value);
   const [pending, startTransition] = useTransition();
   const [templateKey, setTemplateKey] = useState<string | null>(null);
 
   const form = useForm<RecurringFormInput, unknown, RecurringFormValues>({
     resolver: zodResolver(recurringFormSchema),
-    defaultValues: defaultsFrom(schedule, RECURRING_TEMPLATES.find((t) => t.key === template)),
+    defaultValues: defaultsFrom(schedule, RECURRING_TEMPLATES.find((t) => t.key === template), offered),
     ...formValidation,
   });
   const { control, setValue, getValues } = form;
@@ -145,7 +165,7 @@ export function RecurringForm({
     setTemplateKey(t.key);
     const opts = { shouldDirty: true, shouldValidate: form.formState.isSubmitted };
     setValue("name", t.name, opts);
-    setValue("category", t.category, opts);
+    if (offered(t.category)) setValue("category", t.category, opts);
     setValue("frequency", t.frequency, opts);
     setValue("dayOfMonth", t.dayOfMonth, opts);
     setValue("gstRate", t.gstRate, opts);
@@ -223,7 +243,7 @@ export function RecurringForm({
               </datalist>
               {errors.vendor ? <FieldError errors={[errors.vendor]} className="text-xs" /> : null}
             </Field>
-            <SelectField control={control} name="category" label="Category" required options={CATEGORY_OPTIONS} placeholder="Choose a category" />
+            <SelectField control={control} name="category" label="Category" required options={categoryOptions} placeholder="Choose a category" />
             <TextField control={control} name="description" label="Description" placeholder="What is this for?" className="sm:col-span-2" />
           </div>
         </FormSection>

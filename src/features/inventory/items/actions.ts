@@ -11,9 +11,19 @@ import { connectDB } from "@/server/db";
 import { fromDateInput } from "@/lib/dates";
 import { formatNumber } from "@/lib/format";
 import { getStockStatus } from "@/lib/stock-status";
-import { adjustStockSchema, itemFormSchema, itemIdSchema, itemLoadedSchema, suggestSkuSchema, type ItemFormValues } from "./schemas";
+import {
+  adjustStockSchema,
+  copyNameSchema,
+  itemFormSchema,
+  itemIdSchema,
+  itemLoadedSchema,
+  similarItemsSchema,
+  suggestSkuSchema,
+  type ItemFormValues,
+} from "./schemas";
 import { getItemForm } from "./queries";
-import type { ItemFormRecord } from "./types";
+import { copyBaseName, copyName, exactNamePattern, matchItemName, namePrefixPattern, normalizeItemName, normalizeSku } from "./matching";
+import type { ItemFormRecord, SimilarItem } from "./types";
 
 /** Anything that touches stock also moves Finance numbers (inventory value, GST input credit). */
 const REVALIDATE: [string, "layout"][] = [
@@ -39,6 +49,25 @@ async function assertSkuFree(sku: string, exceptId?: string) {
   }
 }
 
+/**
+ * One active item per name: adding the same item again would split its stock and history in two,
+ * so the form points to Buy more instead. Archived items do not count. Checked in code because
+ * existing data may already hold duplicates, so there is no unique index on the name.
+ */
+async function assertNameFree(name: string, exceptId?: string) {
+  const clash = await InventoryItem.findOne(
+    { name: exactNamePattern(name), archivedAt: null, ...(exceptId ? { _id: { $ne: exceptId } } : {}) },
+    { name: 1, sku: 1 },
+  ).lean();
+  if (clash) {
+    throw new AppError(
+      `${clash.name} (${clash.sku}) is already in inventory. Use Buy more on that item to add stock instead of adding it again.`,
+      "conflict",
+      { name: ["Already in inventory"] },
+    );
+  }
+}
+
 function descriptiveFields(v: ItemFormValues) {
   return {
     name: v.name,
@@ -57,6 +86,7 @@ export const createItem = defineAction(
   itemFormSchema,
   async (input, user) => {
     await assertCategory(input.categoryId);
+    await assertNameFree(input.name);
     await assertSkuFree(input.sku);
     const created = await InventoryItem.create({ ...descriptiveFields(input), quantity: 0, available: 0, allocated: 0, unitPrice: 0 });
     const openingQuantity = input.openingQuantity ?? 0;
@@ -81,6 +111,8 @@ export const updateItem = defineAction(
     const existing = await InventoryItem.findOne({ _id: input.id, archivedAt: null }).lean();
     if (!existing) throw notFound("The inventory item");
     await assertCategory(input.categoryId);
+    // Only a rename is checked, so items that already share a name keep saving as they are.
+    if (normalizeItemName(input.name) !== normalizeItemName(existing.name)) await assertNameFree(input.name, input.id);
     if (input.sku !== existing.sku) await assertSkuFree(input.sku, input.id);
 
     // Quantities are deliberately absent: they change only through the ledger.
@@ -183,6 +215,45 @@ export const suggestSku = defineAction(suggestSkuSchema, async ({ name, category
   }
   return { sku: base };
 }, { readOnly: true });
+
+/**
+ * Duplicate: a name for the new item that no active item has yet, "<name> (copy)" or the first free
+ * "<name> (copy N)", so a second copy of the same item is not refused as a duplicate. Read-only.
+ */
+export const suggestCopyName = defineAction(copyNameSchema, async ({ name }) => {
+  const base = copyBaseName(name);
+  const rows = await InventoryItem.find({ name: namePrefixPattern(base), archivedAt: null }, { name: 1 }).lean();
+  const taken = new Set(rows.map((r) => normalizeItemName(r.name ?? "")));
+  for (let n = 1; n < 1000; n++) {
+    const candidate = copyName(base, n);
+    if (!taken.has(normalizeItemName(candidate))) return { name: candidate };
+  }
+  return { name: copyName(base, 1) };
+}, { readOnly: true });
+
+const MATCH_ORDER: Record<SimilarItem["match"], number> = { exact: 0, sku: 1, similar: 2 };
+
+/**
+ * Add item: active items with the same or a very similar name, or the same SKU, so the form can
+ * offer Buy more instead of a second copy. Read-only.
+ */
+export const findSimilarItems = defineAction(
+  similarItemsSchema,
+  async ({ name, sku }): Promise<SimilarItem[]> => {
+    const typedSku = sku ? normalizeSku(sku) : "";
+    if (normalizeItemName(name).length < 2 && !typedSku) return [];
+    const items = await InventoryItem.find({ archivedAt: null }, { name: 1, sku: 1, unit: 1, available: 1 }).lean();
+    const found: SimilarItem[] = [];
+    for (const i of items) {
+      const byName = matchItemName(name, i.name);
+      const match = byName === "exact" ? "exact" : typedSku && i.sku === typedSku ? "sku" : byName;
+      if (!match) continue;
+      found.push({ id: String(i._id), name: i.name, sku: i.sku, unit: i.unit ?? "pcs", available: roundQty(i.available ?? 0), match });
+    }
+    return found.sort((a, b) => MATCH_ORDER[a.match] - MATCH_ORDER[b.match] || a.name.localeCompare(b.name)).slice(0, 3);
+  },
+  { readOnly: true },
+);
 
 /** Loads one item for the edit form. */
 export async function fetchItem(id: string): Promise<ItemFormRecord | null> {

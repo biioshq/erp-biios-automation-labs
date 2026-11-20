@@ -16,7 +16,8 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { ExpenseForm } from "@/features/finance/expenses/components/expense-form";
 import { ExpenseMobileCard, ExpenseSourceBadge } from "@/features/finance/expenses/components/expense-badges";
 import type { ExpenseRow } from "@/features/finance/expenses/types";
-import { EXPENSE_CATEGORIES, PROJECT_STAGES, labelOf } from "@/lib/constants";
+import { PROJECT_STAGES, labelOf } from "@/lib/constants";
+import type { ExpenseCategoryOption } from "@/lib/expense-categories";
 import { formatDate, formatNumber } from "@/lib/format";
 import type { ProjectOption } from "@/server/lookups";
 
@@ -27,12 +28,15 @@ export function ProjectExpensesTab({
   rows,
   projects,
   vendors,
+  categories,
 }: {
   projectId: string;
   projectName: string;
   rows: ExpenseRow[];
   projects: ProjectOption[];
   vendors: string[];
+  /** Built-in and custom categories for the form (getExpenseCategories). Without them the form offers the built-ins. */
+  categories?: ExpenseCategoryOption[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -106,7 +110,7 @@ export function ProjectExpensesTab({
         enableSorting: false,
         cell: ({ row }) => (
           <StatusBadge tone="neutral" dot={false}>
-            {labelOf(EXPENSE_CATEGORIES, row.original.category)}
+            {row.original.categoryLabel}
           </StatusBadge>
         ),
       },
@@ -207,7 +211,7 @@ export function ProjectExpensesTab({
 
       <FormSheet open={open} onOpenChange={setOpen} size="xl" title="Add expense" description={`Counts against ${projectName}'s budget.`}>
         {open ? (
-          <ExpenseForm projects={projects} vendors={vendors} defaultProjectId={projectId} onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
+          <ExpenseForm projects={projects} vendors={vendors} categories={categories} defaultProjectId={projectId} onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
         ) : null}
       </FormSheet>
     </div>

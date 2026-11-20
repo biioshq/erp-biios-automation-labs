@@ -7,6 +7,7 @@ import { Expense, FileModel, Project } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
 import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
 import { getCurrentUser, type SessionUser } from "@/server/auth/session";
+import { assertExpenseCategoryAllowed } from "@/server/expense-categories";
 import { fromDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import { gstGrandTotal, totalTax } from "@/lib/gst";
@@ -106,6 +107,7 @@ export const createExpense = defineAction(
   expenseFormSchema,
   async (input, user) => {
     assertMaySalary(user, input.category);
+    await assertExpenseCategoryAllowed(input.category);
     await assertProjectOpen(input.projectId);
     await assertReceiptFree(input.receiptId, user, null);
     const doc = toDocument(input);
@@ -126,6 +128,8 @@ export const updateExpense = defineAction(
       throw new AppError("This expense comes from an inventory assignment. Change it by returning stock from the project.", "conflict");
     }
     assertMaySalary(user, existing.category, input.category);
+    // Keeping the current category always saves, even if it was hidden since.
+    await assertExpenseCategoryAllowed(input.category, existing.category);
     await assertProjectOpen(input.projectId, existing.project);
     assertMayDropReceipt(user, existing.receipt, input.receiptId);
     await assertReceiptFree(input.receiptId, user, input.id, existing.receipt);

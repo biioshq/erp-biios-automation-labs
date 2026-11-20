@@ -1,5 +1,5 @@
 import type { FileDTO } from "@/features/files/types";
-import type { ExpenseCategory, ExpenseSource, PaymentMethod, ProjectStage } from "@/lib/constants";
+import type { ExpenseSource, PaymentMethod, ProjectStage } from "@/lib/constants";
 
 /** A row in the expenses table. */
 export type ExpenseRow = {
@@ -7,7 +7,10 @@ export type ExpenseRow = {
   number: string;
   vendor: string;
   description: string | null;
-  category: ExpenseCategory;
+  /** The stored value: a built-in (EXPENSE_CATEGORIES) or a custom category. */
+  category: string;
+  /** Its current name (renames show straight away), resolved on the server. */
+  categoryLabel: string;
   amount: number;
   date: string;
   paymentMethod: PaymentMethod;

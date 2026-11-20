@@ -14,7 +14,8 @@ import { Money } from "@/components/shared/money";
 import { useIsAdmin } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { cn } from "@/lib/utils";
-import { EXPENSE_CATEGORIES, RECURRING_FREQUENCIES, RECURRING_STATUSES, labelOf } from "@/lib/constants";
+import { RECURRING_FREQUENCIES, RECURRING_STATUSES, labelOf } from "@/lib/constants";
+import { DEFAULT_EXPENSE_CATEGORIES, expenseCategoryFilterOptions, type ExpenseCategoryOption } from "@/lib/expense-categories";
 import { formatDate } from "@/lib/format";
 import { emitDataChanged } from "@/lib/events";
 import type { Paginated } from "@/lib/list-params";
@@ -77,12 +78,15 @@ export function RecurringView({
   projects,
   vendors,
   employees,
+  categories = DEFAULT_EXPENSE_CATEGORIES,
 }: {
   data: Paginated<RecurringRow>;
   summary: RecurringSummary;
   projects: ProjectOption[];
   vendors: string[];
   employees: EmployeeOption[];
+  /** Built-in and custom categories, hidden ones included (getExpenseCategories). */
+  categories?: ExpenseCategoryOption[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -252,7 +256,7 @@ export function RecurringView({
         meta: { label: "Category" },
         header: "Category",
         enableSorting: false,
-        cell: ({ row }) => <CategoryBadge category={row.original.category} />,
+        cell: ({ row }) => <CategoryBadge label={row.original.categoryLabel} />,
       },
       {
         id: "amount",
@@ -343,7 +347,7 @@ export function RecurringView({
 
   const filters: FilterDef[] = useMemo(
     () => [
-      { key: "category", title: "Category", options: EXPENSE_CATEGORIES.filter((c) => c.value !== "inventory").map((o) => ({ ...o })) },
+      { key: "category", title: "Category", options: expenseCategoryFilterOptions(categories, { includeInventory: false }) },
       { key: "status", title: "Status", options: RECURRING_STATUSES.map((o) => ({ ...o })) },
       { key: "frequency", title: "Frequency", options: RECURRING_FREQUENCIES.map((o) => ({ ...o })) },
       {
@@ -352,7 +356,7 @@ export function RecurringView({
         options: [{ value: "none", label: "No project (overhead)" }, ...projects.map((p) => ({ value: p.value, label: p.label }))],
       },
     ],
-    [projects],
+    [projects, categories],
   );
 
   const sheetOpen = panel !== null;
@@ -464,6 +468,7 @@ export function RecurringView({
             projects={projects}
             vendors={vendors}
             employees={employees}
+            categories={categories}
             onDone={(id) => setPanel({ kind: "view", id })}
             onCancel={() => setPanel(null)}
           />
@@ -476,6 +481,7 @@ export function RecurringView({
             projects={projects}
             vendors={vendors}
             employees={employees}
+            categories={categories}
             onDone={(id) => {
               setDetail(null);
               setPanel({ kind: "view", id });

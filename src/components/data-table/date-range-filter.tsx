@@ -75,7 +75,7 @@ export function DateRangeFilter({
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="flex max-h-[min(80svh,560px)] w-auto max-w-[calc(100vw-1rem)] flex-col gap-0 overflow-y-auto p-0 sm:flex-row" align="start">
+      <PopoverContent className="flex max-h-[min(var(--radix-popover-content-available-height),560px)] w-auto max-w-[calc(100vw-1rem)] flex-col gap-0 overflow-y-auto p-0 sm:flex-row" align="start">
         <div className="flex flex-wrap gap-1 border-b p-2 sm:w-36 sm:flex-col sm:flex-nowrap sm:border-r sm:border-b-0">
           {presets().map((p) => (
             <Button

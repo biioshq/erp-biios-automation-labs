@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Archive, ArrowDownToLine, ArrowUpFromLine, MoreHorizontal, PackagePlus, Pencil, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArrowDownToLine, ArrowUpFromLine, Copy, MoreHorizontal, PackagePlus, Pencil, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -23,7 +23,7 @@ import type { ItemDetail } from "../types";
 import { AdjustStockDialog } from "./adjust-stock-dialog";
 import { ItemForm, type CategoryOption } from "./item-form";
 
-/** Header actions for the item page: stock links, adjust dialog, edit sheet, archive. */
+/** Header actions for the item page: Buy more and the other stock links, adjust dialog, edit sheet, duplicate, archive. */
 export function ItemActions({ item, categories, vendors }: { item: ItemDetail; categories: CategoryOption[]; vendors: string[] }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -62,7 +62,7 @@ export function ItemActions({ item, categories, vendors }: { item: ItemDetail; c
     <>
       <Button asChild>
         <Link href={`/inventory/purchase?item=${item.id}`}>
-          <PackagePlus /> Purchase stock
+          <PackagePlus /> Buy more
         </Link>
       </Button>
 
@@ -116,6 +116,12 @@ export function ItemActions({ item, categories, vendors }: { item: ItemDetail; c
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setEditing(true)}>
             <Pencil /> Edit item
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            {/* A new item with these details: name, stock and history start fresh. */}
+            <Link href={`/inventory/items?new=1&copy=${item.id}`}>
+              <Copy /> Duplicate
+            </Link>
           </DropdownMenuItem>
           {isAdmin ? (
             <>

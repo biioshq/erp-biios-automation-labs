@@ -10,7 +10,7 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { FileTile } from "@/features/files/components/file-preview";
-import { EXPENSE_CATEGORIES, PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
+import { PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import { totalTax } from "@/lib/gst";
 import type { ExpenseDetail } from "../types";
@@ -68,7 +68,7 @@ export function ExpenseDetailView({
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs text-muted-foreground">{expense.number}</span>
             <StatusBadge tone="neutral" dot={false}>
-              {labelOf(EXPENSE_CATEGORIES, expense.category)}
+              {expense.categoryLabel}
             </StatusBadge>
             <ExpenseSourceBadge source={expense.source} />
           </div>

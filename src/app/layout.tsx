@@ -23,10 +23,9 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#0b1929" },
-    { media: "(prefers-color-scheme: light)", color: "#f4ede3" },
-  ],
+  // The light theme's colour for the phone's browser bar, whatever the device setting;
+  // ThemeColorSync switches it to navy only when someone picks the dark theme.
+  themeColor: "#f4ede3",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",

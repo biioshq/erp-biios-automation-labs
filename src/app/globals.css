@@ -142,6 +142,18 @@
   --glow-primary: 0 1px 0 rgb(255 255 255 / 0.35) inset, 0 4px 14px -6px rgb(255 136 0 / 0.55);
 }
 
+/*
+ * The app is light unless someone picks dark with the theme toggle. "only light" also stops
+ * browsers that darken pages on their own (Chrome on Android, Samsung Internet in dark mode)
+ * from repainting it, and keeps native controls (date inputs, scrollbars) light.
+ */
+:root {
+  color-scheme: only light;
+}
+:root.dark {
+  color-scheme: dark;
+}
+
 /* Dark: evening navy ground, lamp white headlines, plaster support copy, slate raised cards. */
 .dark {
   --brand: #ff8800;

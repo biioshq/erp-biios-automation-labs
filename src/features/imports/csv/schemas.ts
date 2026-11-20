@@ -23,8 +23,8 @@ export const csvOptionsSchema = z.object({
   defaultPaymentMethod: purchasePaymentMethod.default("bank_transfer"),
   /** Items: book opening stock of new items as purchases (adds expenses). Existing items always get a purchase. */
   recordAsPurchases: z.boolean().default(true),
-  /** Items: create inventory categories the file names that do not exist yet. */
-  createCategories: z.boolean().default(false),
+  /** Create the categories the file names that do not exist yet (inventory or expense categories). */
+  createCategories: z.boolean().default(true),
   /** Save rows that look like ones already recorded (for items: the same stock bought on the same day at the same price). */
   importDuplicates: z.boolean().default(false),
   /** Items: SKUs the file already uses or the preview suggested, so a suggestion never repeats one. */
@@ -84,6 +84,8 @@ export type PreviewRow = {
   amount: number;
   /** The day the record is booked on (yyyy-mm-dd), when known. */
   date?: string;
+  /** Expenses: a category the file names that does not exist yet; the import creates it. */
+  newCategory?: string;
   /** Items only. */
   item?: {
     /**

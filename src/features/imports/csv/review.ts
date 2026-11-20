@@ -14,14 +14,21 @@ export type ReviewOptions = { createCategories: boolean; recordAsPurchases: bool
 
 /** A preview row with the in-file checks and the options applied. */
 export function reviewRows(kind: CsvImportKind, rows: PreviewRow[], options: ReviewOptions): PreviewRow[] {
-  return kind === "items" ? reviewItems(rows, options) : reviewFinance(rows);
+  return kind === "items" ? reviewItems(rows, options) : reviewFinance(rows, options);
 }
 
-function reviewFinance(rows: PreviewRow[]): PreviewRow[] {
+function reviewFinance(rows: PreviewRow[], options: ReviewOptions): PreviewRow[] {
   const seen = new Map<string, number>();
   return rows.map((row) => {
     if (row.status === "error") return row;
     let out = row;
+    if (row.newCategory && !options.createCategories) {
+      return {
+        ...row,
+        status: "error",
+        errors: [...row.errors, { field: "category", message: `No category named ${row.newCategory}. Tick "Create the new categories" or add it first.` }],
+      };
+    }
     if (row.status === "ready") {
       const earlier = row.dupKeys.map((k) => seen.get(k)).find((l) => l !== undefined);
       if (earlier !== undefined) out = { ...row, status: "duplicate", reason: `Same as row ${earlier} of this file` };
@@ -134,8 +141,8 @@ function reviewItems(rows: PreviewRow[], options: ReviewOptions): PreviewRow[] {
 export function newCategories(rows: PreviewRow[]): string[] {
   const seen = new Map<string, string>();
   for (const r of rows) {
-    const c = r.item?.newCategory;
-    if (c && r.item?.action === "create" && !seen.has(c.toLowerCase())) seen.set(c.toLowerCase(), c);
+    const c = r.item ? (r.item.action === "create" ? r.item.newCategory : undefined) : r.newCategory;
+    if (c && r.status !== "error" && !seen.has(c.toLowerCase())) seen.set(c.toLowerCase(), c);
   }
   return [...seen.values()];
 }

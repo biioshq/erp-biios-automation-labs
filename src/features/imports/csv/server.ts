@@ -2,7 +2,7 @@ import "server-only";
 
 import { Expense, Income, InventoryCategory, InventoryItem, InventoryMovement, Project } from "@/server/models";
 import { roundQty } from "@/server/services/inventory-ledger";
-import { loadExpenseCategories } from "@/server/expense-categories";
+import { createExpenseCategory, loadExpenseCategories } from "@/server/expense-categories";
 import { createExpense } from "@/features/finance/expenses/actions";
 import { createIncome } from "@/features/finance/income/actions";
 import { createItem } from "@/features/inventory/items/actions";
@@ -142,9 +142,11 @@ type ProjectRef = { id: string; name: string; code: string; status: string };
 type FinanceLookups = {
   expenseCategories: ExpenseCategoryOption[];
   projects: Map<string, ProjectRef[]>;
+  /** Category names the whole file uses, by choiceKey, with how often each appears. */
+  fileCategories: Map<string, { name: string; count: number }>;
 };
 
-async function loadFinanceLookups(withCategories: boolean): Promise<FinanceLookups> {
+async function loadFinanceLookups(withCategories: boolean, options: CsvOptions): Promise<FinanceLookups> {
   const [expenseCategories, projects] = await Promise.all([
     withCategories ? loadExpenseCategories() : Promise.resolve([]),
     Project.find({}, { name: 1, code: 1, status: 1 }).lean(),
@@ -159,7 +161,37 @@ async function loadFinanceLookups(withCategories: boolean): Promise<FinanceLooku
       byKey.set(key, list);
     }
   }
-  return { expenseCategories, projects: byKey };
+  const fileCategories = new Map<string, { name: string; count: number }>();
+  for (const c of options.fileCategories) {
+    const key = choiceKey(c.name);
+    if (!key) continue;
+    const seen = fileCategories.get(key);
+    fileCategories.set(key, { name: seen?.name ?? c.name.trim().replace(/\s+/g, " "), count: (seen?.count ?? 0) + c.count });
+  }
+  return { expenseCategories, projects: byKey, fileCategories };
+}
+
+/**
+ * The expense category a cell names: an existing one (by name, value or a built-in's usual name),
+ * a plural or close misspelling of one, else a new category with the spelling the file uses most.
+ */
+function readExpenseCategory(raw: string, ctx: FinanceLookups): { found?: ExpenseCategoryOption; newLabel?: string; readAs: boolean } {
+  const found = findExpenseCategory(raw, ctx.expenseCategories);
+  if (found) return { found, readAs: false };
+  const key = choiceKey(raw);
+  // Not against a category the file names itself (see readCategory for items).
+  const near = nearestName(
+    key,
+    ctx.expenseCategories.filter((c) => !ctx.fileCategories.has(choiceKey(c.label))).map((c) => [choiceKey(c.label), c] as [string, ExpenseCategoryOption]),
+  );
+  if (near) return { found: near, readAs: true };
+  const own = ctx.fileCategories.get(key)?.count ?? 1;
+  const usual = nearestName(
+    key,
+    [...ctx.fileCategories].filter(([, c]) => c.count > own),
+  );
+  const label = (usual?.name ?? raw).replace(/\s+/g, " ").trim();
+  return { newLabel: label, readAs: Boolean(usual) };
 }
 
 function readProject(v: Values, ctx: FinanceLookups, issues: Issues, shown: Record<string, string>, refuseCancelled: boolean): ProjectRef | undefined {
@@ -197,8 +229,13 @@ function findExpenseCategory(raw: string, categories: ExpenseCategoryOption[]): 
 
 /* ---------- Expenses ---------- */
 
+/** Stands in for a category the import creates, so the row is checked like any other before it exists. */
+const NEW_CATEGORY_PLACEHOLDER = "other";
+
 type Built<I> = {
   input: I;
+  /** Expenses: a category the file names that does not exist yet (created by the import). */
+  newCategory?: string;
   issues: Issues;
   notes: Record<string, string>;
   shown: Record<string, string>;
@@ -223,17 +260,29 @@ function buildExpense(v: Values, ctx: FinanceLookups, options: CsvOptions): Buil
   if (amount !== undefined) shown.amount = showMoney(amount);
 
   let category = "";
+  let newCategory: string | undefined;
   const categoryRaw = text(v, "category");
   if (!categoryRaw) issues.add("category", "Category is required");
   else {
-    const c = findExpenseCategory(categoryRaw, ctx.expenseCategories);
-    if (!c) issues.add("category", `No category named ${categoryRaw}. Add it on the Expenses page first, or use one that exists.`);
+    const read = readExpenseCategory(categoryRaw, ctx);
+    const c = read.found;
+    if (read.newLabel) {
+      if (read.newLabel.length > 60) issues.add("category", "A category name has at most 60 characters");
+      else {
+        // Created by the import (see importFinanceRows); checked here with a category that exists.
+        newCategory = read.newLabel;
+        category = NEW_CATEGORY_PLACEHOLDER;
+        shown.category = read.newLabel;
+        notes.category = read.readAs ? `Read as ${read.newLabel} (new category)` : "New category";
+      }
+    } else if (!c) issues.add("category", `No category named ${categoryRaw}`);
     else if (c.value === "inventory") {
       issues.add("category", "Stock for inventory is added under Inventory (Purchase stock or Import items), which records its expense.");
     } else if (c.hidden) issues.add("category", `${c.label} is hidden, so it takes no new records`);
     else {
       category = c.value;
       shown.category = c.label;
+      if (read.readAs) notes.category = `Read as ${c.label}`;
     }
   }
 
@@ -310,7 +359,7 @@ function buildExpense(v: Values, ctx: FinanceLookups, options: CsvOptions): Buil
   const dupKeys: string[] = [];
   if (date && vendor && amount !== undefined) dupKeys.push(dayKey("d", date, vendor, amount));
   if (vendor && invoiceNumber) dupKeys.push(refKey("i", vendor, invoiceNumber));
-  return { input, issues, notes, shown, amount: round2(amount ?? 0), dupKeys };
+  return { input, newCategory, issues, notes, shown, amount: round2(amount ?? 0), dupKeys };
 }
 
 /** A date range covering every row's date, for one query. */
@@ -993,7 +1042,7 @@ export async function previewRows(kind: CsvImportKind, rows: CsvRowInput[], opti
     });
   }
 
-  const ctx = await loadFinanceLookups(kind === "expenses");
+  const ctx = await loadFinanceLookups(kind === "expenses", options);
   const built = rows.map((row) => (kind === "expenses" ? buildExpense(row.values, ctx, options) : buildIncome(row.values, ctx, options)));
   const recorded =
     kind === "expenses" ? await recordedExpenses(built as Built<ExpenseFormInput>[]) : await recordedIncome(built as Built<IncomeFormInput>[]);
@@ -1010,6 +1059,7 @@ export async function previewRows(kind: CsvImportKind, rows: CsvRowInput[], opti
       dupKeys: b.dupKeys,
       amount: b.amount,
       date: b.input.date || undefined,
+      ...(b.newCategory ? { newCategory: b.newCategory } : {}),
     };
   });
 }
@@ -1025,8 +1075,14 @@ function failure(kind: CsvImportKind, line: number, result: Extract<ActionResult
   return { line, status: "failed", message: [result.error, ...fields].join("; ") };
 }
 
-async function importFinanceRows(kind: "expenses" | "income", rows: CsvRowInput[], options: CsvOptions): Promise<ImportRowResult[]> {
-  const ctx = await loadFinanceLookups(kind === "expenses");
+async function importFinanceRows(
+  kind: "expenses" | "income",
+  rows: CsvRowInput[],
+  options: CsvOptions,
+  userId?: string,
+): Promise<{ rows: ImportRowResult[]; createdCategories: string[] }> {
+  const ctx = await loadFinanceLookups(kind === "expenses", options);
+  const createdCategories: string[] = [];
   const built = rows.map((row) => (kind === "expenses" ? buildExpense(row.values, ctx, options) : buildIncome(row.values, ctx, options)));
   // Checked again here, not taken from the preview: the data may have changed since, and a batch
   // sent twice must not save its rows twice.
@@ -1049,8 +1105,20 @@ async function importFinanceRows(kind: "expenses" | "income", rows: CsvRowInput[
         results.push({ line, status: "skipped", message: dup, skipReason: "duplicate" });
         continue;
       }
-      const result =
-        kind === "expenses" ? await createExpense(b.input as ExpenseFormInput) : await createIncome(b.input as IncomeFormInput);
+      let input = b.input;
+      if (b.newCategory) {
+        if (!options.createCategories) {
+          results.push({ line, status: "failed", message: `Category: No category named ${b.newCategory}` });
+          continue;
+        }
+        const c = await ensureExpenseCategory(b.newCategory, ctx, createdCategories, userId);
+        if ("error" in c) {
+          results.push({ line, status: "failed", message: `Category: ${c.error}` });
+          continue;
+        }
+        input = { ...(input as ExpenseFormInput), category: c.value };
+      }
+      const result = kind === "expenses" ? await createExpense(input as ExpenseFormInput) : await createIncome(input as IncomeFormInput);
       if (!result.ok) {
         results.push(failure(kind, line, result));
         continue;
@@ -1063,7 +1131,31 @@ async function importFinanceRows(kind: "expenses" | "income", rows: CsvRowInput[
       results.push({ line, status: "failed", message: "Something went wrong with this row. Try it again." });
     }
   }
-  return results;
+  return { rows: results, createdCategories };
+}
+
+/** Finds or creates an expense category for the import. Another person may add it at the same moment. */
+async function ensureExpenseCategory(
+  label: string,
+  ctx: FinanceLookups,
+  created: string[],
+  userId?: string,
+): Promise<{ value: string } | { error: string }> {
+  const known = findExpenseCategory(label, ctx.expenseCategories);
+  if (known) return { value: known.value };
+  try {
+    const c = await createExpenseCategory(label, userId);
+    ctx.expenseCategories.push(c);
+    created.push(c.label);
+    return { value: c.value };
+  } catch (error) {
+    const again = findExpenseCategory(label, await loadExpenseCategories());
+    if (again) {
+      ctx.expenseCategories.push(again);
+      return { value: again.value };
+    }
+    return { error: error instanceof Error ? error.message : "The category could not be added" };
+  }
 }
 
 /** Finds or creates an inventory category for the import. Another person may create it at the same moment. */
@@ -1193,7 +1285,7 @@ async function importItemRows(rows: CsvRowInput[], options: CsvOptions): Promise
   return { rows: results, createdCategories };
 }
 
-export async function importRows(kind: CsvImportKind, rows: CsvRowInput[], options: CsvOptions): Promise<ImportResult> {
+export async function importRows(kind: CsvImportKind, rows: CsvRowInput[], options: CsvOptions, userId?: string): Promise<ImportResult> {
   if (kind === "items") return importItemRows(rows, options);
-  return { rows: await importFinanceRows(kind, rows, options), createdCategories: [] };
+  return importFinanceRows(kind, rows, options, userId);
 }

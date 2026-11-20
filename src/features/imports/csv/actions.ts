@@ -17,7 +17,7 @@ export const previewCsvImport = defineAction(
  */
 export const importCsvBatch = defineAction(
   csvImportSchema,
-  async ({ kind, rows, options }): Promise<ImportResult> => importRows(kind, rows, options),
+  async ({ kind, rows, options }, user): Promise<ImportResult> => importRows(kind, rows, options, user.id),
   {
     role: "admin",
     revalidate: [

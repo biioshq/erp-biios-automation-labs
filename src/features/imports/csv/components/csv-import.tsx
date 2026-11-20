@@ -138,7 +138,7 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
   const [checking, setChecking] = useState<{ done: number; total: number } | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewRow[] | null>(null);
-  const [createCategories, setCreateCategories] = useState(false);
+  const [createCategories, setCreateCategories] = useState(true);
   const [recordAsPurchases, setRecordAsPurchases] = useState(true);
   const [renameReusedIds, setRenameReusedIds] = useState(true);
   const [importDuplicates, setImportDuplicates] = useState(false);
@@ -201,7 +201,7 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
     setFilter("all");
     setImportDuplicates(false);
     setConfirmEarlier(false);
-    setCreateCategories(false);
+    setCreateCategories(true);
     setRenameReusedIds(true);
     if (!keepKind) setKind(kinds[0] ?? "expenses");
     if (inputRef.current) inputRef.current.value = "";
@@ -328,7 +328,7 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
         const result = await previewCsvImport({
           kind,
           rows: chunk,
-          options: options({ reservedSkus: [...explicit, ...suggested].slice(0, 4000), fileCategories: kind === "items" ? categoryCounts : [] }),
+          options: options({ reservedSkus: [...explicit, ...suggested].slice(0, 4000), fileCategories: kind === "income" ? [] : categoryCounts }),
         });
         if (!result.ok) {
           setCheckError(result.error);
@@ -354,7 +354,7 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
     // A part given a new code in the review (its ID belongs to another part) is saved with that code.
     const renamed = new Map(reviewed.filter((r) => r.item?.renamedFrom).map((r) => [r.line, r.item!.sku]));
     const rows = rowsFor(lines).map((r) => (renamed.has(r.line) ? { ...r, values: { ...r.values, sku: renamed.get(r.line)! } } : r));
-    const categoryCounts = kind === "items" ? fileCategories(rowsFor()) : [];
+    const categoryCounts = kind === "income" ? [] : fileCategories(rowsFor());
     if (!rows.length) return;
     stopRef.current = false;
     setStopping(false);
@@ -716,6 +716,20 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
           />
 
           <div className="space-y-3 rounded-lg border bg-surface/40 p-3">
+            {toCreate.length ? (
+              <label className="flex items-start gap-3 text-sm">
+                <Checkbox checked={createCategories} onCheckedChange={(c) => setCreateCategories(c === true)} className="mt-0.5" />
+                <span>
+                  <span className="font-medium">
+                    Create the {plural(toCreate.length, "new category", "new categories")} from the file
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {toCreate.join(", ")}. {kind === "items" ? "Added to inventory categories" : "Added to expense categories"} when you import; you can
+                    rename or remove them later on the Categories page.
+                  </span>
+                </span>
+              </label>
+            ) : null}
             {kind === "items" ? (
               <>
                 <label className="flex items-start gap-3 text-sm">
@@ -735,17 +749,6 @@ export function CsvImport({ kinds }: { kinds: CsvImportKind[] }) {
                       <span className="block text-xs text-muted-foreground">
                         These parts have an ID that another part already has. The first part keeps it; each later one is saved with the new code shown
                         in its SKU column. Off: they are left out until the file gives each part its own ID.
-                      </span>
-                    </span>
-                  </label>
-                ) : null}
-                {toCreate.length ? (
-                  <label className="flex items-start gap-3 text-sm">
-                    <Checkbox checked={createCategories} onCheckedChange={(c) => setCreateCategories(c === true)} className="mt-0.5" />
-                    <span>
-                      <span className="font-medium">Create the new categories</span>
-                      <span className="block text-xs text-muted-foreground">
-                        {toCreate.join(", ")}. Check the spelling first: rows with a misspelt name would get a category of their own.
                       </span>
                     </span>
                   </label>

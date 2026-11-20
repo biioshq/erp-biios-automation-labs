@@ -24,11 +24,61 @@ const openSignUp = () => process.env.ALLOW_OPEN_SIGNUP === "true";
 const google = googleStatus();
 const isOAuthCallback = (path: string | undefined) => Boolean(path && (path.startsWith("/callback") || path.startsWith("/oauth2/callback")));
 
+/**
+ * The app's public address: BETTER_AUTH_URL (only the origin part), else Vercel's production
+ * address. On Vercel a localhost value (copied from .env.local or .env.example) is ignored, since
+ * it can never be right there and would break sign-in links and Google's return address.
+ */
+function publicBaseURL(): string | undefined {
+  const raw = process.env.BETTER_AUTH_URL?.trim();
+  if (raw) {
+    try {
+      const url = new URL(raw);
+      const local = /^(localhost|127\.|0\.0\.0\.0$|\[::1\]$)/.test(url.hostname);
+      if (!(process.env.VERCEL && local)) return url.origin;
+    } catch {
+      // Not a URL: env.ts reports it at start-up; fall back to Vercel's address below.
+    }
+  }
+  return process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : undefined;
+}
+
+const STATIC_TRUSTED_ORIGINS = [
+  // Extra origins (the portal sets APP_ORIGINS for review servers; TRUSTED_ORIGINS by hand).
+  ...(process.env.APP_ORIGINS ?? process.env.TRUSTED_ORIGINS ?? "").split(","),
+  // Vercel sets these for every deployment, so preview and branch URLs can sign in too.
+  ...[process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]
+    .filter(Boolean)
+    .map((host) => `https://${host}`),
+]
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+/**
+ * The address this request was sent to. A browser's request to the app's own address (any Vercel
+ * alias of the project, or a custom domain pointed at it) is same-origin and safe to trust: Vercel
+ * only routes a domain here when it belongs to this project, and another website's page still sends
+ * its own Origin, which never matches this host, so it is still refused.
+ */
+function requestOrigin(request: Request | undefined): string[] {
+  if (!request) return [];
+  const first = (v: string | null) => v?.split(",")[0]?.trim() || null;
+  const host = first(request.headers.get("x-forwarded-host")) ?? first(request.headers.get("host"));
+  if (!host) return [];
+  let proto = first(request.headers.get("x-forwarded-proto"));
+  if (!proto) {
+    try {
+      proto = new URL(request.url).protocol.replace(":", "");
+    } catch {
+      proto = "https";
+    }
+  }
+  return [`${proto}://${host}`];
+}
+
 export const auth = betterAuth({
   appName: "Biios Project Manager",
-  baseURL:
-    process.env.BETTER_AUTH_URL ||
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : undefined),
+  baseURL: publicBaseURL(),
   secret: process.env.BETTER_AUTH_SECRET,
   database: mongodbAdapter(db),
   emailAndPassword: { enabled: true, minPasswordLength: 8, maxPasswordLength: 128, autoSignIn: true },
@@ -49,16 +99,9 @@ export const auth = betterAuth({
     // (or the first-run setup) create them while sign-up is closed (see setup-db.ts).
     accountLinking: { enabled: true, trustedProviders: ["google"] },
   },
-  // Origins allowed to call the auth API besides baseURL (the portal sets APP_ORIGINS for review servers).
-  trustedOrigins: [
-    ...(process.env.APP_ORIGINS ?? process.env.TRUSTED_ORIGINS ?? "").split(","),
-    // Vercel sets these for every deployment, so preview and branch URLs can sign in too.
-    ...[process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]
-      .filter(Boolean)
-      .map((host) => `https://${host}`),
-  ]
-    .map((o) => o.trim())
-    .filter(Boolean),
+  // Origins allowed to call the auth API besides baseURL: the fixed list plus the address the
+  // request itself was sent to (fixes "Invalid origin" on other Vercel addresses or a custom domain).
+  trustedOrigins: (request) => [...STATIC_TRUSTED_ORIGINS, ...requestOrigin(request)],
   rateLimit: {
     enabled: process.env.NODE_ENV === "production",
     window: 60,

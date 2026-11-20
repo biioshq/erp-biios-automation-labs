@@ -57,9 +57,11 @@ const nextConfig: NextConfig = {
     "/api/health": OCR_FILES,
     "/api/imports/drive/receipts": OCR_FILES,
   },
-  // Source, docs, scripts and local uploads are never needed by the built server.
+  // Docs, scripts and local uploads are never needed by the built server. Not "./src/**": the
+  // tracer applies it inside packages too, which dropped fast-csv/build/src (ExcelJS loads it at
+  // start), so every report export and Excel import failed on Vercel with "Cannot find module".
   outputFileTracingExcludes: {
-    "*": ["./src/**", "./docs/**", "./scripts/**", "./storage/**", "./.next-review/**", "./.next-standalone/**"],
+    "*": ["./docs/**", "./scripts/**", "./storage/**", "./.next-review/**", "./.next-standalone/**"],
   },
   experimental: {
     // Forms may carry receipts and documents (storage enforces 15 MB per file).

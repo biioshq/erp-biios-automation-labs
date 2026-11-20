@@ -3,6 +3,7 @@ import { StockLevelBar } from "@/components/shared/stock-level-bar";
 import { Money } from "@/components/shared/money";
 import { formatNumber } from "@/lib/format";
 import type { StockStatus } from "@/lib/constants";
+import { poolsOf } from "../stock-cost";
 import type { LedgerItem } from "../types";
 
 export const STATUS_DOT: Record<StockStatus, string> = {
@@ -16,7 +17,7 @@ export function StatusDot({ status }: { status: StockStatus }) {
 }
 
 /** The selected item's current stock: status, level bar and the three numbers that matter. */
-export function ItemCard({ item, title = "Current stock" }: { item: LedgerItem; title?: string }) {
+export function ItemCard({ item, title = "Current stock", showExpensed = false }: { item: LedgerItem; title?: string; showExpensed?: boolean }) {
   return (
     <section className="rounded-xl border bg-card p-4 shadow-card sm:p-5">
       <p className="eyebrow">{title}</p>
@@ -37,7 +38,29 @@ export function ItemCard({ item, title = "Current stock" }: { item: LedgerItem; 
         <span>Average cost per {item.unit}</span>
         <Money value={item.unitPrice} className="font-medium text-foreground" />
       </p>
+      {showExpensed && item.available > 0 ? <ExpensedSplit item={item} /> : null}
     </section>
+  );
+}
+
+/** How much of the stock on hand was expensed when bought, and how much is expensed when it is used. */
+function ExpensedSplit({ item }: { item: LedgerItem }) {
+  const pools = poolsOf(item);
+  return (
+    <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+      <div className="flex items-center justify-between gap-3">
+        <dt>Not expensed yet, added to expenses when used</dt>
+        <dd className="tabular shrink-0 font-medium text-foreground">
+          {formatNumber(pools.unexpensedQty)} {item.unit}
+        </dd>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <dt>Expensed at purchase</dt>
+        <dd className="tabular shrink-0 font-medium text-foreground">
+          {formatNumber(pools.expensedQty)} {item.unit}
+        </dd>
+      </div>
+    </dl>
   );
 }
 

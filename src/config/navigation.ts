@@ -1,4 +1,5 @@
 import {
+  Upload,
   ArrowDownToLine,
   ArrowLeftRight,
   ArrowUpFromLine,
@@ -84,6 +85,7 @@ export const MODULES: NavModule[] = [
             icon: Repeat,
             keywords: ["salary", "salaries", "rent", "bills", "subscriptions", "monthly"],
           },
+          { title: "Import", href: "/finance/import", icon: Upload, keywords: ["csv", "bulk", "google drive", "bills", "receipts", "income"] },
         ],
       },
       { title: "Income", href: "/finance/income", icon: BadgeIndianRupee, keywords: ["revenue", "payments", "client"] },
@@ -116,6 +118,7 @@ export const MODULES: NavModule[] = [
           { title: "All items", href: "/inventory/items", icon: Boxes, keywords: ["all inventory", "sku", "stock"] },
           { title: "Categories", href: "/inventory/categories", icon: Tags, keywords: ["item categories"] },
           { title: "Low stock", href: "/inventory/low-stock", icon: TriangleAlert, keywords: ["reorder", "out of stock"] },
+          { title: "Import items", tab: "Import", href: "/inventory/import", icon: Upload, keywords: ["csv", "bulk", "google drive", "photos"] },
         ],
       },
       {

@@ -94,6 +94,7 @@ It should print `transactions on` and `Ready: 15 app collections, 59 indexes`. T
    | `ALLOW_OPEN_SIGNUP` | `false` |
    | `NEXT_PUBLIC_COMPANY_STATE_CODE` | `27` (Maharashtra; decides CGST+SGST vs IGST) |
    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | optional, for "Continue with Google" (see [Google sign-in](#google-sign-in)) |
+   | `GOOGLE_DRIVE_API_KEY` | optional, for importing bills and item photos from Google Drive: a Google Cloud API key with the Google Drive API enabled; share the folders as "Anyone with the link" |
 
    `BETTER_AUTH_URL` can stay empty for now: on Vercel the app uses the project's production address. Set it when you
    add your own domain (step 8).

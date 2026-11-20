@@ -37,7 +37,10 @@ const TAX_POSITIVE = (prefix: string) => ({
 /**
  * Input tax credit register: GST on expenses plus GST on stock purchase invoices.
  * Assignment expenses are left out on purpose: they carry no GST because it was
- * claimed on the purchase, so counting them would claim it twice.
+ * claimed on the purchase, so counting them would claim it twice. Purchase
+ * expenses carry the same invoice as their purchase movement, which is listed
+ * here (as for purchases made before they became expenses), so they are left
+ * out too.
  */
 export async function buildGstReport(f: ReportFilters): Promise<ReportData> {
   await connectDB();
@@ -55,7 +58,7 @@ export async function buildGstReport(f: ReportFilters): Promise<ReportData> {
   const scope = await salaryScope();
   const expenseQuery = {
     // Members never receive individual salary rows (salaryScope is empty for admins).
-    $and: [expenseBase, { source: { $ne: "inventory_assignment" }, gst: { $exists: true }, $expr: TAX_POSITIVE("gst") }, scope],
+    $and: [expenseBase, { source: { $nin: ["inventory_assignment", "inventory_purchase"] }, gst: { $exists: true }, $expr: TAX_POSITIVE("gst") }, scope],
   };
   const salariesHidden = Object.keys(scope).length > 0 && (f.category.length === 0 || f.category.includes("salaries"));
 

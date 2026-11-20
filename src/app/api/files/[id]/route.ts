@@ -17,7 +17,7 @@ export async function GET(request: NextRequest, { params }: RouteContext<"/api/f
   const doc = await FileModel.findById(id).lean();
   if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
   // Payslips and other salary receipts are admin-only, even for someone who knows the file id.
-  if (await isHiddenFromUser(doc._id, user)) {
+  if (await isHiddenFromUser(doc._id, user, doc.kind)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

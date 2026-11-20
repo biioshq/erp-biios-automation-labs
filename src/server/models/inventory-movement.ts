@@ -36,7 +36,10 @@ const inventoryMovementSchema = new Schema(
     vendor: { type: String, trim: true },
     invoice: { type: purchaseInvoiceSchema, default: undefined },
     receipt: { type: Schema.Types.ObjectId, ref: "File" },
+    /** Purchase: the expense it booked. Assign: the assignment's expense (the company one when there are two). */
     expense: { type: Schema.Types.ObjectId, ref: "Expense" },
+    /** Signed change to the item's not-yet-expensed stock (InventoryItem.unexpensedQty); missing when none. */
+    unexpensedDelta: { type: Number },
     allocation: { type: Schema.Types.ObjectId, ref: "InventoryAllocation" },
     /** Item levels right after this movement. */
     balance: {

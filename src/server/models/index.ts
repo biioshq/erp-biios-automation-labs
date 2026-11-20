@@ -12,6 +12,7 @@ import "server-only";
  *   employees ─< projectMembers >── projects
  *   recurringExpenses ─< expenses (posted occurrences); employees ── recurringExpenses (salary)
  *   expenseCategories (custom categories and renames of built-ins, matched by value on expenses / recurringExpenses)
+ *   expenseDrafts (bills imported from Google Drive, waiting for review) >── files (receipt), ── expenses once saved
  *   notifications, reports (export log), counters (document numbers), user (Better Auth)
  *
  * Money is stored in rupees as numbers rounded to paise (see round2).
@@ -35,3 +36,4 @@ export { Employee, type EmployeeDoc } from "./employee";
 export { ProjectMember, type ProjectMemberDoc } from "./project-member";
 export { RecurringExpense, type RecurringExpenseDoc } from "./recurring-expense";
 export { ExpenseCategorySetting, type ExpenseCategorySettingDoc } from "./expense-category";
+export { ExpenseDraft, type ExpenseDraftDoc, EXPENSE_DRAFT_STATUSES, type ExpenseDraftStatus } from "./expense-draft";

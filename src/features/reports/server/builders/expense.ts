@@ -7,6 +7,7 @@ import { expenseFilter } from "@/features/finance/expenses/queries";
 import { PAYMENT_METHODS, PROJECT_STAGES, labelOf, type PaymentMethod, type ProjectStage } from "@/lib/constants";
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { round2 } from "@/lib/format";
+import { COMPANY_EXPENSES } from "@/server/services/metrics";
 import { col, day, describeFilters, sumTotals } from "../common";
 import type { ReportData, ReportFilters, ReportRow } from "../../types";
 
@@ -30,7 +31,12 @@ export const EXPENSE_COLUMNS = [
 
 type PopulatedProject = { name: string } | null;
 
-/** Every expense in range, with its GST split. Filters match the Expenses page, so an export equals the list. */
+/**
+ * Every expense in range, with its GST split. Filters match the Expenses page, so an export matches
+ * the list and its totals. One difference: in a company view (no filter to named projects) the list
+ * also shows stock used on projects that was counted at purchase, outside its totals; the export
+ * leaves those rows out, so its rows add up to the same total.
+ */
 export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> {
   await connectDB();
   const scope = await salaryScope();
@@ -47,8 +53,10 @@ export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> 
       ...(f.source.length ? { source: f.source } : {}),
     },
   });
-  // Members never receive individual salary rows.
-  const filter = (Object.keys(scope).length ? { $and: [filterBase, scope] } : filterBase) as typeof filterBase;
+  // Members never receive individual salary rows. Stock counted at purchase is always left out (as
+  // in the Expenses list totals): its purchase is already a row. The project report shows it.
+  const extra = [scope, COMPANY_EXPENSES].filter((x) => Object.keys(x).length);
+  const filter = (extra.length ? { $and: [filterBase, ...extra] } : filterBase) as typeof filterBase;
   // Say so when it changes the result, since the Finance report and CA pack do show members a company salary total.
   const salariesHidden = Object.keys(scope).length > 0 && (f.category.length === 0 || f.category.includes("salaries"));
   const [docs, categoryLabel] = await Promise.all([

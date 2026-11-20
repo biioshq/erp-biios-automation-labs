@@ -20,6 +20,10 @@ export type ItemRow = {
   vendor: string | null;
   location: string | null;
   status: StockStatus;
+  /** The item's photo (a stored file), or null. */
+  photoFileId: string | null;
+  /** Served by the signed-in file route, /api/files/<id>. */
+  photoUrl: string | null;
   updatedAt: string;
 };
 

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useOptimistic, useRef, useState, startTransition } 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
-import { Boxes, Download, Eye, MoreHorizontal, Paperclip, Pencil, Plus, Receipt, Repeat, Trash2 } from "lucide-react";
+import { Boxes, Download, Eye, MoreHorizontal, PackagePlus, Paperclip, Pencil, Plus, Receipt, Repeat, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -33,7 +33,7 @@ import { deleteExpense, fetchExpense } from "../actions";
 import type { ExpenseDetail, ExpenseRow, ExpenseSummary } from "../types";
 import { ExpenseForm } from "./expense-form";
 import { ExpenseDetailSkeleton, ExpenseDetailView } from "./expense-detail";
-import { ExpenseMobileCard, ExpenseSourceBadge } from "./expense-badges";
+import { ExpenseMobileCard, ExpenseSourceBadge, isInventoryExpense } from "./expense-badges";
 
 type Panel = { kind: "new" } | { kind: "view"; id: string } | { kind: "edit"; id: string } | null;
 
@@ -161,6 +161,8 @@ export function ExpensesView({
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-surface text-muted-foreground">
               {row.original.source === "inventory_assignment" ? (
                 <Boxes className="size-4 text-brand-ink" />
+              ) : row.original.source === "inventory_purchase" ? (
+                <PackagePlus className="size-4 text-brand-ink" />
               ) : row.original.source === "recurring" ? (
                 <Repeat className="size-4 text-brand-ink" />
               ) : (
@@ -170,7 +172,9 @@ export function ExpensesView({
             <div className="min-w-0">
               <p className="flex items-center gap-2 font-medium">
                 <span className="truncate">{row.original.vendor}</span>
-                {row.original.source === "recurring" ? <ExpenseSourceBadge source="recurring" className="h-5 px-2 text-[11px]" /> : null}
+                {row.original.source === "recurring" || row.original.source === "inventory_purchase" || row.original.countedAtPurchase ? (
+                  <ExpenseSourceBadge source={row.original.source} countedAtPurchase={row.original.countedAtPurchase} className="h-5 px-2 text-[11px]" />
+                ) : null}
               </p>
               <p className="truncate font-mono text-[11px] text-muted-foreground">
                 {row.original.number}
@@ -254,7 +258,20 @@ export function ExpensesView({
         accessorKey: "amount",
         meta: { label: "Amount", align: "right" },
         header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" align="right" />,
-        cell: ({ row }) => <Money value={row.original.amount} className="font-semibold" />,
+        cell: ({ row }) =>
+          row.original.countedAtPurchase ? (
+            // Shown for the project's sake, but not in the totals above: the purchase is already counted.
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Money value={row.original.amount} className="font-semibold text-muted-foreground" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Counted when the stock was bought, so not added to the totals again</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Money value={row.original.amount} className="font-semibold" />
+          ),
         enableHiding: false,
       },
       {
@@ -285,7 +302,7 @@ export function ExpensesView({
                 <DropdownMenuItem onSelect={() => setPanel({ kind: "view", id: row.original.id })}>
                   <Eye /> View
                 </DropdownMenuItem>
-                {row.original.source !== "inventory_assignment" ? (
+                {!isInventoryExpense(row.original.source) ? (
                   <>
                     <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
                       <Pencil /> Edit
@@ -350,7 +367,7 @@ export function ExpensesView({
         searchPlaceholder="Search vendor, invoice, number…"
         getRowId={(r) => r.id}
         onRowClick={(r) => setPanel({ kind: "view", id: r.id })}
-        renderMobileRow={(r) => <ExpenseMobileCard row={r} />}
+        renderMobileRow={(r) => <ExpenseMobileCard row={r} mutedIfCounted />}
         initialHidden={["paymentMethod"]}
         toolbarActions={
           <DropdownMenu>
@@ -406,7 +423,7 @@ export function ExpensesView({
           <ExpenseForm projects={projects} vendors={vendors} categories={categories} onDone={() => setPanel(null)} onCancel={() => setPanel(null)} />
         ) : panel && (loadingDetail || detail?.id !== panel.id) ? (
           <ExpenseDetailSkeleton />
-        ) : panel?.kind === "edit" && detail ? (
+        ) : panel?.kind === "edit" && detail && !isInventoryExpense(detail.source) ? (
           <ExpenseForm
             // Keyed by the record only: a refresh must never remount the form and drop what is being typed.
             key={detail.id}
@@ -421,7 +438,8 @@ export function ExpensesView({
             }}
             onCancel={() => setPanel({ kind: "view", id: detail.id })}
           />
-        ) : panel?.kind === "view" && detail ? (
+        ) : (panel?.kind === "view" || panel?.kind === "edit") && detail ? (
+          // An inventory expense opened for editing (an old link) shows read-only: it changes through inventory.
           <ExpenseDetailView expense={detail} onEdit={() => setPanel({ kind: "edit", id: detail.id })} onDelete={() => remove(detail)} canDelete={isAdmin} />
         ) : null}
       </FormSheet>

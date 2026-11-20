@@ -51,6 +51,7 @@ export function ProjectExpensesTab({
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
+  // Every row counts here, stock counted at purchase included: it is part of this project's cost.
   const visible = useMemo(() => (stage === "all" ? rows : rows.filter((r) => r.stage === stage)), [rows, stage]);
   const total = visible.reduce((s, r) => s + r.amount, 0);
   const fromStock = visible.filter((r) => r.source === "inventory_assignment").reduce((s, r) => s + r.amount, 0);
@@ -76,7 +77,7 @@ export function ProjectExpensesTab({
             <div className="min-w-0">
               <p className="flex items-center gap-2 truncate font-medium">
                 {row.original.vendor}
-                <ExpenseSourceBadge source={row.original.source} className="h-5 px-2 text-[11px]" />
+                <ExpenseSourceBadge source={row.original.source} countedAtPurchase={row.original.countedAtPurchase} className="h-5 px-2 text-[11px]" />
               </p>
               <p className="truncate font-mono text-[11px] text-muted-foreground">
                 {row.original.number}

@@ -16,7 +16,7 @@ import { assignFormSchema, purchaseFormSchema, returnFormSchema } from "./schema
 import { getHeldItems, getProjectImpact } from "./queries";
 import type { AssignResult, HeldItem, ProjectImpact, PurchaseResult, ReturnResult } from "./types";
 
-/** Assignments create project expenses, so Finance refreshes along with Inventory. */
+/** Purchases and assignments create expenses, so Finance refreshes along with Inventory. */
 const REVALIDATE: [string, "layout"][] = [
   ["/inventory", "layout"],
   ["/finance", "layout"],
@@ -32,7 +32,7 @@ export const purchaseStockAction = defineAction(
     const g = input.invoice;
     const taxable = round2(g.taxableAmount ?? 0);
     const hasInvoice = Boolean(g.invoiceNumber || g.gstin || taxable > 0);
-    const { item, movement } = await purchaseStock(
+    const { item, movement, expenseId, expenseAmount } = await purchaseStock(
       {
         itemId: input.itemId,
         quantity: input.quantity,
@@ -56,10 +56,13 @@ export const purchaseStockAction = defineAction(
           : undefined,
         receiptFileId: input.receiptFileId,
         note: input.note,
+        paymentMethod: input.paymentMethod,
       },
       user.id,
     );
+    // The receipt belongs to the movement; the purchase expense points at the same file.
     if (input.receiptFileId) await attachFiles([input.receiptFileId], { type: "movement", id: String(movement._id) });
+    const expense = expenseId ? await Expense.findById(expenseId, { number: 1 }).lean() : null;
     return {
       itemName: item.name,
       unit: item.unit ?? "pcs",
@@ -68,6 +71,8 @@ export const purchaseStockAction = defineAction(
       total: movement.totalCost ?? round2(input.quantity * input.unitPrice),
       available: item.available,
       status: getStockStatus(item.available, item.minStock),
+      expenseNumber: expense?.number ?? null,
+      expenseAmount,
     };
   },
   { revalidate: REVALIDATE },
@@ -95,6 +100,8 @@ export const assignStockAction = defineAction(
       projectName: result.project.name,
       expenseNumber: expense?.number ?? null,
       total: result.totalCost,
+      companyCost: result.companyCost,
+      countedAtPurchaseCost: result.countedAtPurchaseCost,
       available: result.after.available,
       status: getStockStatus(result.after.available, result.after.minStock),
     };

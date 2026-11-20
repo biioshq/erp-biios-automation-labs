@@ -86,6 +86,8 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number]["value"];
 export const EXPENSE_SOURCES = options([
   { value: "manual", label: "Manual" },
   { value: "inventory_assignment", label: "Inventory assignment" },
+  /** Created when stock is bought: the cash spent. Edited through the purchase, not by hand. */
+  { value: "inventory_purchase", label: "Stock purchase" },
   { value: "recurring", label: "Recurring" },
 ] as const);
 export type ExpenseSource = (typeof EXPENSE_SOURCES)[number]["value"];

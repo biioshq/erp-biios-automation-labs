@@ -5,6 +5,7 @@ import { connectDB } from "@/server/db";
 import { Expense, InventoryMovement } from "@/server/models";
 import { expenseFilter } from "@/features/finance/expenses/queries";
 import { round2 } from "@/lib/format";
+import { COMPANY_EXPENSES } from "@/server/services/metrics";
 import { filtersForReport } from "../../schemas";
 import { col, coversWholeMonths, describeFilters, rangeOf, sumTotals } from "../common";
 import { buildExpenseReport } from "./expense";
@@ -30,9 +31,12 @@ export async function buildCaReport(filters: ReportFilters): Promise<ReportData>
   });
   const member = Object.keys(scope).length > 0;
   // Vendor totals are what was paid to each supplier: assignment expenses only move stock already
-  // bought (and paid) to a project, so they are left out and the stock purchases themselves added below.
+  // bought (and paid) to a project, so they are left out and the stock purchases themselves added below
+  // from their movements. Purchase expenses repeat those movements, so they are left out here too.
   // Members never receive individual salary rows.
-  const expenseF = { $and: [expenseFBase, { source: { $ne: "inventory_assignment" } }, scope] };
+  const expenseF = { $and: [expenseFBase, { source: { $nin: ["inventory_assignment", "inventory_purchase"] } }, scope] };
+  // The same rows as the expense register (buildExpenseReport), for the reconciliation lines.
+  const registerF = { $and: [expenseFBase, scope, COMPANY_EXPENSES] };
   // Same rule as the GST register: purchases have no project, and count as "inventory" spend.
   const includePurchases = f.project.length === 0 && (f.category.length === 0 || f.category.includes("inventory"));
   const purchaseQuery: Record<string, unknown> = { type: "purchase" };
@@ -47,7 +51,7 @@ export async function buildCaReport(filters: ReportFilters): Promise<ReportData>
   type VendorGroup = { _id: string | null; gstin: string | null; count: number; taxable: number; tax: number; total: number };
   // Income has its own category list, so the expense category filter does not apply to it.
   const incomeFilters = { ...f, category: [], vendor: [] };
-  const [expense, income, gst, vendors, purchases, salaries, assigned] = await Promise.all([
+  const [expense, income, gst, vendors, purchases, salaries, assigned, purchaseExpenses] = await Promise.all([
     buildExpenseReport(f),
     buildIncomeReport(incomeFilters),
     buildGstReport(f),
@@ -90,7 +94,12 @@ export async function buildCaReport(filters: ReportFilters): Promise<ReportData>
       : Promise.resolve([] as { total: number }[]),
     // Stock used on projects: in the expense register at cost, but left out of the vendor totals.
     Expense.aggregate<{ total: number }>([
-      { $match: { $and: [expenseFBase, { source: "inventory_assignment" }, scope] } as never },
+      { $match: { $and: [registerF, { source: "inventory_assignment" }] } as never },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]),
+    // Stock purchases booked as expenses: in the register, and in the vendor totals through their movements.
+    Expense.aggregate<{ total: number }>([
+      { $match: { $and: [registerF, { source: "inventory_purchase" }] } as never },
       { $group: { _id: null, total: { $sum: "$amount" } } },
     ]),
   ]);
@@ -142,6 +151,7 @@ export async function buildCaReport(filters: ReportFilters): Promise<ReportData>
   };
 
   const assignedTotal = round2(assigned[0]?.total ?? 0);
+  const purchaseExpenseTotal = round2(purchaseExpenses[0]?.total ?? 0);
   const purchaseTotal = round2(purchases.reduce((s, p) => s + p.total, 0));
   const vendorTotal = Number(vendorSection.totals?.total ?? 0);
   const summaryRows: ReportRow[] = [
@@ -159,11 +169,14 @@ export async function buildCaReport(filters: ReportFilters): Promise<ReportData>
     { line: "GST input credit: IGST", amount: itc("igst") },
     { line: "GST input credit: CESS", amount: itc("cess") },
     { line: "GST input credit: total", amount: itcTotal, _kind: "subtotal" },
-    // "Expenses" counts stock when it is used on a project (at cost), while the vendor table counts it when
-    // it is bought (at invoice value), so the two differ by this much.
+    // "Expenses" counts older stock when it is used on a project (at cost) and newer stock when it is
+    // bought, while the vendor table counts all stock when it is bought (at invoice value, from the
+    // purchase movements), so the two differ by this much.
     { line: "Reconciliation to vendor-wise totals", amount: null, _kind: "subtotal" },
     { line: salaryLine ? "Expense register (other than salaries)" : "Expense register", amount: registerTotal },
     { line: "Less: stock used on projects", amount: assignedTotal ? -assignedTotal : 0 },
+    // Only once purchases are booked as expenses, so older periods keep the lines they had.
+    ...(purchaseExpenseTotal ? [{ line: "Less: stock purchases booked as expenses", amount: -purchaseExpenseTotal }] : []),
     { line: "Add: stock purchases at invoice value", amount: purchaseTotal },
     { line: "Vendor-wise total", amount: vendorTotal, _kind: "subtotal" },
   ];

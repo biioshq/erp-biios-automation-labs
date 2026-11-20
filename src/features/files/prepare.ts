@@ -39,17 +39,23 @@ async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
   }
 }
 
+export type PrepareOptions = {
+  /** Longest side in pixels; smaller than the default for item photos, which only show as pictures. */
+  maxEdge?: number;
+};
+
 /** Returns a smaller JPEG for large images, or the original file. Never throws. */
-export async function prepareUpload(file: File): Promise<File> {
+export async function prepareUpload(file: File, options: PrepareOptions = {}): Promise<File> {
+  const maxEdge = options.maxEdge ?? MAX_EDGE;
   if (!RESIZABLE.has(file.type) || typeof window === "undefined") return file;
   try {
     const bitmap = await loadBitmap(file);
     const width = "naturalWidth" in bitmap ? bitmap.naturalWidth : bitmap.width;
     const height = "naturalHeight" in bitmap ? bitmap.naturalHeight : bitmap.height;
     const longEdge = Math.max(width, height);
-    if (file.size <= SHRINK_ABOVE_BYTES && longEdge <= MAX_EDGE) return file;
+    if (file.size <= SHRINK_ABOVE_BYTES && longEdge <= maxEdge) return file;
 
-    const scale = Math.min(1, MAX_EDGE / longEdge);
+    const scale = Math.min(1, maxEdge / longEdge);
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(width * scale);
     canvas.height = Math.round(height * scale);

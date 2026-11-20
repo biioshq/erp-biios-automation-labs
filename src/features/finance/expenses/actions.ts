@@ -127,6 +127,9 @@ export const updateExpense = defineAction(
     if (existing.source === "inventory_assignment") {
       throw new AppError("This expense comes from an inventory assignment. Change it by returning stock from the project.", "conflict");
     }
+    if (existing.source === "inventory_purchase") {
+      throw new AppError("This expense comes from a stock purchase. It changes only through inventory.", "conflict");
+    }
     assertMaySalary(user, existing.category, input.category);
     // Keeping the current category always saves, even if it was hidden since.
     await assertExpenseCategoryAllowed(input.category, existing.category);
@@ -150,6 +153,11 @@ export const deleteExpense = defineAction(
     if (!existing) throw notFound("The expense");
     if (existing.source === "inventory_assignment") {
       throw new AppError("This expense comes from an inventory assignment. Return the stock from the project to reverse it.", "conflict");
+    }
+    // Its receipt is the purchase's too, and the stock it paid for stays on hand: deleting it would drop
+    // the cost from the books.
+    if (existing.source === "inventory_purchase") {
+      throw new AppError("This expense comes from a stock purchase, so it can't be deleted here. It changes only through inventory.", "conflict");
     }
     await Expense.deleteOne({ _id: existing._id });
     if (existing.receipt) await removeFile(String(existing.receipt));

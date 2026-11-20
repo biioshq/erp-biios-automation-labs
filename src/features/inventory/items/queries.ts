@@ -52,6 +52,8 @@ function toRow(i: ItemLean, categories: Map<string, ItemCategoryRef>): ItemRow {
     vendor: i.vendor ?? null,
     location: i.location ?? null,
     status: getStockStatus(roundQty(i.available), i.minStock),
+    photoFileId: i.photoFileId ? String(i.photoFileId) : null,
+    photoUrl: i.photoFileId ? `/api/files/${String(i.photoFileId)}` : null,
     updatedAt: iso(i.updatedAt)!,
   };
 }

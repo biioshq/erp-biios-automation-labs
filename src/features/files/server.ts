@@ -30,19 +30,30 @@ export function safeDisplayName(name: string) {
   return base.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200) || "file";
 }
 
-export async function storeFile(input: {
-  file: File;
+/** What a stored file can belong to. */
+export type FileEntityType = "expense" | "income" | "task" | "project" | "movement" | "item";
+
+type StoreOptions = {
   kind: FileKind;
   userId: string;
   documentType?: ProjectDocumentType;
   projectId?: string;
-  entity?: { type: "expense" | "income" | "task" | "project" | "movement"; id: string };
-}): Promise<FileDoc> {
-  const buffer = Buffer.from(await input.file.arrayBuffer());
-  const stored = await saveUpload(buffer, input.file.type);
+  entity?: { type: FileEntityType; id: string };
+  /** Set for files imported from Google Drive. */
+  driveFileId?: string;
+};
+
+export async function storeFile(input: StoreOptions & { file: File }): Promise<FileDoc> {
+  const { file, ...options } = input;
+  return storeBuffer({ ...options, bytes: Buffer.from(await file.arrayBuffer()), name: file.name, mimeType: file.type });
+}
+
+/** Stores bytes the server already holds (for example a file downloaded from Google Drive). */
+export async function storeBuffer(input: StoreOptions & { bytes: Buffer; name: string; mimeType: string }): Promise<FileDoc> {
+  const stored = await saveUpload(input.bytes, input.mimeType);
   try {
     return await FileModel.create({
-      name: safeDisplayName(input.file.name),
+      name: safeDisplayName(input.name),
       mimeType: stored.mimeType,
       size: stored.size,
       storageKey: stored.storageKey,
@@ -52,6 +63,7 @@ export async function storeFile(input: {
       project: input.projectId && Types.ObjectId.isValid(input.projectId) ? new Types.ObjectId(input.projectId) : undefined,
       entity: input.entity ? { type: input.entity.type, id: new Types.ObjectId(input.entity.id) } : undefined,
       uploadedBy: new Types.ObjectId(input.userId),
+      ...(input.driveFileId ? { driveFileId: input.driveFileId } : {}),
     });
   } catch (error) {
     await deleteStoredFile(stored.storageKey);
@@ -93,7 +105,7 @@ export async function isClaimableFile(
  * The file's project follows the record's: without a project it is cleared, so deleting a project the record
  * has moved away from never deletes the record's files.
  */
-export async function attachFiles(fileIds: string[], entity: { type: "expense" | "income" | "task" | "project" | "movement"; id: string }, projectId?: string | null) {
+export async function attachFiles(fileIds: string[], entity: { type: FileEntityType; id: string }, projectId?: string | null) {
   const ids = fileIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id));
   if (!ids.length) return;
   await FileModel.updateMany(
@@ -108,8 +120,11 @@ export async function attachFiles(fileIds: string[], entity: { type: "expense" |
  * Payslips and other salary receipts are admin-only, even for someone who knows the file id. Every route that
  * hands out a stored file or what is read from it (download, OCR) asks this first.
  */
-export async function isHiddenFromUser(fileId: Types.ObjectId | string, user: { role: string }): Promise<boolean> {
+export async function isHiddenFromUser(fileId: Types.ObjectId | string, user: { role: string }, kind?: string): Promise<boolean> {
   if (user.role === "admin") return false;
+  // Item photos can never be receipts (expenses only take files of kind "receipt"), so a list of
+  // thumbnails costs no extra query. Callers that hold the file record pass its kind.
+  if (kind === "photo") return false;
   return Boolean(await Expense.exists({ receipt: new Types.ObjectId(String(fileId)), category: "salaries" }));
 }
 

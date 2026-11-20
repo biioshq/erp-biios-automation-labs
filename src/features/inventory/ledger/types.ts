@@ -10,8 +10,14 @@ export type LedgerItem = {
   allocated: number;
   quantity: number;
   minStock: number;
-  /** Weighted average cost: what assignments are costed at. */
+  /** Average cost per unit of the stock on hand. */
   unitPrice: number;
+  /**
+   * The not-yet-expensed lot as stored (null on an untracked item: then all stock is not expensed
+   * yet). With these the assign form previews the split exactly as the ledger books it (stock-cost.ts).
+   */
+  unexpensedQty: number | null;
+  unexpensedValue: number | null;
   lastPurchasePrice: number | null;
   vendor: string | null;
   status: StockStatus;
@@ -81,6 +87,9 @@ export type PurchaseResult = {
   total: number;
   available: number;
   status: StockStatus;
+  /** The expense the purchase booked (none for a ₹0 purchase). */
+  expenseNumber: string | null;
+  expenseAmount: number;
 };
 
 export type AssignResult = {
@@ -90,6 +99,10 @@ export type AssignResult = {
   projectName: string;
   expenseNumber: string | null;
   total: number;
+  /** Of `total`: added to company expenses now (stock not expensed yet). */
+  companyCost: number;
+  /** Of `total`: moved into the project only, as it was expensed when bought. */
+  countedAtPurchaseCost: number;
   available: number;
   status: StockStatus;
 };

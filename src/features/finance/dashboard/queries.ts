@@ -6,6 +6,7 @@ import { connectDB } from "@/server/db";
 import { Expense, Income, Project, RecurringExpense } from "@/server/models";
 import { iso } from "@/server/serialize";
 import {
+  COMPANY_EXPENSES,
   budgetUsage,
   financeTotals,
   inventorySnapshot,
@@ -89,7 +90,8 @@ const projectOf = (value: unknown): Transaction["project"] => {
 
 async function recentTransactions(limit = 10): Promise<Transaction[]> {
   const [expenses, income, expenseLabel] = await Promise.all([
-    Expense.find(await salaryScope(), { number: 1, vendor: 1, amount: 1, date: 1, category: 1, project: 1 })
+    // Company money only: stock used on a project that was expensed when bought is shown with its purchase.
+    Expense.find({ ...(await salaryScope()), ...COMPANY_EXPENSES }, { number: 1, vendor: 1, amount: 1, date: 1, category: 1, project: 1 })
       .sort({ date: -1, _id: -1 })
       .limit(limit)
       .populate("project", "name color")

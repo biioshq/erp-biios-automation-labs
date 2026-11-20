@@ -11,6 +11,8 @@ import { mongoSort, searchRegex, type ListParams, type Paginated } from "@/lib/l
 import type { ExpenseSource, PaymentMethod, ProjectStage } from "@/lib/constants";
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { totalTax } from "@/lib/gst";
+import { round2 } from "@/lib/format";
+import { COMPANY_EXPENSES } from "@/server/services/metrics";
 import type { ExpenseDetail, ExpenseRow, ExpenseSummary } from "./types";
 
 type PopulatedProject = { _id: Types.ObjectId; name: string; code: string; color?: string } | null;
@@ -40,6 +42,7 @@ function toRow(e: ExpenseDoc & { project?: unknown }, labelOf: Labeler): Expense
     project: project?._id ? { id: String(project._id), name: project.name, code: project.code, color: project.color ?? "#4a82cc" } : null,
     stage: (e.stage as ProjectStage | undefined) ?? null,
     source: (e.source ?? "manual") as ExpenseSource,
+    countedAtPurchase: e.countedAtPurchase === true,
     gstin: e.gst?.gstin ?? null,
     invoiceNumber: e.gst?.invoiceNumber ?? null,
     totalTax: e.gst ? totalTax(e.gst) : 0,
@@ -87,8 +90,10 @@ export async function listExpenses(params: ListParams): Promise<Paginated<Expens
       .populate("employee", "name")
       .lean(),
     Expense.countDocuments(filter),
+    // Totals leave out stock counted at purchase, whatever the filter: the purchase itself is
+    // already in them. Project spend and the project's expenses tab count it.
     Expense.aggregate<{ total: number; tax: number }>([
-      { $match: filter },
+      { $match: { $and: [filter, COMPANY_EXPENSES] } },
       {
         $group: {
           _id: null,
@@ -104,7 +109,12 @@ export async function listExpenses(params: ListParams): Promise<Paginated<Expens
     total,
     page: params.page,
     pageSize: params.pageSize,
-    summary: { count: total, total: summary[0]?.total ?? 0, tax: summary[0]?.tax ?? 0 },
+    // Rounded to paise: a float sum depends on the order the database adds the rows in.
+    summary: {
+      count: total,
+      total: round2(summary[0]?.total ?? 0),
+      tax: round2(summary[0]?.tax ?? 0),
+    },
   };
 }
 

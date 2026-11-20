@@ -24,8 +24,9 @@ import {
 import { getItemForm } from "./queries";
 import { copyBaseName, copyName, exactNamePattern, matchItemName, namePrefixPattern, normalizeItemName, normalizeSku } from "./matching";
 import type { ItemFormRecord, SimilarItem } from "./types";
+import { removeFile } from "@/features/files/server";
 
-/** Anything that touches stock also moves Finance numbers (inventory value, GST input credit). */
+/** Anything that touches stock also moves Finance numbers (purchase expenses, inventory value, GST input credit). */
 const REVALIDATE: [string, "layout"][] = [
   ["/inventory", "layout"],
   ["/finance", "layout"],
@@ -93,7 +94,11 @@ export const createItem = defineAction(
     if (openingQuantity > 0) {
       try {
         const date = input.purchaseDate ? fromDateInput(input.purchaseDate) : new Date();
-        await recordOpeningStock(String(created._id), openingQuantity, input.openingUnitPrice ?? 0, input.vendor, date, user.id);
+        // Booked as a purchase (with its expense) unless the stock was already on hand.
+        await recordOpeningStock(String(created._id), openingQuantity, input.openingUnitPrice ?? 0, input.vendor, date, user.id, {
+          asPurchase: input.openingAsPurchase ?? true,
+          paymentMethod: input.openingPaymentMethod,
+        });
       } catch (error) {
         // An item without its opening stock would be misleading: undo the create.
         await InventoryItem.deleteOne({ _id: created._id });
@@ -188,6 +193,8 @@ export const removeItem = defineAction(
     }
     const deleted = await InventoryItem.deleteOne(empty);
     if (deleted.deletedCount === 0) throw changed();
+    // Archived items keep their photo; a deleted one leaves nothing behind.
+    if (item.photoFileId) await removeFile(String(item.photoFileId)).catch(() => undefined);
     return { id, archived: false };
   },
   { role: "admin", revalidate: REVALIDATE },

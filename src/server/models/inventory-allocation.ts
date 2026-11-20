@@ -4,6 +4,7 @@ import { PROJECT_STAGES, valuesOf } from "@/lib/constants";
 /**
  * Stock a project holds from one assignment. Its generated expense always
  * equals `quantity × unitCost`; returns reduce `quantity` (latest assignment first).
+ * One assignment of stock that is partly expensed already makes two allocations, one of each kind.
  * Feeds the project's "Inventory Used" tab.
  */
 const inventoryAllocationSchema = new Schema(
@@ -18,6 +19,14 @@ const inventoryAllocationSchema = new Schema(
     stage: { type: String, enum: valuesOf(PROJECT_STAGES), required: true },
     assignedAt: { type: Date, required: true },
     expense: { type: Schema.Types.ObjectId, ref: "Expense" },
+    /**
+     * Units of this assignment expensed when they were assigned (a company expense). An assignment is
+     * one kind or the other: all units (stock not expensed yet) or 0 (stock already expensed at
+     * purchase, `countedAtPurchase`). Missing on older assignments, which were all expensed at assignment.
+     */
+    expensedAtAssignment: { type: Number, min: 0 },
+    /** The stock was expensed when bought: the expense here is a project cost only (Expense.countedAtPurchase). */
+    countedAtPurchase: { type: Boolean },
     movement: { type: Schema.Types.ObjectId, ref: "InventoryMovement" },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },

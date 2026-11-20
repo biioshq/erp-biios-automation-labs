@@ -27,6 +27,8 @@ const schema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_ALLOWED_DOMAINS: z.string().optional(),
+  // Google Drive import (optional): an API key with the Google Drive API enabled.
+  GOOGLE_DRIVE_API_KEY: z.string().optional(),
   RECURRING_SCHEDULER: z.enum(["on", "off"]).optional(),
   // File storage on Vercel: Cloudinary (recommended) or an S3-compatible bucket. Cloudinary values
   // are checked in cloudinary-config.ts, which also accepts them pasted with quotes or "NAME=".

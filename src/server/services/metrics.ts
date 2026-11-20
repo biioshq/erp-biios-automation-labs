@@ -13,14 +13,25 @@ import { getStockStatus } from "@/lib/stock-status";
  * The ERP's shared numbers. Dashboards, project pages and reports all read
  * these, so a figure is computed one way everywhere.
  *
- *  - Spend is always the sum of expenses (manual + inventory assignments).
- *    Per-project spend leaves salaries out for members (see projectSpend).
+ *  - Spend is always the sum of expenses (manual, recurring, stock purchases and
+ *    inventory assignments). Per-project spend leaves salaries out for members
+ *    (see projectSpend).
+ *  - Company totals leave out assignment records marked countedAtPurchase: that
+ *    stock was expensed when it was bought, so counting its use again would count
+ *    it twice. Project spend includes them: they are the project's cost.
  *  - Inventory value is stock on hand: available × weighted average cost.
  *    Allocated stock is already counted as project expenses, so it is not
  *    counted again here. Its value is what was charged to the projects.
  */
 
 type Range = { from?: Date; to?: Date };
+
+/**
+ * Expenses that count in company totals: everything except the project cost of stock already
+ * expensed at purchase. `$ne: true` also matches records without the field (all older ones),
+ * and needs no index.
+ */
+export const COMPANY_EXPENSES = { countedAtPurchase: { $ne: true } } as const;
 
 const dateMatch = (field: string, range?: Range) =>
   range?.from || range?.to
@@ -36,7 +47,7 @@ export async function financeTotals(range?: Range) {
       { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
     ]),
     Expense.aggregate<{ total: number; count: number; tax: number }>([
-      { $match: dateMatch("date", range) },
+      { $match: { ...dateMatch("date", range), ...COMPANY_EXPENSES } },
       {
         $group: {
           _id: null,
@@ -63,8 +74,8 @@ export async function financeTotals(range?: Range) {
 export async function monthlyIncomeExpense(months = 12) {
   await connectDB();
   const from = startOfMonthIST(new Date(), -(months - 1));
-  const group = (amountField: string) => [
-    { $match: { date: { $gte: from } } },
+  const group = (amountField: string, extra: Record<string, unknown> = {}) => [
+    { $match: { date: { $gte: from }, ...extra } },
     {
       $group: {
         _id: { $dateToString: { format: "%Y-%m", date: "$date", timezone: "Asia/Kolkata" } },
@@ -74,7 +85,7 @@ export async function monthlyIncomeExpense(months = 12) {
   ];
   const [inc, exp] = await Promise.all([
     Income.aggregate<{ _id: string; total: number }>(group("$amount")),
-    Expense.aggregate<{ _id: string; total: number }>(group("$amount")),
+    Expense.aggregate<{ _id: string; total: number }>(group("$amount", COMPANY_EXPENSES)),
   ]);
   const incomeBy = new Map(inc.map((r) => [r._id, r.total]));
   const expenseBy = new Map(exp.map((r) => [r._id, r.total]));
@@ -91,7 +102,7 @@ export async function monthlyExpensesByCategory(months = 6) {
   await connectDB();
   const from = startOfMonthIST(new Date(), -(months - 1));
   const rows = await Expense.aggregate<{ _id: { month: string; category: string }; total: number }>([
-    { $match: { date: { $gte: from } } },
+    { $match: { date: { $gte: from }, ...COMPANY_EXPENSES } },
     {
       $group: {
         _id: { month: { $dateToString: { format: "%Y-%m", date: "$date", timezone: "Asia/Kolkata" } }, category: "$category" },
@@ -130,7 +141,10 @@ async function viewerSeesSalaries(options: SpendOptions) {
   return canSeeSalaries();
 }
 
-/** Spend (total and per stage) and income received, per project. Pass ids to limit the scope. */
+/**
+ * Spend (total and per stage) and income received, per project. Pass ids to limit the scope.
+ * Includes stock counted at purchase: it is part of what the project used.
+ */
 export async function projectSpend(
   projectIds?: (string | Types.ObjectId)[],
   options: SpendOptions = {},

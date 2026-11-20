@@ -17,6 +17,11 @@ export type ExpenseRow = {
   project: { id: string; name: string; code: string; color: string } | null;
   stage: ProjectStage | null;
   source: ExpenseSource;
+  /**
+   * Stock used on a project that was expensed when it was bought: a project cost only. Listed, but
+   * left out of company totals (the list totals, dashboard and reports).
+   */
+  countedAtPurchase: boolean;
   gstin: string | null;
   invoiceNumber: string | null;
   totalTax: number;
@@ -55,4 +60,8 @@ export type ExpenseDetail = ExpenseRow & {
   updatedAt: string;
 };
 
+/**
+ * `count` is every listed row. `total` and `tax` always leave out rows counted at purchase (stock
+ * expensed when it was bought), so they never count it twice.
+ */
 export type ExpenseSummary = { count: number; total: number; tax: number };

@@ -55,6 +55,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/ocr": OCR_FILES,
     "/api/health": OCR_FILES,
+    "/api/imports/drive/receipts": OCR_FILES,
   },
   // Source, docs, scripts and local uploads are never needed by the built server.
   outputFileTracingExcludes: {

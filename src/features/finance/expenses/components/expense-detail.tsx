@@ -14,7 +14,7 @@ import { PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import { totalTax } from "@/lib/gst";
 import type { ExpenseDetail } from "../types";
-import { ExpenseSourceBadge } from "./expense-badges";
+import { ExpenseSourceBadge, isInventoryExpense } from "./expense-badges";
 
 function Row({ icon: Icon, label, children }: { icon: typeof Tag; label: string; children: React.ReactNode }) {
   return (
@@ -59,7 +59,8 @@ export function ExpenseDetailView({
   /** Only admins may delete; the server enforces it too. */
   canDelete?: boolean;
 }) {
-  const generated = expense.source === "inventory_assignment";
+  const generated = isInventoryExpense(expense.source);
+  const purchase = expense.source === "inventory_purchase";
   const g = expense.gst;
   return (
     <>
@@ -70,10 +71,15 @@ export function ExpenseDetailView({
             <StatusBadge tone="neutral" dot={false}>
               {expense.categoryLabel}
             </StatusBadge>
-            <ExpenseSourceBadge source={expense.source} />
+            <ExpenseSourceBadge source={expense.source} countedAtPurchase={expense.countedAtPurchase} />
           </div>
           <Money value={expense.amount} exact className="block text-3xl font-semibold tracking-tight" />
           <p className="text-sm text-muted-foreground">{expense.description ?? "No description"}</p>
+          {expense.countedAtPurchase ? (
+            <p className="text-xs text-muted-foreground">
+              This stock was expensed when it was bought. It counts in the project&apos;s spend and budget, but not again in company totals.
+            </p>
+          ) : null}
           {expense.recurring ? (
             <Link
               href={`/finance/recurring?view=${expense.recurring.id}`}
@@ -153,7 +159,7 @@ export function ExpenseDetailView({
             </div>
           ) : (
             <p className="rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground">
-              {generated ? "GST was recorded on the stock purchase invoice." : "No GST invoice recorded for this expense."}
+              {generated && !purchase ? "GST was recorded on the stock purchase invoice." : "No GST invoice recorded for this expense."}
             </p>
           )}
         </section>
@@ -184,7 +190,11 @@ export function ExpenseDetailView({
       </FormSheetBody>
       <FormSheetFooter>
         {generated ? (
-          <p className="mr-auto text-xs text-muted-foreground">Created by an inventory assignment. Return stock to change it.</p>
+          <p className="mr-auto text-xs text-muted-foreground">
+            {purchase
+              ? "Created by a stock purchase. It changes only through inventory."
+              : "Created by an inventory assignment. Return stock to change it."}
+          </p>
         ) : (
           <>
             {canDelete ? (

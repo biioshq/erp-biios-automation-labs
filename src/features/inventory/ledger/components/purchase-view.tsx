@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { DateField, FormSection, NumberField, TextField, TextareaField } from "@/components/forms/fields";
+import { DateField, FormSection, NumberField, SelectField, TextField, TextareaField } from "@/components/forms/fields";
 import { Money } from "@/components/shared/money";
 import { StockStatusBadge } from "@/components/shared/status-badge";
 import { applyFieldErrors } from "@/lib/action-result";
@@ -24,7 +24,13 @@ import { FileDropzone } from "@/features/files/components/file-dropzone";
 import { FileTile } from "@/features/files/components/file-preview";
 import { ACCEPT_RECEIPTS, type FileDTO } from "@/features/files/types";
 import { discardPurchaseReceipt, purchaseStockAction } from "../actions";
-import { purchaseFormSchema, type PurchaseFormInput, type PurchaseFormValues } from "../schemas";
+import {
+  DEFAULT_PURCHASE_PAYMENT_METHOD,
+  PURCHASE_PAYMENT_METHODS,
+  purchaseFormSchema,
+  type PurchaseFormInput,
+  type PurchaseFormValues,
+} from "../schemas";
 import { withoutUnusedInvoiceFill } from "../purchase-fill";
 import type { LastPurchase, LedgerItem } from "../types";
 import { ItemCard, StatusDot } from "./item-card";
@@ -62,6 +68,7 @@ function defaultsFor(item?: LedgerItem, quantity?: number, last?: LastPurchase):
     unitPrice: (item ? (item.lastPurchasePrice ?? item.unitPrice) || undefined : undefined) as number,
     vendor: fill.vendor,
     date: toDateInput(new Date()),
+    paymentMethod: DEFAULT_PURCHASE_PAYMENT_METHOD,
     invoice: {
       invoiceNumber: "",
       invoiceDate: undefined,
@@ -254,6 +261,7 @@ export function PurchaseView({
       const r = result.data;
       toast.success(
         `Purchased ${formatNumber(r.quantity)} ${r.unit} of ${r.itemName} at ${formatCurrency(r.unitPrice)} each (${formatCurrency(r.total)}). Available is now ${formatNumber(r.available)}.`,
+        r.expenseNumber ? { description: `Added to expenses as ${r.expenseNumber} (${formatCurrency(r.expenseAmount)}).` } : undefined,
       );
       emitDataChanged();
       form.reset({ ...defaultsFor(), itemId: "" });
@@ -345,6 +353,14 @@ export function PurchaseView({
             </Field>
             <DateField control={control} name="date" label="Purchase date" required />
           </div>
+          <SelectField
+            control={control}
+            name="paymentMethod"
+            label="Payment method"
+            required
+            options={PURCHASE_PAYMENT_METHODS}
+            description="The purchase is added to expenses right away, paid this way. Assigning the stock to a project later does not add it again."
+          />
           {filledFrom && item ? (
             <p className="-mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
               <History className="mt-0.5 size-3.5 shrink-0" />

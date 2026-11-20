@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PROJECT_STAGES, valuesOf } from "@/lib/constants";
+import { PAYMENT_METHODS, PROJECT_STAGES, valuesOf, type PaymentMethod } from "@/lib/constants";
 import { dateInput, gstin, money, objectId, optionalDateInput, optionalMoney, optionalObjectId, optionalText, quantity } from "@/lib/zod";
 import { gstGrandTotal, gstIssues } from "@/lib/gst";
 
@@ -9,6 +9,14 @@ import { gstGrandTotal, gstIssues } from "@/lib/gst";
  * more, or its preview would price a quantity other than the one recorded. */
 export const hasQtyDecimals = (n: number) => Math.abs(n * 1000 - Math.round(n * 1000)) < 1e-6;
 export const stockQuantity = quantity.refine(hasQtyDecimals, "Use at most 3 decimals");
+
+/** How a stock purchase was paid: any method except "stock" (that one marks stock taken from inventory). */
+export const PURCHASE_PAYMENT_METHODS = PAYMENT_METHODS.filter((m) => m.value !== "stock");
+export type PurchasePaymentMethod = Exclude<PaymentMethod, "stock">;
+export const DEFAULT_PURCHASE_PAYMENT_METHOD: PurchasePaymentMethod = "bank_transfer";
+export const purchasePaymentMethod = z.enum(PURCHASE_PAYMENT_METHODS.map((m) => m.value) as [PurchasePaymentMethod, ...PurchasePaymentMethod[]], {
+  error: "Pick how it was paid",
+});
 
 const pickId = (what: string) => z.string({ error: `Pick ${what}` }).regex(/^[a-f\d]{24}$/i, `Pick ${what}`);
 
@@ -31,6 +39,8 @@ export const purchaseFormSchema = z
     unitPrice: money,
     vendor: optionalText(200),
     date: dateInput,
+    /** The purchase is booked as an expense paid this way. Optional for older callers. */
+    paymentMethod: purchasePaymentMethod.default(DEFAULT_PURCHASE_PAYMENT_METHOD),
     invoice: invoiceSchema,
     receiptFileId: optionalObjectId,
     note: optionalText(1000),

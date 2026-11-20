@@ -18,6 +18,7 @@ import { formatCurrency, formatNumber, round2 } from "@/lib/format";
 import { getStockStatus } from "@/lib/stock-status";
 import { assignStockAction, fetchProjectImpact } from "../actions";
 import { assignFormSchema, type AssignFormInput, type AssignFormValues } from "../schemas";
+import { splitAssignment } from "../stock-cost";
 import type { LedgerItem, LedgerProject, ProjectImpact } from "../types";
 import { ItemCard, StatusDot } from "./item-card";
 import { ContextPlaceholder, ImpactRow, OperationForm, OperationLayout, SubmitBar } from "./operation-layout";
@@ -146,8 +147,14 @@ export function AssignView({
         return;
       }
       const r = result.data;
+      // Stock expensed when it was bought only moves its cost into the project; older stock is expensed now.
+      const parts = [
+        r.countedAtPurchaseCost > 0 ? `${formatCurrency(r.countedAtPurchaseCost)} moved into the project's budget (counted when bought)` : "",
+        r.companyCost > 0 ? `${formatCurrency(r.companyCost)} added to expenses` : "",
+      ].filter(Boolean);
       toast.success(
-        `Assigned ${formatNumber(r.quantity)} ${r.unit} of ${r.itemName} to ${r.projectName}.${r.expenseNumber ? ` Expense ${r.expenseNumber} added (${formatCurrency(r.total)}).` : ""}`,
+        `Assigned ${formatNumber(r.quantity)} ${r.unit} of ${r.itemName} to ${r.projectName}.${r.expenseNumber ? ` Expense ${r.expenseNumber}.` : ""}`,
+        parts.length ? { description: `${parts.join(", ")}.` } : undefined,
       );
       emitDataChanged();
       // Several items often go to the same project and stage, so those stay selected.
@@ -171,7 +178,7 @@ export function AssignView({
             Books <Money value={preview.cost} className="font-medium text-foreground" /> to {project?.name ?? "the project"}
           </>
         ) : (
-          "An expense is created for the project when you save."
+          "The cost is booked to the project when you save. Stock already expensed at purchase is not added to company expenses again."
         )
       }
     />
@@ -264,7 +271,7 @@ export function AssignView({
       context={
         item ? (
           <>
-            <ItemCard item={item} />
+            <ItemCard item={item} showExpensed />
             {preview ? (
               <ImpactPanel
                 item={item}
@@ -291,7 +298,9 @@ export function AssignView({
 type AssignPreview = ReturnType<typeof previewAssign>;
 
 function previewAssign(item: LedgerItem, quantity: number, impact: ProjectImpact | null, stage: string | undefined) {
-  const cost = round2(quantity * item.unitPrice);
+  // The same split the ledger books: already-expensed units first, each lot at its own cost.
+  const split = splitAssignment(item, quantity);
+  const cost = split.total;
   const availableAfter = item.available - quantity;
   const statusAfter = getStockStatus(availableAfter, item.minStock);
   const budget = impact?.budget ?? 0;
@@ -300,6 +309,8 @@ function previewAssign(item: LedgerItem, quantity: number, impact: ProjectImpact
   const remainingAfter = round2(budget - spent - cost);
   return {
     cost,
+    companyCost: split.companyAmount,
+    countedCost: split.countedAmount,
     availableAfter,
     allocatedAfter: item.allocated + quantity,
     statusAfter,
@@ -375,9 +386,23 @@ function ImpactPanel({
         )}
       </div>
       <div className="mt-1 flex items-center justify-between border-t pt-3 text-sm">
-        <span className="text-muted-foreground">Expense to be booked</span>
+        <span className="text-muted-foreground">Cost to the project</span>
         <Money value={preview.cost} className="font-semibold" />
       </div>
+      <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-3">
+          <dt>Added to expenses</dt>
+          <dd>
+            <Money value={preview.companyCost} className="font-medium text-foreground" />
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt>Already expensed at purchase</dt>
+          <dd>
+            <Money value={preview.countedCost} className="font-medium text-foreground" />
+          </dd>
+        </div>
+      </dl>
 
       <div className="mt-3 space-y-2 empty:hidden">
         {preview.emptied ? (

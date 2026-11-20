@@ -9,6 +9,7 @@ import { INVENTORY_UNITS, labelOf } from "@/lib/constants";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ItemRow } from "../types";
+import { ItemThumb } from "./item-photo";
 
 export function OutOfStockHint({ className }: { className?: string }) {
   return <p className={cn("text-xs font-medium text-danger", className)}>Purchase before allocating</p>;
@@ -35,9 +36,12 @@ export function ItemCard({ item, index = 0 }: { item: ItemRow; index?: number })
       className="group animate-in fade-in-0 slide-in-from-bottom-1 flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-card transition-colors duration-300 fill-mode-both hover:border-foreground/20 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <p className="truncate text-[15px] font-semibold tracking-tight">{item.name}</p>
-          <p className="truncate font-mono text-[11px] text-muted-foreground">{item.sku}</p>
+        <div className="flex min-w-0 items-center gap-3">
+          <ItemThumb src={item.photoUrl} name={item.name} size="md" />
+          <div className="min-w-0 space-y-1">
+            <p className="truncate text-[15px] font-semibold tracking-tight">{item.name}</p>
+            <p className="truncate font-mono text-[11px] text-muted-foreground">{item.sku}</p>
+          </div>
         </div>
         <StockStatusBadge status={item.status} />
       </div>

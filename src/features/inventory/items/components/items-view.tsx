@@ -49,6 +49,7 @@ import { fetchItem, removeItem } from "../actions";
 import type { ItemFormRecord, ItemRow } from "../types";
 import { ItemForm, type CategoryOption } from "./item-form";
 import { ItemCard, OutOfStockHint } from "./item-card";
+import { ItemThumb } from "./item-photo";
 
 type Panel = { kind: "new"; from: string | null } | { kind: "edit"; id: string } | null;
 type Layout = "table" | "cards";
@@ -260,9 +261,12 @@ export function ItemsView({
         meta: { label: "Item name" },
         header: ({ column }) => <DataTableColumnHeader column={column} title="Item name" />,
         cell: ({ row }) => (
-          <div className="min-w-44">
-            <p className="truncate font-medium">{row.original.name}</p>
-            <p className="truncate font-mono text-[11px] text-muted-foreground">{row.original.sku}</p>
+          <div className="flex min-w-52 items-center gap-2.5">
+            <ItemThumb src={row.original.photoUrl} name={row.original.name} size="xs" />
+            <div className="min-w-0">
+              <p className="truncate font-medium">{row.original.name}</p>
+              <p className="truncate font-mono text-[11px] text-muted-foreground">{row.original.sku}</p>
+            </div>
           </div>
         ),
         enableHiding: false,
@@ -489,6 +493,7 @@ function ItemMobileRow({ item }: { item: ItemRow }) {
   return (
     <div className="space-y-2.5">
       <div className="flex items-start justify-between gap-2">
+        <ItemThumb src={item.photoUrl} name={item.name} size="sm" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-medium">{item.name}</p>
           <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">

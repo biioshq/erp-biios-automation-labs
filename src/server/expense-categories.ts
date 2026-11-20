@@ -47,7 +47,7 @@ const categoryError = (message: string, field = "category") => new AppError(mess
  */
 export async function assertExpenseCategoryAllowed(value: string, current?: string | null): Promise<void> {
   if (current != null && value === current) return;
-  if (value === "inventory") throw categoryError("Inventory expenses are created by assigning stock to a project. Pick another category.");
+  if (value === "inventory") throw categoryError("Inventory expenses are created by stock purchases and assignments. Pick another category.");
   const category = (await loadExpenseCategories()).find((c) => c.value === value);
   if (!category) throw categoryError("Pick a category from the list.");
   if (category.hidden) throw categoryError(`${category.label} is hidden, so it takes no new records. Pick another category.`);

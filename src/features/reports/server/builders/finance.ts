@@ -6,6 +6,7 @@ import { Expense, Income } from "@/server/models";
 import { INCOME_CATEGORIES, labelOf, type IncomeCategory } from "@/lib/constants";
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { round2 } from "@/lib/format";
+import { COMPANY_EXPENSES } from "@/server/services/metrics";
 import { col, coversWholeMonths, describeFilters, projectMatch, rangeOf } from "../common";
 import type { ReportData, ReportFilters, ReportRow, ReportSection } from "../../types";
 
@@ -30,7 +31,9 @@ export async function buildFinanceReport(f: ReportFilters): Promise<ReportData> 
   const member = Object.keys(scope).length > 0;
   const partMonth = !coversWholeMonths(f);
   const hideSalaries = member && (Boolean(project) || partMonth);
-  const expenseMatch = hideSalaries ? { ...match, ...scope } : match;
+  // Stock counted at purchase is the project's cost, not company spend: always left out, even for a
+  // project filter, since its purchase is already in company spend (the project report shows it).
+  const expenseMatch = { ...(hideSalaries ? { ...match, ...scope } : match), ...COMPANY_EXPENSES };
 
   const byCategory = (m: Record<string, unknown>) => [{ $match: m }, { $group: { _id: "$category", total: { $sum: "$amount" }, count: { $sum: 1 } } }];
   const byMonth = (m: Record<string, unknown>) => [

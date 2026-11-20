@@ -9,16 +9,19 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { DateField, FormSection, NumberField, SelectField, TextField, TextareaField } from "@/components/forms/fields";
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
 import { applyFieldErrors } from "@/lib/action-result";
 import { INVENTORY_UNITS, labelOf } from "@/lib/constants";
 import { emitDataChanged } from "@/lib/events";
-import { round2 } from "@/lib/format";
+import { formatCurrency, formatMonth, round2 } from "@/lib/format";
+import { fromDateInput, toDateInput } from "@/lib/dates";
 import { createItem, suggestCopyName, suggestSku, updateItem } from "../actions";
 import { copyBaseName, copyName, copyNumber } from "../matching";
 import { itemFormSchema, type ItemFormInput, type ItemFormValues } from "../schemas";
+import { DEFAULT_PURCHASE_PAYMENT_METHOD, PURCHASE_PAYMENT_METHODS } from "../../ledger/schemas";
 import type { ItemFormRecord } from "../types";
 import { formValidation } from "@/components/forms/form-options";
 import { SimilarItemsNotice, useSimilarItems } from "./similar-items-notice";
@@ -45,6 +48,9 @@ function defaultsFromTemplate(template: ItemFormRecord, categories: CategoryOpti
     location: template.location ?? "",
     openingQuantity: undefined,
     openingUnitPrice: undefined,
+    // Left unset so the switch follows the purchase date until it is changed (see openingIsPurchase).
+    openingAsPurchase: undefined,
+    openingPaymentMethod: DEFAULT_PURCHASE_PAYMENT_METHOD,
   };
 }
 
@@ -61,6 +67,9 @@ function defaultsFrom(item?: ItemFormRecord | null, categoryId?: string): ItemFo
     location: item?.location ?? "",
     openingQuantity: undefined,
     openingUnitPrice: undefined,
+    // Left unset so the switch follows the purchase date until it is changed (see openingIsPurchase).
+    openingAsPurchase: undefined,
+    openingPaymentMethod: DEFAULT_PURCHASE_PAYMENT_METHOD,
   };
 }
 
@@ -140,6 +149,13 @@ export function ItemForm({
   const similar = useSimilarItems(typedName, typedSku, !isEdit);
   const openingQuantity = useWatch({ control, name: "openingQuantity" });
   const openingUnitPrice = useWatch({ control, name: "openingUnitPrice" });
+  const purchaseDate = useWatch({ control, name: "purchaseDate" });
+  // Stock with a purchase date in an earlier month is most likely stock already on hand: booking it as
+  // a purchase would change a past month's totals, so the switch starts off then. A choice made with
+  // the switch is kept when the date changes.
+  const pastMonth = Boolean(purchaseDate) && String(purchaseDate).slice(0, 7) < toDateInput(new Date()).slice(0, 7);
+  const openingIsPurchase = (value: boolean | undefined) => value ?? !pastMonth;
+  const openingAsPurchase = openingIsPurchase(useWatch({ control, name: "openingAsPurchase" }));
   const unitLabel = labelOf(INVENTORY_UNITS, unit).toLowerCase();
 
   async function suggest(auto = false) {
@@ -188,7 +204,9 @@ export function ItemForm({
 
   const onSubmit = form.handleSubmit((values) => {
     startTransition(async () => {
-      const payload = isEdit ? { ...values, openingQuantity: undefined, openingUnitPrice: undefined } : values;
+      const payload = isEdit
+        ? { ...values, openingQuantity: undefined, openingUnitPrice: undefined, openingAsPurchase: undefined, openingPaymentMethod: undefined }
+        : { ...values, openingAsPurchase: openingIsPurchase(values.openingAsPurchase) };
       const result = isEdit && item ? await updateItem({ ...payload, id: item.id, loaded }) : await createItem(payload);
       if (!result.ok) {
         applyFieldErrors(result, form.setError);
@@ -299,6 +317,38 @@ export function ItemForm({
               <FieldDescription className="text-xs">
                 Opening value <Money value={round2((openingQuantity ?? 0) * openingUnitPrice)} className="font-medium text-foreground" />
               </FieldDescription>
+            ) : null}
+            {(openingQuantity ?? 0) > 0 ? (
+              <>
+                <Controller
+                  control={control}
+                  name="openingAsPurchase"
+                  render={({ field }) => (
+                    <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border bg-surface/40 px-3.5 py-3">
+                      <span className="min-w-0 space-y-0.5">
+                        <span className="block text-sm font-medium">Bought now, add to expenses</span>
+                        <span className="block text-xs text-pretty text-muted-foreground">
+                          {openingIsPurchase(field.value)
+                            ? "Adds this stock to expenses as a purchase, on the purchase date (today if none). Assigning it to a project later does not add it again."
+                            : "Stock you already had: no expense now. Its cost is added to expenses when it is assigned to a project."}
+                        </span>
+                      </span>
+                      <Switch checked={openingIsPurchase(field.value)} onCheckedChange={field.onChange} className="mt-0.5" />
+                    </label>
+                  )}
+                />
+                {openingAsPurchase && pastMonth && purchaseDate ? (
+                  <p role="status" className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                    {openingUnitPrice !== undefined
+                      ? `This adds ${formatCurrency(round2((openingQuantity ?? 0) * openingUnitPrice))} to expenses in ${formatMonth(fromDateInput(String(purchaseDate)))}, a past month.`
+                      : `This adds the stock's cost to expenses in ${formatMonth(fromDateInput(String(purchaseDate)))}, a past month.`}{" "}
+                    Turn this off for stock you already had.
+                  </p>
+                ) : null}
+                {openingAsPurchase ? (
+                  <SelectField control={control} name="openingPaymentMethod" label="Payment method" options={PURCHASE_PAYMENT_METHODS} />
+                ) : null}
+              </>
             ) : null}
           </FormSection>
         )}

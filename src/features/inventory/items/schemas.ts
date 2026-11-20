@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { INVENTORY_UNITS, valuesOf } from "@/lib/constants";
 import { money, objectId, optionalDateInput, optionalMoney, optionalObjectId, optionalText, requiredText } from "@/lib/zod";
-import { hasQtyDecimals, stockQuantity } from "../ledger/schemas";
+import { hasQtyDecimals, purchasePaymentMethod, stockQuantity } from "../ledger/schemas";
 
 /** Validation shared by the item form (client) and the item actions (server). Client-safe. */
 
@@ -25,6 +25,13 @@ export const itemFormSchema = z
     /** Create only: recorded as the first purchase movement. */
     openingQuantity: money.refine(hasQtyDecimals, "Use at most 3 decimals").optional(),
     openingUnitPrice: optionalMoney,
+    /**
+     * Create only. True (the default): the opening stock was just bought and is booked as a purchase,
+     * with its expense. False: it was already on hand, so no expense now; it is expensed when assigned.
+     */
+    openingAsPurchase: z.boolean().optional(),
+    /** Create only: how an opening purchase was paid (default bank transfer). */
+    openingPaymentMethod: purchasePaymentMethod.optional(),
   })
   .superRefine((v, ctx) => {
     if ((v.openingQuantity ?? 0) > 0 && v.openingUnitPrice === undefined) {

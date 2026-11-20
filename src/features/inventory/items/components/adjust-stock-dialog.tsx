@@ -80,7 +80,8 @@ export function AdjustStockDialog({
           <DialogHeader>
             <DialogTitle>Adjust stock</DialogTitle>
             <DialogDescription>
-              Correct the available quantity of {item.name}. Use Purchase, Assign or Return for normal stock movement.
+              Correct the available quantity of {item.name}. Use Purchase, Assign or Return for normal stock movement. An
+              adjustment does not add or remove expenses.
             </DialogDescription>
           </DialogHeader>
 

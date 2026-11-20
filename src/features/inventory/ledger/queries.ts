@@ -28,6 +28,8 @@ export async function getLedgerItems(): Promise<LedgerItem[]> {
     quantity: roundQty(i.quantity),
     minStock: i.minStock,
     unitPrice: i.unitPrice,
+    unexpensedQty: typeof i.unexpensedQty === "number" ? i.unexpensedQty : null,
+    unexpensedValue: typeof i.unexpensedValue === "number" ? i.unexpensedValue : null,
     lastPurchasePrice: i.lastPurchasePrice ?? null,
     vendor: i.vendor ?? null,
     status: getStockStatus(roundQty(i.available), i.minStock),

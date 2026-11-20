@@ -12,6 +12,7 @@ import { STOCK_STATUS_META } from "@/lib/stock-status";
 import { cn } from "@/lib/utils";
 import type { ItemDetail } from "../types";
 import { ItemActions } from "./item-actions";
+import { ItemPhotoPanel } from "./item-photo-panel";
 import type { CategoryOption } from "./item-form";
 import { PriceTrendChart } from "./price-trend-chart";
 
@@ -135,15 +136,20 @@ export function ItemDetailView({ item, categories, vendors }: { item: ItemDetail
       ) : null}
 
       <Section contentClassName="space-y-6">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:gap-x-6 sm:gap-y-6 lg:grid-cols-4">
-          <Figure label="Available" value={formatNumber(item.available)} big tone={tone} hint={unit} />
-          <Figure label="Allocated" value={formatNumber(item.allocated)} big hint={`${unit} on projects`} />
-          <Figure label="Total" value={formatNumber(item.quantity)} big hint={`${unit} held in all`} />
-          <Figure label="Minimum" value={formatNumber(item.minStock)} big hint="Low Stock at or below" />
-        </div>
-        <div className="space-y-2">
-          <StockLevelBar available={item.available} minStock={item.minStock} quantity={item.quantity} className="h-2" />
-          <p className="text-xs text-muted-foreground">{STOCK_STATUS_META[item.status].description}</p>
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-6">
+          <ItemPhotoPanel itemId={item.id} name={item.name} photoFileId={item.photoFileId} photoUrl={item.photoUrl} />
+          <div className="min-w-0 flex-1 space-y-6">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:gap-x-6 sm:gap-y-6 xl:grid-cols-4">
+              <Figure label="Available" value={formatNumber(item.available)} big tone={tone} hint={unit} />
+              <Figure label="Allocated" value={formatNumber(item.allocated)} big hint={`${unit} on projects`} />
+              <Figure label="Total" value={formatNumber(item.quantity)} big hint={`${unit} held in all`} />
+              <Figure label="Minimum" value={formatNumber(item.minStock)} big hint="Low Stock at or below" />
+            </div>
+            <div className="space-y-2">
+              <StockLevelBar available={item.available} minStock={item.minStock} quantity={item.quantity} className="h-2" />
+              <p className="text-xs text-muted-foreground">{STOCK_STATUS_META[item.status].description}</p>
+            </div>
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-4 border-t pt-5 sm:grid-cols-3 lg:grid-cols-5">
           <Fact label="Unit price (weighted avg)">

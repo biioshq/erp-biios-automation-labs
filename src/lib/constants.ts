@@ -63,6 +63,8 @@ export const EXPENSE_CATEGORIES = options([
   { value: "professional_fees", label: "Professional fees" },
   { value: "marketing", label: "Marketing" },
   { value: "office", label: "Office" },
+  { value: "maintenance", label: "Repairs & maintenance" },
+  { value: "interest", label: "Interest & bank charges" },
   { value: "other", label: "Other" },
 ] as const);
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]["value"];
@@ -89,6 +91,10 @@ export const EXPENSE_SOURCES = options([
   /** Created when stock is bought: the cash spent. Edited through the purchase, not by hand. */
   { value: "inventory_purchase", label: "Stock purchase" },
   { value: "recurring", label: "Recurring" },
+  /** Cost of not-yet-expensed stock that was wasted. Edited through inventory, not by hand. */
+  { value: "inventory_wastage", label: "Stock wastage" },
+  /** The interest part of a loan repayment. Edited through the loan, not by hand. */
+  { value: "liability_interest", label: "Loan interest" },
 ] as const);
 export type ExpenseSource = (typeof EXPENSE_SOURCES)[number]["value"];
 
@@ -124,6 +130,10 @@ export const MOVEMENT_TYPES = options([
   { value: "assign", label: "Assigned to project" },
   { value: "return", label: "Returned from project" },
   { value: "adjustment", label: "Manual adjustment" },
+  /** Stock written off: damaged, expired, lost. From storage it leaves stock; from a project it was in use there. */
+  { value: "wastage", label: "Wasted" },
+  /** An item moved to another storage location (stock levels unchanged). */
+  { value: "transfer", label: "Moved location" },
 ] as const);
 export type MovementType = (typeof MOVEMENT_TYPES)[number]["value"];
 
@@ -226,3 +236,180 @@ export const USER_ROLES = options([
   { value: "member", label: "Member" },
 ] as const);
 export type UserRole = (typeof USER_ROLES)[number]["value"];
+
+/* Finance: payments, accounts, balance sheet */
+
+/** Where an expense stands against what was paid on it. Derived, never stored (src/lib/payments.ts). */
+export const PAYMENT_STATUSES = options([
+  { value: "paid", label: "Paid" },
+  { value: "partial", label: "Partly paid" },
+  { value: "unpaid", label: "Unpaid" },
+  { value: "overdue", label: "Overdue" },
+] as const);
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number]["value"];
+
+/** Direct costs belong to delivering projects; indirect ones are overheads. */
+export const EXPENSE_NATURES = options([
+  { value: "direct", label: "Direct" },
+  { value: "indirect", label: "Indirect" },
+] as const);
+export type ExpenseNature = (typeof EXPENSE_NATURES)[number]["value"];
+
+export const BANK_ACCOUNT_KINDS = options([
+  { value: "bank", label: "Bank account" },
+  { value: "cash", label: "Cash in hand" },
+] as const);
+export type BankAccountKind = (typeof BANK_ACCOUNT_KINDS)[number]["value"];
+
+export const INVOICE_STATUSES = options([
+  { value: "issued", label: "Issued" },
+  { value: "cancelled", label: "Cancelled" },
+] as const);
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number]["value"];
+
+export const DEPRECIATION_METHODS = options([
+  { value: "slm", label: "Straight line" },
+  { value: "wdv", label: "Written down value" },
+  { value: "none", label: "Not depreciated" },
+] as const);
+export type DepreciationMethod = (typeof DEPRECIATION_METHODS)[number]["value"];
+
+export const ASSET_CONDITIONS = options([
+  { value: "good", label: "Good" },
+  { value: "under_maintenance", label: "Under maintenance" },
+  { value: "damaged", label: "Damaged" },
+  { value: "lost", label: "Lost" },
+  { value: "disposed", label: "Disposed" },
+] as const);
+export type AssetCondition = (typeof ASSET_CONDITIONS)[number]["value"];
+
+/** How a fixed asset was paid for. One record per purchase: an asset bought through an expense links it. */
+export const ASSET_FUNDING = options([
+  { value: "expense", label: "Paid through an expense already recorded" },
+  { value: "paid", label: "Paid from a bank or cash account" },
+  { value: "unpaid", label: "Not paid yet" },
+  { value: "opening", label: "Owned before the books started" },
+] as const);
+export type AssetFunding = (typeof ASSET_FUNDING)[number]["value"];
+
+export const INVESTMENT_TYPES = options([
+  { value: "fixed_deposit", label: "Fixed deposit" },
+  { value: "mutual_fund", label: "Mutual fund" },
+  { value: "shares", label: "Shares" },
+  { value: "bonds", label: "Bonds / debentures" },
+  { value: "property", label: "Property" },
+  { value: "other", label: "Other" },
+] as const);
+export type InvestmentType = (typeof INVESTMENT_TYPES)[number]["value"];
+
+/** What a liability is: a loan carries interest and repayments; "other" is any other obligation. */
+export const LIABILITY_KINDS = options([
+  { value: "loan", label: "Loan or borrowing" },
+  { value: "other", label: "Other obligation" },
+] as const);
+export type LiabilityKind = (typeof LIABILITY_KINDS)[number]["value"];
+
+/** Where the money of a liability went when it was taken on. */
+export const LIABILITY_SOURCES = options([
+  { value: "account", label: "Received into a bank or cash account" },
+  { value: "opening", label: "Owed before the books started" },
+] as const);
+export type LiabilitySource = (typeof LIABILITY_SOURCES)[number]["value"];
+
+export const LIABILITY_STATUSES = options([
+  { value: "pending", label: "Pending" },
+  { value: "overdue", label: "Overdue" },
+  { value: "paid", label: "Paid" },
+] as const);
+export type LiabilityStatus = (typeof LIABILITY_STATUSES)[number]["value"];
+
+export const EQUITY_HOLDER_KINDS = options([
+  { value: "owner", label: "Owner" },
+  { value: "investor", label: "Investor" },
+] as const);
+export type EquityHolderKind = (typeof EQUITY_HOLDER_KINDS)[number]["value"];
+
+/**
+ * Capital / equity entries. Money in from owners and investors, drawings and dividends move cash;
+ * reserve transfers and opening retained earnings only move value inside equity. None is income or expense.
+ */
+export const CAPITAL_ENTRY_TYPES = options([
+  { value: "capital", label: "Capital introduced" },
+  { value: "drawing", label: "Drawing" },
+  { value: "dividend", label: "Dividend / distribution" },
+  { value: "reserve_transfer", label: "Transfer to reserve" },
+  { value: "opening_retained", label: "Retained earnings before the books started" },
+] as const);
+export type CapitalEntryType = (typeof CAPITAL_ENTRY_TYPES)[number]["value"];
+
+export const INVESTOR_INSTRUMENTS = options([
+  { value: "equity", label: "Equity shares" },
+  { value: "preference", label: "Preference shares" },
+  { value: "convertible", label: "Convertible note / CCD" },
+  { value: "partner_capital", label: "Partner capital" },
+  { value: "other", label: "Other" },
+] as const);
+export type InvestorInstrument = (typeof INVESTOR_INSTRUMENTS)[number]["value"];
+
+/* Inventory: wastage */
+
+export const WASTAGE_REASONS = options([
+  { value: "damaged", label: "Damaged" },
+  { value: "expired", label: "Expired" },
+  { value: "lost", label: "Lost" },
+  { value: "defective", label: "Defective" },
+  { value: "scrap", label: "Scrap / offcuts" },
+  { value: "other", label: "Other" },
+] as const);
+export type WastageReason = (typeof WASTAGE_REASONS)[number]["value"];
+
+/* Bank statements */
+
+/** What a statement line becomes. "match" links it to a record that already exists. */
+export const BANK_LINE_ACTIONS = options([
+  { value: "match", label: "Already recorded" },
+  { value: "expense", label: "New expense" },
+  { value: "income", label: "New income" },
+  { value: "capital", label: "Capital introduced" },
+  { value: "drawing", label: "Owner drawing" },
+  { value: "loan_received", label: "Loan received" },
+  { value: "loan_payment", label: "Loan repayment" },
+  { value: "transfer", label: "Transfer between own accounts" },
+  { value: "ignore", label: "Ignore" },
+] as const);
+export type BankLineAction = (typeof BANK_LINE_ACTIONS)[number]["value"];
+
+/* Analytics & Planning */
+
+export const SCENARIO_TYPES = options([
+  { value: "demand", label: "Demand change" },
+  { value: "supply_delay", label: "Supply delay" },
+  { value: "new_project", label: "New project" },
+  { value: "price", label: "Purchase price change" },
+  { value: "budget", label: "Budget planning" },
+  { value: "manpower", label: "HR & manpower" },
+  { value: "equipment", label: "Equipment requirement" },
+] as const);
+export type ScenarioType = (typeof SCENARIO_TYPES)[number]["value"];
+
+export const SCENARIO_STATUSES = options([
+  { value: "draft", label: "Draft" },
+  { value: "saved", label: "Saved" },
+  { value: "under_review", label: "Under review" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+  { value: "archived", label: "Archived" },
+] as const);
+export type ScenarioStatus = (typeof SCENARIO_STATUSES)[number]["value"];
+
+/** Budget heads for budget planning scenarios. */
+export const BUDGET_HEADS = options([
+  { value: "materials", label: "Materials" },
+  { value: "equipment", label: "Equipment" },
+  { value: "labour", label: "Labour and manpower" },
+  { value: "transport", label: "Transportation" },
+  { value: "operations", label: "Operations" },
+  { value: "administration", label: "Administration" },
+  { value: "other", label: "Other expenses" },
+] as const);
+export type BudgetHead = (typeof BUDGET_HEADS)[number]["value"];

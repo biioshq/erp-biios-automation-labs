@@ -4,7 +4,18 @@ import type { ClientSession } from "mongoose";
 import { Counter } from "@/server/models";
 import { financialYearIST } from "@/lib/dates";
 
-type Sequence = "expense" | "income" | "project" | "task" | "employee" | "recurring";
+type Sequence =
+  | "expense"
+  | "income"
+  | "project"
+  | "task"
+  | "employee"
+  | "recurring"
+  | "invoice"
+  | "asset"
+  | "liability"
+  | "capital"
+  | "scenario";
 
 const FORMATS: Record<Sequence, { prefix: string; pad: number; yearly: boolean }> = {
   expense: { prefix: "EXP", pad: 5, yearly: true },
@@ -13,6 +24,11 @@ const FORMATS: Record<Sequence, { prefix: string; pad: number; yearly: boolean }
   task: { prefix: "TSK", pad: 4, yearly: false },
   employee: { prefix: "EMP", pad: 4, yearly: false },
   recurring: { prefix: "RCR", pad: 4, yearly: false },
+  invoice: { prefix: "INV", pad: 5, yearly: true },
+  asset: { prefix: "AST", pad: 4, yearly: false },
+  liability: { prefix: "LIA", pad: 4, yearly: false },
+  capital: { prefix: "CAP", pad: 5, yearly: true },
+  scenario: { prefix: "SCN", pad: 4, yearly: false },
 };
 
 /**

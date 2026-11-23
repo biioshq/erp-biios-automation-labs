@@ -88,11 +88,11 @@ export async function listMovements(params: ListParams): Promise<Paginated<Movem
     ]),
   ]);
 
-  const summary: MovementSummary = { purchase: empty(), assign: empty(), return: empty(), adjustment: { ...empty(), net: 0 }, count: total };
+  const summary: MovementSummary = { purchase: empty(), assign: empty(), return: empty(), adjustment: { ...empty(), net: 0 }, wastage: empty(), count: total };
   for (const g of grouped) {
     const totals = { units: g.units, value: round2(g.value), count: g.count };
     if (g._id === "adjustment") summary.adjustment = { ...totals, net: g.net };
-    else if (g._id in summary) summary[g._id] = totals;
+    else if (g._id === "purchase" || g._id === "assign" || g._id === "return" || g._id === "wastage") summary[g._id] = totals;
   }
 
   return {

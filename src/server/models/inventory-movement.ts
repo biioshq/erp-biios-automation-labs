@@ -1,5 +1,5 @@
 import { Schema, model, models, type InferSchemaType, type Model, type Types } from "mongoose";
-import { MOVEMENT_TYPES, PROJECT_STAGES, valuesOf } from "@/lib/constants";
+import { DEPARTMENTS, MOVEMENT_TYPES, PROJECT_STAGES, WASTAGE_REASONS, valuesOf } from "@/lib/constants";
 
 /** Purchase invoice details, so stock purchases count toward GST input credit. */
 const purchaseInvoiceSchema = new Schema(
@@ -48,6 +48,29 @@ const inventoryMovementSchema = new Schema(
       quantity: { type: Number, required: true },
     },
     note: { type: String, trim: true, maxlength: 1000 },
+    /** Wastage: why, where and who is answerable. */
+    wastage: {
+      type: new Schema(
+        {
+          reason: { type: String, enum: valuesOf(WASTAGE_REASONS), required: true },
+          /** "storage" or "project" (stock that was in use on `project`). */
+          from: { type: String, enum: ["storage", "project"], required: true },
+          department: { type: String, enum: valuesOf(DEPARTMENTS) },
+          location: { type: String, trim: true, maxlength: 120 },
+          responsible: { type: String, trim: true, maxlength: 160 },
+        },
+        { _id: false },
+      ),
+      default: undefined,
+    },
+    /** A location move: where the item was kept before and after. */
+    relocation: {
+      type: new Schema(
+        { from: { type: String, trim: true, maxlength: 120 }, to: { type: String, trim: true, maxlength: 120 } },
+        { _id: false },
+      ),
+      default: undefined,
+    },
     date: { type: Date, required: true, index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },

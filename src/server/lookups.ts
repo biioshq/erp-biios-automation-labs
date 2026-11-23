@@ -1,7 +1,7 @@
 import "server-only";
 
 import { connectDB } from "@/server/db";
-import { Expense, InventoryCategory, InventoryItem, InventoryMovement, Project } from "@/server/models";
+import { BankAccount, Expense, InventoryCategory, InventoryItem, InventoryMovement, Project } from "@/server/models";
 import { salaryScope } from "@/server/auth/session";
 import { getStockStatus } from "@/lib/stock-status";
 import type { ProjectStatus, StockStatus } from "@/lib/constants";
@@ -123,5 +123,19 @@ export async function getEmployeeOptions(): Promise<EmployeeOption[]> {
     description: [p.code, p.designation].filter(Boolean).join(" · "),
     department: p.department ?? "",
     status: p.status ?? "active",
+  }));
+}
+
+export type BankAccountOption = { value: string; label: string; description: string; kind: "bank" | "cash" };
+
+/** Bank and cash accounts for pickers ("Paid from", "Received into"), open ones only. */
+export async function getBankAccountOptions(): Promise<BankAccountOption[]> {
+  await connectDB();
+  const docs = await BankAccount.find({ archivedAt: null }, { name: 1, kind: 1, bankName: 1, accountLast4: 1 }).sort({ kind: 1, name: 1 }).lean();
+  return docs.map((d) => ({
+    value: String(d._id),
+    label: d.name,
+    description: [d.kind === "cash" ? "Cash" : d.bankName, d.accountLast4 ? `…${d.accountLast4}` : null].filter(Boolean).join(" · "),
+    kind: d.kind as "bank" | "cash",
   }));
 }

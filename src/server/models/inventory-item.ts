@@ -19,6 +19,8 @@ const inventoryItemSchema = new Schema(
     allocated: { type: Number, default: 0, min: 0 },
     /** Below or at this level the item is Low Stock. */
     minStock: { type: Number, default: 0, min: 0 },
+    /** Days from ordering to having it in stock; alerts start this many days (plus a week) before stock runs out. */
+    leadTimeDays: { type: Number, min: 0 },
     /**
      * Average cost per unit of the stock on hand, so stock value is available × unitPrice. Untracked
      * items (no `unexpensedQty`) are assigned at this price; tracked items cost each lot at its own

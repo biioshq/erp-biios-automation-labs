@@ -111,7 +111,7 @@ export function PriorityBadge({ priority }: { priority: TaskPriority }) {
   return <StatusBadge tone={PRIORITY_TONES[priority]}>{labelOf(TASK_PRIORITIES, priority)}</StatusBadge>;
 }
 
-const MOVEMENT_TONES: Record<MovementType, Tone> = { purchase: "success", assign: "brand", return: "info", adjustment: "neutral" };
+const MOVEMENT_TONES: Record<MovementType, Tone> = { purchase: "success", assign: "brand", return: "info", adjustment: "neutral", wastage: "danger", transfer: "neutral" };
 export function MovementTypeBadge({ type }: { type: MovementType }) {
   return <StatusBadge tone={MOVEMENT_TONES[type]}>{labelOf(MOVEMENT_TYPES, type)}</StatusBadge>;
 }

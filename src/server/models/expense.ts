@@ -1,10 +1,30 @@
 import { Schema, model, models, type InferSchemaType, type Model, type Types } from "mongoose";
 import {
+  DEPARTMENTS,
   EXPENSE_SOURCES,
   PAYMENT_METHODS,
   PROJECT_STAGES,
   valuesOf,
 } from "@/lib/constants";
+
+/**
+ * A payment made against an expense. An expense without `payments` is settled the old way: paid in
+ * full on its date unless its method is "On credit" (then unpaid). With `payments`, those are what
+ * was paid (src/lib/payments.ts). Additive: existing expenses never get this field written.
+ */
+const expensePaymentSchema = new Schema(
+  {
+    date: { type: Date, required: true },
+    amount: { type: Number, required: true, min: 0 },
+    paymentMethod: { type: String, enum: valuesOf(PAYMENT_METHODS), required: true },
+    account: { type: Schema.Types.ObjectId, ref: "BankAccount" },
+    reference: { type: String, trim: true, maxlength: 120 },
+    note: { type: String, trim: true, maxlength: 1000 },
+    bankTransaction: { type: Schema.Types.ObjectId, ref: "BankTransaction" },
+    createdBy: { type: Schema.Types.ObjectId, ref: "User" },
+  },
+  { timestamps: true },
+);
 
 /** GST invoice details. All optional: not every expense has a tax invoice. */
 const gstSchema = new Schema(
@@ -74,11 +94,30 @@ const expenseSchema = new Schema(
     employee: { type: Schema.Types.ObjectId, ref: "Employee", index: true },
     quantity: { type: Number },
     unitCost: { type: Number },
+    /** When an unpaid or part-paid bill falls due. */
+    dueDate: { type: Date },
+    /** Payments against it; missing on every older expense (see expensePaymentSchema). */
+    payments: { type: [expensePaymentSchema], default: undefined },
+    /** The bank or cash account it was paid from, when paid on its date; missing = the default for its method. */
+    account: { type: Schema.Types.ObjectId, ref: "BankAccount" },
+    department: { type: String, enum: valuesOf(DEPARTMENTS) },
+    /** Paid in advance for a period (insurance, an annual licence): the cost is spread over these days. */
+    prepaid: {
+      type: new Schema({ from: { type: Date, required: true }, to: { type: Date, required: true } }, { _id: false }),
+      default: undefined,
+    },
+    /** The fixed asset this expense paid for: its cost is the asset's, not a running expense. */
+    capitalAsset: { type: Schema.Types.ObjectId, ref: "FixedAsset" },
+    /** Interest on this loan (source "liability_interest"). */
+    liability: { type: Schema.Types.ObjectId, ref: "Liability" },
+    /** The bank statement line it came from or was matched to. */
+    bankTransaction: { type: Schema.Types.ObjectId, ref: "BankTransaction" },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },
 );
 expenseSchema.index({ project: 1, date: -1 });
+expenseSchema.index({ dueDate: 1 }, { partialFilterExpression: { dueDate: { $type: "date" } } });
 expenseSchema.index({ project: 1, stage: 1 });
 expenseSchema.index({ vendor: 1 });
 expenseSchema.index({ occurrenceKey: 1 }, { unique: true, partialFilterExpression: { occurrenceKey: { $type: "string" } } });

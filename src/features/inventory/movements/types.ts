@@ -29,5 +29,7 @@ export type MovementSummary = {
   return: MovementTotals;
   /** Net change in available units (adjustments can go either way). */
   adjustment: MovementTotals & { net: number };
+  /** Units written off (from storage or from a project), at cost. */
+  wastage: MovementTotals;
   count: number;
 };

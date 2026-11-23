@@ -15,6 +15,12 @@ const incomeSchema = new Schema(
     reference: { type: String, trim: true, maxlength: 120 },
     notes: { type: String, trim: true, maxlength: 4000 },
     receipt: { type: Schema.Types.ObjectId, ref: "File" },
+    /** The invoice this payment settles (all or part of). */
+    invoice: { type: Schema.Types.ObjectId, ref: "Invoice", index: true },
+    /** The bank or cash account it came into; missing = the default for its method. */
+    account: { type: Schema.Types.ObjectId, ref: "BankAccount" },
+    /** The bank statement line it came from or was matched to. */
+    bankTransaction: { type: Schema.Types.ObjectId, ref: "BankTransaction" },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true, collection: "income" },

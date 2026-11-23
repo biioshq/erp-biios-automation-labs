@@ -12,6 +12,8 @@ const expenseCategorySchema = new Schema(
     label: { type: String, trim: true, maxlength: 60 },
     hidden: { type: Boolean, default: false },
     builtIn: { type: Boolean, default: false },
+    /** Direct (project delivery) or indirect (overhead). Missing = the built-in default (src/lib/expense-nature.ts). */
+    nature: { type: String, enum: ["direct", "indirect"] },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },

@@ -12,6 +12,26 @@ const projectSchema = new Schema(
     description: { type: String, trim: true, maxlength: 4000 },
     status: { type: String, enum: valuesOf(PROJECT_STATUSES), default: "planning", index: true },
     budget: { type: Number, required: true, min: 0, default: 0 },
+    /** What the client pays for the whole project, when agreed. */
+    contractValue: { type: Number, min: 0 },
+    /**
+     * Earlier budgets, oldest first, pushed whenever the budget changes. The first entry is the
+     * original budget; missing on projects whose budget never changed (then the budget is both).
+     */
+    budgetHistory: {
+      type: [
+        new Schema(
+          {
+            budget: { type: Number, required: true, min: 0 },
+            changedAt: { type: Date, required: true },
+            changedBy: { type: Schema.Types.ObjectId, ref: "User" },
+            note: { type: String, trim: true, maxlength: 500 },
+          },
+          { _id: false },
+        ),
+      ],
+      default: undefined,
+    },
     /** Optional planned split of the budget across stages. */
     stageBudgets: { type: new Schema(stageBudgetShape, { _id: false }), default: () => ({}) },
     startDate: { type: Date },

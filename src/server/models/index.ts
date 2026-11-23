@@ -15,6 +15,16 @@ import "server-only";
  *   expenseDrafts (bills imported from Google Drive, waiting for review) >── files (receipt), ── expenses once saved
  *   notifications, reports (export log), counters (document numbers), user (Better Auth)
  *
+ * Finance (balance sheet side; every balance is computed in src/server/accounting, never stored):
+ *   bankAccounts (cash and bank, opening balances) ─< expenses / income / payments (account)
+ *   accountTransfers (between own accounts), bankStatements ─< bankTransactions (lines, linked to the record each became)
+ *   invoices ─< income (invoice): receivables
+ *   fixedAssets (register, depreciation, maintenance) ── expenses (funding.expense / capitalAsset)
+ *   investments, liabilities (loans and other obligations, with repayments) ── expenses (interest)
+ *   equityHolders ─< capitalEntries (capital, drawings, dividends, reserves)
+ *   financeGroups (subgroups admins add under the built-in asset, liability and equity groups)
+ * Analytics: scenarios (hypothetical only), forecastSnapshots (forecasts kept to compare with actuals)
+ *
  * Money is stored in rupees as numbers rounded to paise (see round2).
  * Project spend, budget usage and inventory value are always computed from
  * expenses / items, never stored twice.
@@ -37,3 +47,13 @@ export { ProjectMember, type ProjectMemberDoc } from "./project-member";
 export { RecurringExpense, type RecurringExpenseDoc } from "./recurring-expense";
 export { ExpenseCategorySetting, type ExpenseCategorySettingDoc } from "./expense-category";
 export { ExpenseDraft, type ExpenseDraftDoc, EXPENSE_DRAFT_STATUSES, type ExpenseDraftStatus } from "./expense-draft";
+export { BankAccount, type BankAccountDoc } from "./bank-account";
+export { AccountTransfer, type AccountTransferDoc } from "./account-transfer";
+export { BankStatement, type BankStatementDoc, BankTransaction, type BankTransactionDoc } from "./bank-statement";
+export { FinanceGroup, type FinanceGroupDoc } from "./finance-group";
+export { FixedAsset, type FixedAssetDoc } from "./fixed-asset";
+export { Investment, type InvestmentDoc } from "./investment";
+export { Liability, type LiabilityDoc } from "./liability";
+export { EquityHolder, type EquityHolderDoc, CapitalEntry, type CapitalEntryDoc } from "./equity";
+export { Invoice, type InvoiceDoc } from "./invoice";
+export { Scenario, type ScenarioDoc, ForecastSnapshot, type ForecastSnapshotDoc } from "./scenario";

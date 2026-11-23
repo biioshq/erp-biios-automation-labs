@@ -15,6 +15,11 @@ const inventoryAllocationSchema = new Schema(
     quantity: { type: Number, required: true, min: 0 },
     quantityAssigned: { type: Number, required: true, min: 0 },
     quantityReturned: { type: Number, default: 0, min: 0 },
+    /**
+     * Units of `quantity` wasted while in use on the project. They stay in `quantity` (the project
+     * still bore their cost, so the expense is unchanged) but can no longer be returned. Missing = 0.
+     */
+    quantityWasted: { type: Number, min: 0 },
     unitCost: { type: Number, required: true, min: 0 },
     stage: { type: String, enum: valuesOf(PROJECT_STAGES), required: true },
     assignedAt: { type: Date, required: true },

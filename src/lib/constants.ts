@@ -104,6 +104,7 @@ export const INCOME_CATEGORIES = options([
   { value: "retainer", label: "Retainer" },
   { value: "product_sale", label: "Product sale" },
   { value: "grant", label: "Grant" },
+  { value: "interest", label: "Interest income" },
   { value: "other", label: "Other" },
 ] as const);
 export type IncomeCategory = (typeof INCOME_CATEGORIES)[number]["value"];

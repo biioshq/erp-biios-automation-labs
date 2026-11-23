@@ -72,7 +72,7 @@ export function effectiveAsOf(to?: Date | null): Date {
   return end.getTime() > today.getTime() ? today : end;
 }
 
-const INCOME_OTHER = new Set<IncomeCategory>(["grant", "other"]);
+const INCOME_OTHER = new Set<IncomeCategory>(["grant", "interest", "other"]);
 const DIRECT_LINE = "Payments to suppliers and for expenses";
 
 /** Builds the postings of every record dated up to `asOf` (inclusive). */

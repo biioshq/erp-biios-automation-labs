@@ -19,7 +19,10 @@ const fileSchema = new Schema(
     project: { type: Schema.Types.ObjectId, ref: "Project", index: true },
     /** What the file belongs to, when it belongs to one record. */
     entity: {
-      type: { type: String, enum: ["expense", "income", "task", "project", "movement", "item"] },
+      type: {
+        type: String,
+        enum: ["expense", "income", "task", "project", "movement", "item", "invoice", "fixed_asset", "liability", "capital", "investment", "bank_statement"],
+      },
       id: { type: Schema.Types.ObjectId },
     },
     uploadedBy: { type: Schema.Types.ObjectId, ref: "User" },

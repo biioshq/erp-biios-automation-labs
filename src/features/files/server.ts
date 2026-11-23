@@ -31,7 +31,22 @@ export function safeDisplayName(name: string) {
 }
 
 /** What a stored file can belong to. */
-export type FileEntityType = "expense" | "income" | "task" | "project" | "movement" | "item";
+export type FileEntityType =
+  | "expense"
+  | "income"
+  | "task"
+  | "project"
+  | "movement"
+  | "item"
+  | "invoice"
+  | "fixed_asset"
+  | "liability"
+  | "capital"
+  | "investment"
+  | "bank_statement";
+
+/** Records whose papers only admins see (capital, loans, investments, bank statements), like salary receipts. */
+const ADMIN_ONLY_ENTITIES: FileEntityType[] = ["liability", "capital", "investment", "bank_statement"];
 
 type StoreOptions = {
   kind: FileKind;
@@ -125,7 +140,12 @@ export async function isHiddenFromUser(fileId: Types.ObjectId | string, user: { 
   // Item photos can never be receipts (expenses only take files of kind "receipt"), so a list of
   // thumbnails costs no extra query. Callers that hold the file record pass its kind.
   if (kind === "photo") return false;
-  return Boolean(await Expense.exists({ receipt: new Types.ObjectId(String(fileId)), category: "salaries" }));
+  const id = new Types.ObjectId(String(fileId));
+  const [salary, adminOnly] = await Promise.all([
+    Expense.exists({ receipt: id, category: "salaries" }),
+    FileModel.exists({ _id: id, "entity.type": { $in: ADMIN_ONLY_ENTITIES } }),
+  ]);
+  return Boolean(salary || adminOnly);
 }
 
 /** Deletes the record and its bytes. */

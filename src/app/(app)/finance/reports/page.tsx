@@ -9,7 +9,8 @@ import { ReportFilterBar } from "@/features/reports/components/report-filters";
 import { ReportPanel } from "@/features/reports/components/report-panel";
 import { metaOf, type ReportMeta } from "@/features/reports/meta";
 import { getFilterOptions } from "@/features/reports/options";
-import { listReportHistory } from "@/features/reports/queries";
+import { getInventoryReportOverview, listReportHistory } from "@/features/reports/queries";
+import { InventoryMovementsSection, InventoryOverview } from "@/features/reports/components/inventory-overview";
 import { parseReportFilters, reportQueryString } from "@/features/reports/schemas";
 import { canSeeSalaries, requireUser } from "@/server/auth/session";
 
@@ -21,7 +22,14 @@ export default async function ReportsPage({ searchParams }: PageProps<"/finance/
   const sp = await searchParams;
   const selected = metaOf(typeof sp.report === "string" ? sp.report : undefined);
   const filters = parseReportFilters(sp);
-  const [options, history, seesAll] = await Promise.all([getFilterOptions(selected), listReportHistory(20), canSeeSalaries()]);
+  const isInventory = selected?.type === "inventory";
+  const [options, history, seesAll, inventory] = await Promise.all([
+    getFilterOptions(selected),
+    listReportHistory(20),
+    canSeeSalaries(),
+    // The inventory report shows its valuation and movement overview on screen too.
+    isInventory ? getInventoryReportOverview(filters) : Promise.resolve(null),
+  ]);
 
   const today = toDateInput(new Date());
   const fy = financialYearIST();
@@ -45,6 +53,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/finance/
         description="Build a report, check it on screen, then download it as PDF, Excel or CSV. Figures come from the same records as the rest of Project Manager."
       />
       <ReportCards selected={selected?.type} hrefFor={hrefFor} />
+      {inventory ? <InventoryOverview overview={inventory} /> : null}
       {selected ? (
         <ReportPanel
           type={selected.type}
@@ -59,6 +68,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/finance/
           description="Pick one of the reports above to set a period, filter it and see a preview before you download."
         />
       )}
+      {inventory ? <InventoryMovementsSection overview={inventory} from={filters.from} to={filters.to} /> : null}
       <ExportHistory rows={history} ownOnly={!seesAll} />
     </Page>
   );

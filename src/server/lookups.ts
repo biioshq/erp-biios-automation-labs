@@ -24,24 +24,49 @@ export async function getProjectOptions(): Promise<ProjectOption[]> {
   }));
 }
 
-/** Known vendor names (expenses, recurring bills, stock purchases and items), most used first. */
+/** Names the app writes when no vendor was given; not anyone's name. */
+const PLACEHOLDER_VENDORS = new Set(["stock purchase", "company stock", "opening stock"]);
+const vendorKey = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase();
+
+/**
+ * Known vendor names (expenses, recurring bills, stock purchases and items), most used first.
+ * Product names are left out: a value that is the name or SKU of an inventory item (an expense
+ * whose Vendor column held the product, for example) is never offered as a vendor, and neither
+ * are the placeholders the app writes when no vendor was given.
+ */
 export async function getVendorNames(limit = 300): Promise<string[]> {
   await connectDB();
   // Salary payees are employees: members never see who is paid (salaryScope is empty for admins).
   // Assignment expenses only repeat an item's vendor (or "Company stock"), so they are left out.
   const scope = await salaryScope();
-  const [fromExpenses, fromPurchases, fromItems] = await Promise.all([
+  const [fromExpenses, fromPurchases, fromItems, items] = await Promise.all([
     Expense.aggregate<{ _id: string }>([
       { $match: { source: { $ne: "inventory_assignment" }, ...scope } },
       { $group: { _id: "$vendor", n: { $sum: 1 } } },
       { $sort: { n: -1 } },
-      { $limit: limit },
+      { $limit: limit + 50 },
     ]),
     // Older suppliers of an item stay findable after another vendor becomes its latest one.
     InventoryMovement.distinct("vendor", { type: "purchase" }),
     InventoryItem.distinct("vendor"),
+    InventoryItem.find({}, { name: 1, sku: 1 }).lean(),
   ]);
-  return [...new Set([...fromExpenses.map((v) => v._id), ...(fromPurchases as string[]), ...(fromItems as string[])].filter(Boolean))];
+  const products = new Set<string>();
+  for (const item of items) {
+    if (item.name) products.add(vendorKey(item.name));
+    if (item.sku) products.add(vendorKey(item.sku));
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of [...fromExpenses.map((v) => v._id), ...(fromPurchases as string[]), ...(fromItems as string[])]) {
+    if (typeof name !== "string" || !name.trim()) continue;
+    const key = vendorKey(name);
+    if (seen.has(key) || products.has(key) || PLACEHOLDER_VENDORS.has(key)) continue;
+    seen.add(key);
+    out.push(name.trim());
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 export type ItemOption = {

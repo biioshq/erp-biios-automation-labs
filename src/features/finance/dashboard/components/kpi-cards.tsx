@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, BadgeIndianRupee, Boxes, CalendarClock, FolderKanban, Receipt, TrendingDown, TrendingUp } from "lucide-react";
 import { ResponsiveMoney } from "./responsive-money";
 import { StatCard } from "@/components/shared/stat-card";
-import { formatNumber, formatPercent } from "@/lib/format";
+import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import type { FinanceDashboardData } from "../types";
 
 function CardLink({ href, children }: { href: string; children: React.ReactNode }) {
@@ -13,14 +13,27 @@ function CardLink({ href, children }: { href: string; children: React.ReactNode 
   );
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const monthName = (key: string) => {
+  const [y, m] = key.split("-").map(Number);
+  return `${MONTHS[m - 1]} ${y}`;
+};
+/** "Apr to Oct 2026", "Nov 2025 to Jan 2026", or one month. */
+function monthSpan(from: string, to: string) {
+  if (from === to) return monthName(from);
+  if (from.slice(0, 4) === to.slice(0, 4)) return `${MONTHS[Number(from.slice(5, 7)) - 1]} to ${monthName(to)}`;
+  return `${monthName(from)} to ${monthName(to)}`;
+}
+
 /** Tighter tiles on phones so two fit across at 360px. */
 const KPI = "max-sm:p-4 max-sm:[&>.tabular]:text-xl";
 
-/** The six headline numbers. Deltas compare with the previous period up to the same day as today. */
+/** The six headline numbers. Deltas compare with the previous period up to the same day as today; the monthly average uses whole months. */
 export function KpiCards({ data }: { data: FinanceDashboardData }) {
   const k = data.kpis;
   const vs = data.previousPhrase ? `vs ${data.previousPhrase}` : undefined;
   const profitable = k.profit >= 0;
+  const avg = k.monthlyAverage;
   const otherProjects = [
     k.planningProjects ? `${formatNumber(k.planningProjects)} planning` : null,
     k.onHoldProjects ? `${formatNumber(k.onHoldProjects)} on hold` : null,
@@ -81,14 +94,21 @@ export function KpiCards({ data }: { data: FinanceDashboardData }) {
       />
       <StatCard
         className={KPI}
-        label="Monthly spending"
+        label="Monthly average spending"
         icon={CalendarClock}
         tone="warning"
-        value={<ResponsiveMoney value={k.monthSpend} />}
-        delta={k.monthSpendDelta}
-        deltaLabel="vs same days last month"
-        invertDelta
-        hint={k.monthSpendDelta === null ? "Spent this calendar month" : undefined}
+        value={avg ? <ResponsiveMoney value={avg.value} /> : <span className="text-muted-foreground">Not yet</span>}
+        hint={
+          avg ? (
+            <span title="Expenses of whole calendar months (1st to last day) divided by the number of months. Months with no expenses count as zero.">
+              {monthSpan(avg.fromMonth, avg.toMonth)}, {formatNumber(avg.months)} whole {avg.months === 1 ? "month" : "months"}
+              {avg.fallback ? " before this one" : ""}
+            </span>
+          ) : (
+            "Shows once a whole month of expenses is recorded"
+          )
+        }
+        footer={<p className="text-xs text-muted-foreground">This month so far: {formatCurrency(k.monthToDate)}</p>}
       />
     </div>
   );

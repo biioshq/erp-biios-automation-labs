@@ -72,6 +72,10 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  // Pages that moved: old links and bookmarks land on the new place (their own query is kept).
+  async redirects() {
+    return [{ source: "/inventory/reports", destination: "/finance/reports?report=inventory", permanent: false }];
+  },
   turbopack: {
     rules: {
       "*.css": {

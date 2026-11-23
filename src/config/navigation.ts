@@ -99,7 +99,7 @@ export const MODULES: NavModule[] = [
           { title: "Employees", href: "/finance/employees", icon: Users, keywords: ["staff", "people", "team", "payroll", "salary"] },
         ],
       },
-      { title: "Reports", href: "/finance/reports", icon: FileBarChart, keywords: ["gst", "ca", "export", "pdf", "excel"] },
+      { title: "Reports", href: "/finance/reports", icon: FileBarChart, keywords: ["gst", "ca", "export", "pdf", "excel", "inventory", "stock valuation"] },
     ],
   },
   {
@@ -133,7 +133,6 @@ export const MODULES: NavModule[] = [
         ],
       },
       { title: "Movements", href: "/inventory/movements", icon: ArrowLeftRight, keywords: ["stock movement", "history", "ledger"] },
-      { title: "Reports", href: "/inventory/reports", icon: FileBarChart, keywords: ["valuation"] },
     ],
   },
   {

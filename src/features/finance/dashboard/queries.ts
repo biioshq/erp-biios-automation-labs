@@ -17,11 +17,11 @@ import { INCOME_CATEGORIES, labelOf, type IncomeCategory, type ProjectStatus } f
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { isBuiltInExpenseCategory } from "@/lib/expense-categories";
 import { round2 } from "@/lib/format";
-import { endOfDayIST, toDateInput } from "@/lib/dates";
+import { endOfDayIST, monthKeyIST, startOfMonthIST, toDateInput } from "@/lib/dates";
 import { monthlyEquivalent } from "@/lib/recurrence";
 import type { RecurringFrequency } from "@/lib/constants";
 import { OTHER_KEY, resolvePeriod, type DashboardPeriod } from "./periods";
-import type { BudgetRow, CategoryStack, FinanceDashboardData, RecurringCommitments, Transaction } from "./types";
+import type { BudgetRow, CategoryStack, FinanceDashboardData, MonthlyAverage, RecurringCommitments, Transaction } from "./types";
 
 const TOP_CATEGORIES = 5;
 
@@ -172,11 +172,50 @@ async function recurringCommitments(): Promise<RecurringCommitments> {
   };
 }
 
+/** Months from `a` to `b` (both IST month starts): 0 when the same month. */
+function monthsBetween(a: Date, b: Date): number {
+  const [ay, am] = monthKeyIST(a).split("-").map(Number);
+  const [by, bm] = monthKeyIST(b).split("-").map(Number);
+  return (by - ay) * 12 + (bm - am);
+}
+
+/** Months averaged when the selected period has no whole month yet ("This month", or the first month of a quarter or year). */
+const FALLBACK_MONTHS = 3;
+
+/**
+ * Average spend per month over whole calendar months, 1st to the last day:
+ *
+ *   monthly average = company expenses of those months ÷ number of months
+ *
+ * The months are the selected period's months that have ended (the current month is left out until
+ * it ends, so a half month never pulls the average down). Months with no expenses count as ₹0.
+ * Months before the first recorded expense are left out, so a young company is not averaged over
+ * months before it started. When the period has no whole month yet, the three months before this
+ * one are used. Null when no whole month of records exists.
+ */
+async function monthlyAverage(periodFrom: Date | undefined, now: Date): Promise<MonthlyAverage | null> {
+  const first = await Expense.findOne(COMPANY_EXPENSES, { date: 1 }).sort({ date: 1 }).lean();
+  if (!first) return null;
+  const thisMonth = startOfMonthIST(now);
+  const firstMonth = startOfMonthIST(first.date);
+  const later = (a: Date, b: Date) => (a.getTime() >= b.getTime() ? a : b);
+  let from = later(periodFrom ? startOfMonthIST(periodFrom) : firstMonth, firstMonth);
+  let fallback = false;
+  if (monthsBetween(from, thisMonth) <= 0) {
+    from = later(startOfMonthIST(now, -FALLBACK_MONTHS), firstMonth);
+    fallback = true;
+  }
+  const months = monthsBetween(from, thisMonth);
+  if (months <= 0) return null;
+  const to = new Date(thisMonth.getTime() - 1);
+  const totals = await financeTotals({ from, to });
+  return { value: round2(totals.expenses / months), months, fromMonth: monthKeyIST(from), toMonth: monthKeyIST(to), fallback };
+}
+
 export async function getFinanceDashboard(period: DashboardPeriod): Promise<FinanceDashboardData> {
   await connectDB();
   const now = new Date();
   const range = resolvePeriod(period, now);
-  // The "Monthly spending" tile compares this month with the same days of last month.
   const month = resolvePeriod("month", now);
   // The previous side of every delta stops at today's date, so the current side
   // must too: entries dated later this period (a rent bill for the 30th) would
@@ -185,14 +224,13 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
   const today = endOfDayIST(now);
   const toToday = (to: Date) => new Date(Math.min(to.getTime(), today.getTime()));
 
-  const [totals, current, previous, thisMonth, thisMonthToDate, lastMonth, inventory, statusCounts, monthly, categoryRows, budgetRows, transactions, recurring, expenseLabel] =
+  const [totals, current, previous, thisMonth, average, inventory, statusCounts, monthly, categoryRows, budgetRows, transactions, recurring, expenseLabel] =
     await Promise.all([
       financeTotals({ from: range.from, to: range.to }),
       range.previous && range.to ? financeTotals({ from: range.from, to: toToday(range.to) }) : Promise.resolve(null),
       range.previous ? financeTotals({ from: range.previous.from, to: range.previous.to }) : Promise.resolve(null),
-      financeTotals({ from: month.from, to: month.to }),
       financeTotals({ from: month.from, to: toToday(month.to!) }),
-      financeTotals({ from: month.previous!.from, to: month.previous!.to }),
+      monthlyAverage(range.from, now),
       inventorySnapshot(),
       Project.aggregate<{ _id: ProjectStatus; n: number }>([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
       monthlyIncomeExpense(12),
@@ -230,8 +268,8 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
       incomeDelta: current && previous ? delta(current.income, previous.income) : null,
       expenseDelta: current && previous ? delta(current.expenses, previous.expenses) : null,
       profitDelta: current && previous ? delta(current.profit, previous.profit) : null,
-      monthSpend: thisMonth.expenses,
-      monthSpendDelta: delta(thisMonthToDate.expenses, lastMonth.expenses),
+      monthlyAverage: average,
+      monthToDate: thisMonth.expenses,
       inventoryValue: inventory.value,
       inventoryItems: inventory.items,
       activeProjects: projectCount("active"),

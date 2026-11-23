@@ -11,15 +11,29 @@ export type DashboardKpis = {
   incomeDelta: number | null;
   expenseDelta: number | null;
   profitDelta: number | null;
-  /** Calendar month spending, independent of the selected period. */
-  monthSpend: number;
-  /** This month up to today against the same days of last month (1st to today's date). */
-  monthSpendDelta: number | null;
+  /**
+   * Average spend per calendar month: the company expenses of whole months (1st to the last day)
+   * divided by how many months. Null before a whole month of records exists.
+   */
+  monthlyAverage: MonthlyAverage | null;
+  /** Spent this calendar month so far. */
+  monthToDate: number;
   inventoryValue: number;
   inventoryItems: number;
   activeProjects: number;
   planningProjects: number;
   onHoldProjects: number;
+};
+
+export type MonthlyAverage = {
+  value: number;
+  /** Whole months averaged. */
+  months: number;
+  /** First and last month averaged, "2026-04" and "2026-10". */
+  fromMonth: string;
+  toMonth: string;
+  /** True when the selected period had no whole month yet, so the three months before this one were used. */
+  fallback: boolean;
 };
 
 export type MonthlyPoint = { month: string; income: number; expenses: number; profit: number };

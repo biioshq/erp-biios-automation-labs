@@ -79,6 +79,8 @@ export type NavItem = {
   exact?: boolean;
   /** Shorter label when the page shows as a section tab. Defaults to the title. */
   tab?: string;
+  /** Hidden from members in the sidebar and tabs (the page itself also shows members an admin-only note). */
+  adminOnly?: boolean;
   /**
    * Pages that sit under this entry. The sidebar lists only the parent; the
    * children show as tabs at the top of each of these pages. The first child
@@ -154,42 +156,44 @@ export const MODULES: NavModule[] = [
         icon: Building2,
         keywords: ["balance sheet", "what we own"],
         children: [
-          { title: "Assets overview", tab: "Overview", href: "/finance/assets", icon: Building2, exact: true, keywords: ["total assets"] },
-          { title: "Cash & bank", href: "/finance/assets/cash", icon: Landmark, keywords: ["bank balance", "cash in hand", "accounts", "opening balance"] },
+          { title: "Assets overview", tab: "Overview", adminOnly: true, href: "/finance/assets", icon: Building2, exact: true, keywords: ["total assets"] },
+          { title: "Cash & bank", adminOnly: true, href: "/finance/assets/cash", icon: Landmark, keywords: ["bank balance", "cash in hand", "accounts", "opening balance"] },
           { title: "Receivables", href: "/finance/assets/receivables", icon: HandCoins, keywords: ["accounts receivable", "customers owe"] },
           { title: "Prepaid expenses", tab: "Prepaid", href: "/finance/assets/prepaid", icon: CalendarRange, keywords: ["advance paid", "insurance", "annual"] },
           { title: "Inventory valuation", tab: "Inventory", href: "/finance/assets/inventory", icon: Boxes, keywords: ["stock in storage", "stock in use", "wasted stock"] },
           { title: "Fixed assets", href: "/finance/assets/fixed", icon: Armchair, keywords: ["furniture", "machinery", "vehicles", "computers", "register"] },
           { title: "Depreciation", href: "/finance/assets/depreciation", icon: TrendingDown, keywords: ["book value", "accumulated depreciation"] },
           { title: "Intangible assets", tab: "Intangible", href: "/finance/assets/intangible", icon: KeyRound, keywords: ["software", "licences", "amortisation"] },
-          { title: "Investments", href: "/finance/assets/investments", icon: PiggyBank, keywords: ["fixed deposit", "mutual fund", "shares"] },
+          { title: "Investments", adminOnly: true, href: "/finance/assets/investments", icon: PiggyBank, keywords: ["fixed deposit", "mutual fund", "shares"] },
         ],
       },
       {
         title: "Liabilities",
+        adminOnly: true,
         href: "/finance/liabilities",
         icon: Scale,
         keywords: ["owe", "debt", "balance sheet"],
         children: [
-          { title: "Liabilities overview", tab: "Overview", href: "/finance/liabilities", icon: Scale, exact: true, keywords: ["total liabilities", "overdue"] },
-          { title: "Accounts payable", tab: "Payables", href: "/finance/liabilities/payables", icon: Receipt, keywords: ["vendor dues", "unpaid bills", "suppliers"] },
-          { title: "Loans & borrowings", tab: "Loans", href: "/finance/liabilities/loans", icon: Banknote, keywords: ["loan", "emi", "interest", "lender"] },
-          { title: "Current liabilities", tab: "Current", href: "/finance/liabilities/current", icon: ListChecks, keywords: ["short-term", "taxes payable", "salaries payable", "customer advances"] },
-          { title: "Non-current liabilities", tab: "Non-current", href: "/finance/liabilities/non-current", icon: ListTree, keywords: ["long-term", "term loan"] },
+          { title: "Liabilities overview", tab: "Overview", adminOnly: true, href: "/finance/liabilities", icon: Scale, exact: true, keywords: ["total liabilities", "overdue"] },
+          { title: "Accounts payable", tab: "Payables", adminOnly: true, href: "/finance/liabilities/payables", icon: Receipt, keywords: ["vendor dues", "unpaid bills", "suppliers"] },
+          { title: "Loans & borrowings", tab: "Loans", adminOnly: true, href: "/finance/liabilities/loans", icon: Banknote, keywords: ["loan", "emi", "interest", "lender"] },
+          { title: "Current liabilities", tab: "Current", adminOnly: true, href: "/finance/liabilities/current", icon: ListChecks, keywords: ["short-term", "taxes payable", "salaries payable", "customer advances"] },
+          { title: "Non-current liabilities", tab: "Non-current", adminOnly: true, href: "/finance/liabilities/non-current", icon: ListTree, keywords: ["long-term", "term loan"] },
         ],
       },
       {
         title: "Capital / Equity",
+        adminOnly: true,
         href: "/finance/equity",
         icon: Landmark,
         keywords: ["owner", "investor", "capital", "shareholders"],
         children: [
-          { title: "Equity summary", tab: "Summary", href: "/finance/equity", icon: Landmark, exact: true, keywords: ["total equity"] },
-          { title: "Owners' capital", tab: "Owners", href: "/finance/equity/owners", icon: UserRound, keywords: ["owner", "promoter", "capital introduced"] },
-          { title: "Investors' capital", tab: "Investors", href: "/finance/equity/investors", icon: Users, keywords: ["investor", "shareholding", "ownership"] },
-          { title: "Drawings", href: "/finance/equity/drawings", icon: ArrowUpFromLine, keywords: ["withdrawal", "owner drawings"] },
-          { title: "Retained earnings", tab: "Retained", href: "/finance/equity/retained-earnings", icon: TrendingUp, keywords: ["accumulated profit", "dividends"] },
-          { title: "Reserves & surplus", tab: "Reserves", href: "/finance/equity/reserves", icon: Vault, keywords: ["general reserve"] },
+          { title: "Equity summary", tab: "Summary", adminOnly: true, href: "/finance/equity", icon: Landmark, exact: true, keywords: ["total equity"] },
+          { title: "Owners' capital", tab: "Owners", adminOnly: true, href: "/finance/equity/owners", icon: UserRound, keywords: ["owner", "promoter", "capital introduced"] },
+          { title: "Investors' capital", tab: "Investors", adminOnly: true, href: "/finance/equity/investors", icon: Users, keywords: ["investor", "shareholding", "ownership"] },
+          { title: "Drawings", adminOnly: true, href: "/finance/equity/drawings", icon: ArrowUpFromLine, keywords: ["withdrawal", "owner drawings"] },
+          { title: "Retained earnings", tab: "Retained", adminOnly: true, href: "/finance/equity/retained-earnings", icon: TrendingUp, keywords: ["accumulated profit", "dividends"] },
+          { title: "Reserves & surplus", tab: "Reserves", adminOnly: true, href: "/finance/equity/reserves", icon: Vault, keywords: ["general reserve"] },
         ],
       },
       {
@@ -199,10 +203,10 @@ export const MODULES: NavModule[] = [
         keywords: ["gst", "ca", "export", "pdf", "excel", "inventory", "stock valuation"],
         children: [
           { title: "Reports", tab: "All reports", href: "/finance/reports", icon: FileBarChart, keywords: ["gst", "ca", "export", "pdf", "excel", "inventory", "stock valuation"] },
-          { title: "Balance sheet", href: "/finance/reports/balance-sheet", icon: Scale, keywords: ["assets", "liabilities", "equity", "position"] },
-          { title: "Profit & loss", href: "/finance/reports/profit-loss", icon: TrendingUp, keywords: ["p&l", "income statement", "net profit"] },
-          { title: "Cash flow", href: "/finance/reports/cash-flow", icon: ArrowLeftRight, keywords: ["cash inflow", "cash outflow"] },
-          { title: "Trial balance", href: "/finance/reports/trial-balance", icon: ListChecks, keywords: ["ledger", "debit", "credit"] },
+          { title: "Balance sheet", adminOnly: true, href: "/finance/reports/balance-sheet", icon: Scale, keywords: ["assets", "liabilities", "equity", "position"] },
+          { title: "Profit & loss", adminOnly: true, href: "/finance/reports/profit-loss", icon: TrendingUp, keywords: ["p&l", "income statement", "net profit"] },
+          { title: "Cash flow", adminOnly: true, href: "/finance/reports/cash-flow", icon: ArrowLeftRight, keywords: ["cash inflow", "cash outflow"] },
+          { title: "Trial balance", adminOnly: true, href: "/finance/reports/trial-balance", icon: ListChecks, keywords: ["ledger", "debit", "credit"] },
         ],
       },
     ],
@@ -435,8 +439,24 @@ export function modulePages(mod: NavModule): NavItem[] {
  * one the page belongs to marked. Only on the child pages themselves; detail
  * pages (a project, an employee, an item) have their own header and tabs.
  */
-export function getSectionTabs(pathname: string): { item: NavItem; tabs: NavItem[]; activeHref: string } | null {
+export function getSectionTabs(pathname: string, isAdmin = true): { item: NavItem; tabs: NavItem[]; activeHref: string } | null {
   const { item, child } = findActive(pathname);
   if (!item?.children?.length || !child || pathname !== child.href) return null;
-  return { item, tabs: item.children, activeHref: child.href };
+  return { item, tabs: item.children.filter((c) => isAdmin || !c.adminOnly), activeHref: child.href };
+}
+
+/**
+ * The entries a person sees: members do not get admin-only entries or pages. An entry whose own
+ * page is admin-only opens its first page the member can see.
+ */
+export function visibleItems(items: NavItem[], isAdmin: boolean): NavItem[] {
+  if (isAdmin) return items;
+  return items
+    .filter((i) => !i.adminOnly)
+    .map((i) => {
+      if (!i.children) return i;
+      const children = i.children.filter((c) => !c.adminOnly);
+      const ownHidden = i.children.some((c) => c.href === i.href && c.adminOnly);
+      return { ...i, children, href: ownHidden && children[0] ? children[0].href : i.href };
+    });
 }

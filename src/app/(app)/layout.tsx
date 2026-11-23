@@ -19,7 +19,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <SidebarInset className="min-w-0 lg:peer-data-[variant=inset]:shadow-card">
           <AppHeader />
           {/* Tabs for the pages under the current sidebar entry; nothing on other pages. */}
-          <SectionTabs />
+          <SectionTabs isAdmin={user.role === "admin"} />
           <div className="flex flex-1 flex-col pb-[env(safe-area-inset-bottom)]">{children}</div>
         </SidebarInset>
       </SidebarProvider>

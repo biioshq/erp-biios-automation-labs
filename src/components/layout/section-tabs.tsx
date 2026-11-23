@@ -12,10 +12,10 @@ import { cn } from "@/lib/utils";
  * detail pages. The row lines up with the page body and scrolls sideways inside
  * itself on narrow screens, keeping the active tab in view.
  */
-export function SectionTabs() {
+export function SectionTabs({ isAdmin = true }: { isAdmin?: boolean }) {
   const pathname = usePathname();
   const navRef = useRef<HTMLElement>(null);
-  const section = getSectionTabs(pathname);
+  const section = getSectionTabs(pathname, isAdmin);
   const activeHref = section?.activeHref;
 
   useEffect(() => {

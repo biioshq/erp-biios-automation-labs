@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { BiiosStacked, BiiosSymbol, PRODUCT_NAME } from "@/components/brand/logo";
-import { MODULES, findActive, type NavItem } from "@/config/navigation";
+import { MODULES, findActive, visibleItems, type NavItem } from "@/config/navigation";
 import { UserMenu } from "./user-menu";
 import type { SessionUser } from "@/server/auth/session";
 
@@ -80,16 +80,16 @@ export function AppSidebar({ user }: { user: SessionUser }) {
                     </CollapsibleTrigger>
                     <CollapsibleContent className="data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down overflow-hidden">
                       <SidebarMenuSub className="mr-0 gap-0.5 py-1 pr-0">
-                        {mod.items.map((item) =>
+                        {visibleItems(mod.items, user.role === "admin").map((item) =>
                           item.children?.length ? (
-                            <SubGroup key={item.href} item={item} active={item === activeItem} activeChild={activeItem === item ? activeChild : null} onNavigate={closeOnMobile} />
+                            <SubGroup key={item.title} item={item} active={item.title === activeItem?.title} activeChild={item.title === activeItem?.title ? activeChild : null} onNavigate={closeOnMobile} />
                           ) : (
                             <SidebarMenuSubItem key={item.href}>
-                              <SidebarMenuSubButton asChild isActive={item === activeItem} className="h-8 data-active:shadow-[inset_2px_0_0_var(--brand)] max-lg:h-10">
+                              <SidebarMenuSubButton asChild isActive={item.title === activeItem?.title} className="h-8 data-active:shadow-[inset_2px_0_0_var(--brand)] max-lg:h-10">
                                 <Link href={item.href} onClick={closeOnMobile} prefetch>
                                   <item.icon className="opacity-70" />
                                   <span>{item.title}</span>
-                                  {item === activeItem ? <ActiveDot /> : null}
+                                  {item.title === activeItem?.title ? <ActiveDot /> : null}
                                 </Link>
                               </SidebarMenuSubButton>
                             </SidebarMenuSubItem>

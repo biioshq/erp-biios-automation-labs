@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useIsAdmin } from "@/components/current-user";
 import { useTheme } from "next-themes";
 import { Boxes, FolderKanban, ListTodo, Moon, Receipt, BadgeIndianRupee, Search, Sun, Zap } from "lucide-react";
 import {
@@ -31,6 +32,7 @@ const GROUPS: { key: keyof SearchGroups; heading: string; icon: typeof Receipt }
 /** ⌘K / Ctrl+K: jump to any page, run a quick action, or search records across modules. */
 export function CommandMenu() {
   const router = useRouter();
+  const isAdmin = useIsAdmin();
   const { resolvedTheme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -122,7 +124,9 @@ export function CommandMenu() {
           <CommandSeparator />
           {MODULES.map((m) => (
             <CommandGroup key={m.id} heading={m.title}>
-              {modulePages(m).map((item) => (
+              {modulePages(m)
+                .filter((item) => isAdmin || !item.adminOnly)
+                .map((item) => (
                 <CommandItem
                   key={item.href}
                   value={`${m.title} ${item.title} ${(item.keywords ?? []).join(" ")}`}
@@ -132,7 +136,7 @@ export function CommandMenu() {
                   {item.title}
                   <CommandShortcut>{m.title}</CommandShortcut>
                 </CommandItem>
-              ))}
+                ))}
             </CommandGroup>
           ))}
           <CommandSeparator />

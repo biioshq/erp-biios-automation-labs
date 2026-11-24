@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDate, formatNumber } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
+import { cn } from "@/lib/utils";
 import type { SearchParams } from "@/lib/list-params";
 import { can, requireUser } from "@/server/auth/session";
 import { NoAccess } from "@/components/shared/no-access";
@@ -19,6 +20,7 @@ import { DEFAULT_PERIOD, parsePeriod } from "@/features/analytics/insights/perio
 import { DetailsLink, Footnote, NotRecorded } from "@/features/analytics/dashboard/components/bits";
 import { PeriodLinks } from "@/features/analytics/insights/components/period-links";
 import { BillsTable, ComparisonTable, VendorTable } from "@/features/analytics/insights/components/tables";
+import { EDGE_CELLS } from "@/features/analytics/inventory/components/table-kit";
 import type { VendorInsights } from "@/features/analytics/insights/types";
 
 export const metadata: Metadata = { title: "Vendor performance" };
@@ -58,7 +60,7 @@ function VendorHistory({ selected, backHref }: { selected: NonNullable<VendorIns
       {selected.purchases.length ? (
         <div className="mt-4 border-t pt-3">
           <p className="px-4 pb-1 text-xs font-medium text-muted-foreground sm:px-5">Stock bought, newest first</p>
-          <Table className="min-w-[560px]">
+          <Table className={cn("min-w-[560px]", EDGE_CELLS)}>
             <TableHeader>
               <TableRow>
                 <TableHead>Item</TableHead>

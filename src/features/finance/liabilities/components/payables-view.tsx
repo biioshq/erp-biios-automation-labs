@@ -133,7 +133,7 @@ export function PayablesTable({ data, vendors, accounts }: { data: Paginated<Pay
       pageSize={data.pageSize}
       filters={filters}
       dateRange={{ label: "Due date" }}
-      searchPlaceholder="Search vendor or expense number…"
+      searchPlaceholder="Search vendor or number…"
       getRowId={(r) => r.id}
       onRowClick={(r) => router.push(expenseHref(r.id))}
       renderMobileRow={(r) => (

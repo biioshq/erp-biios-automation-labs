@@ -298,7 +298,7 @@ export function InvestmentsView({
       <AssetToolbar
         filters={filters}
         layout={layout}
-        searchPlaceholder="Search name, institution, reference…"
+        searchPlaceholder="Search name or reference…"
         actions={<AddSubgroupButton parents={activeGroups} defaultParent={INVESTMENT_ROOT_KEY} label="Add subgroup" />}
       />
 

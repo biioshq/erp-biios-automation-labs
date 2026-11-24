@@ -109,7 +109,7 @@ export function RelocationForm({
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid || same || undefined} className="gap-1.5">
                   <FieldLabel htmlFor="relocation-to" className="text-[13px]">
-                    New location<span className="ml-0.5 text-danger">*</span>
+                    <span>New location<span className="ml-0.5 text-danger">*</span></span>
                   </FieldLabel>
                   <Input
                     {...field}

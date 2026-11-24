@@ -142,7 +142,7 @@ export default async function PurchaseRequirementsPage({ searchParams }: Props) 
 
           <Section
             title={view === "all" ? "All materials" : "Suggested purchases"}
-            description={view === "all" ? "Every material in the filters, with or without a suggestion." : "Materials with a suggested purchase, earliest order date first."}
+            description={`${view === "all" ? "Every material in the filters, with or without a suggestion." : "Materials with a suggested purchase, earliest order date first."} Needed is the expected use over the next ${horizon} days plus the lead time. Issued to projects and the minimum level can be shown from Columns.`}
           >
             {shown.length ? (
               <PurchaseTable rows={shown} horizon={horizon} />

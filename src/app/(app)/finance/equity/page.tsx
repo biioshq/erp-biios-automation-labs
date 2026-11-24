@@ -25,6 +25,35 @@ export default async function EquitySummaryPage() {
   const [data, panel] = await Promise.all([getEquitySummary(), getPanelData()]);
   const { overview } = data;
   const empty = data.holders.length === 0 && data.latest.length === 0;
+  const breakdown = (
+    <Section title="How total equity adds up" description="Each line as on the balance sheet today.">
+      <ul className="divide-y text-sm">
+        {overview.lines.map((line) => (
+          <li key={line.key} className="flex items-center justify-between gap-3 py-2">
+            {line.href ? (
+              <Link href={line.href} className="min-w-0 truncate hover:underline">
+                {line.label}
+              </Link>
+            ) : (
+              <span className="min-w-0 truncate" title={line.key === "opening_balance" ? "Opening balances of accounts, stock and assets entered when the books started" : undefined}>
+                {line.label}
+              </span>
+            )}
+            <Money value={line.amount} tone={line.amount < 0 ? "negative" : undefined} />
+          </li>
+        ))}
+        <li className="flex items-center justify-between gap-3 pt-3 font-semibold">
+          <span>Total equity</span>
+          <Money value={overview.total} tone="auto" />
+        </li>
+      </ul>
+      {overview.lines.some((l) => l.key === "opening_balance") ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Opening balance equity is the other side of the opening balances entered for accounts, stock and assets. It is part of equity until it is explained by capital or retained earnings.
+        </p>
+      ) : null}
+    </Section>
+  );
 
   return (
     <Page>
@@ -79,34 +108,46 @@ export default async function EquitySummaryPage() {
           value={<Money value={overview.total} tone="auto" />}
           icon={Scale}
           tone="default"
-          hint="As on the balance sheet"
+          hint={
+            Math.abs(overview.openingBalance) >= 0.005 ? (
+              <>
+                Includes <Money value={overview.openingBalance} tone="auto" /> opening balance equity
+              </>
+            ) : (
+              "As on the balance sheet"
+            )
+          }
         />
       </StatGrid>
 
       {empty ? (
-        <EmptyState
-          icon={Landmark}
-          title="No capital recorded yet"
-          description="Add the owners and investors, then record the capital each one put in. Drawings, dividends and reserves follow from here."
-          action={
-            <div className="flex flex-wrap justify-center gap-2">
-              <IfCan permission="finance.equity:create">
-                <Button asChild>
-                  <Link href="?new=capital" scroll={false}>
-                    <Plus /> Record capital
-                  </Link>
-                </Button>
-              </IfCan>
-              <IfCan permission="finance.equity:create">
-                <Button asChild variant="outline">
-                  <Link href="?holder=new&kind=owner" scroll={false}>
-                    <UserRound /> Add owner
-                  </Link>
-                </Button>
-              </IfCan>
-            </div>
-          }
-        />
+        <div className="grid gap-4 xl:grid-cols-3 xl:items-start">
+          <EmptyState
+            className="xl:col-span-2"
+            icon={Landmark}
+            title="No capital recorded yet"
+            description="Add the owners and investors, then record the capital each one put in. Drawings, dividends and reserves follow from here."
+            action={
+              <div className="flex flex-wrap justify-center gap-2">
+                <IfCan permission="finance.equity:create">
+                  <Button asChild>
+                    <Link href="?new=capital" scroll={false}>
+                      <Plus /> Record capital
+                    </Link>
+                  </Button>
+                </IfCan>
+                <IfCan permission="finance.equity:create">
+                  <Button asChild variant="outline">
+                    <Link href="?holder=new&kind=owner" scroll={false}>
+                      <UserRound /> Add owner
+                    </Link>
+                  </Button>
+                </IfCan>
+              </div>
+            }
+          />
+          {breakdown}
+        </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-3">
           <Section
@@ -133,33 +174,7 @@ export default async function EquitySummaryPage() {
               />
             </div>
           </Section>
-          <Section title="How total equity adds up" description="Each line as on the balance sheet today.">
-            <ul className="divide-y text-sm">
-              {overview.lines.map((line) => (
-                <li key={line.key} className="flex items-center justify-between gap-3 py-2">
-                  {line.href ? (
-                    <Link href={line.href} className="min-w-0 truncate hover:underline">
-                      {line.label}
-                    </Link>
-                  ) : (
-                    <span className="min-w-0 truncate" title={line.key === "opening_balance" ? "Opening balances of accounts, stock and assets entered when the books started" : undefined}>
-                      {line.label}
-                    </span>
-                  )}
-                  <Money value={line.amount} tone={line.amount < 0 ? "negative" : undefined} />
-                </li>
-              ))}
-              <li className="flex items-center justify-between gap-3 pt-3 font-semibold">
-                <span>Total equity</span>
-                <Money value={overview.total} tone="auto" />
-              </li>
-            </ul>
-            {overview.lines.some((l) => l.key === "opening_balance") ? (
-              <p className="mt-3 text-xs text-muted-foreground">
-                Opening balance equity is the other side of the opening balances entered for accounts, stock and assets. It is part of equity until it is explained by capital or retained earnings.
-              </p>
-            ) : null}
-          </Section>
+          {breakdown}
         </div>
       )}
 

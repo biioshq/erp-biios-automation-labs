@@ -124,7 +124,7 @@ export function UnusualList({ rows }: { rows: ConsumptionRow[] }) {
             <ItemLink id={r.id} name={r.name} sku={r.sku} />
             <p className="text-xs text-muted-foreground">{r.unusual?.text}</p>
           </div>
-          <StatusBadge tone={r.unusual?.direction === "up" ? "warning" : "info"}>{r.unusual?.direction === "up" ? "Increase" : "Decrease"}</StatusBadge>
+          <StatusBadge tone={r.unusual?.direction === "up" ? "warning" : "info"} className="shrink-0 self-start">{r.unusual?.direction === "up" ? "Increase" : "Decrease"}</StatusBadge>
         </li>
       ))}
     </ul>

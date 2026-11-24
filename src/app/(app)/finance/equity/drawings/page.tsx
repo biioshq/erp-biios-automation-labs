@@ -57,7 +57,7 @@ export default async function DrawingsPage() {
           id="equity-drawings"
           entries={drawings}
           show={["holder", "purpose", "payment"]}
-          searchPlaceholder="Search owner, purpose, reference…"
+          searchPlaceholder="Search owner or reference…"
           emptyState={
             <EmptyState
               icon={ArrowUpFromLine}

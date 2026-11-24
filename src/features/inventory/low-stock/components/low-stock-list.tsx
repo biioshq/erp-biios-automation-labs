@@ -53,6 +53,9 @@ function ItemName({ item }: { item: LowStockItem }) {
  * `canPurchase` hides the Purchase buttons from people who may not record a purchase.
  */
 export function LowStockList({ items, today, canPurchase }: { items: LowStockItem[]; today: string; canPurchase: boolean }) {
+  // Fits the card at 1440px: the minimum sits under Available and the stockout date under Days of
+  // cover (as on the phone cards), and Lead time shows only when an item has one.
+  const showLeadTime = items.some((i) => i.leadTimeDays !== null);
   return (
     <>
       <div className="hidden overflow-x-auto rounded-xl border bg-card shadow-card md:block">
@@ -61,12 +64,10 @@ export function LowStockList({ items, today, canPurchase }: { items: LowStockIte
             <TableRow>
               <TableHead>Item</TableHead>
               <TableHead className="text-right">Available</TableHead>
-              <TableHead className="text-right">Minimum</TableHead>
               <TableHead className="text-right">Use per day</TableHead>
               <TableHead className="text-right">Days of cover</TableHead>
-              <TableHead>Stockout</TableHead>
               <TableHead>Order by</TableHead>
-              <TableHead className="text-right">Lead time</TableHead>
+              {showLeadTime ? <TableHead className="text-right">Lead time</TableHead> : null}
               <TableHead className="text-right">Suggested order</TableHead>
               <TableHead>Why</TableHead>
               <TableHead className="w-0" />
@@ -80,15 +81,17 @@ export function LowStockList({ items, today, canPurchase }: { items: LowStockIte
                 </TableCell>
                 <TableCell className={cn("tabular text-right font-semibold whitespace-nowrap", i.level === "out" ? "text-danger" : i.level === "below_min" && "text-warning")}>
                   {formatNumber(i.available)} <span className="text-xs font-normal text-muted-foreground">{i.unit}</span>
+                  <span className="block text-xs font-normal text-muted-foreground">min {formatNumber(i.minStock)}</span>
                 </TableCell>
-                <TableCell className="tabular text-right text-muted-foreground">{formatNumber(i.minStock)}</TableCell>
-                <TableCell className="tabular text-right whitespace-nowrap text-muted-foreground">{perDay(i)}</TableCell>
-                <TableCell className="tabular text-right">{i.daysOfCover !== null ? formatNumber(i.daysOfCover) : "-"}</TableCell>
-                <TableCell className="tabular whitespace-nowrap">{i.stockoutDate ? formatDate(i.stockoutDate) : "-"}</TableCell>
+                <TableCell className="tabular max-w-28 text-right whitespace-normal text-muted-foreground">{perDay(i)}</TableCell>
+                <TableCell className="tabular text-right whitespace-nowrap">
+                  {i.daysOfCover !== null ? formatNumber(i.daysOfCover) : "-"}
+                  {i.stockoutDate ? <span className="block text-xs text-muted-foreground">to {formatDate(i.stockoutDate)}</span> : null}
+                </TableCell>
                 <TableCell className="tabular whitespace-nowrap">
                   <OrderBy item={i} today={today} />
                 </TableCell>
-                <TableCell className="tabular text-right whitespace-nowrap text-muted-foreground">{leadTime(i)}</TableCell>
+                {showLeadTime ? <TableCell className="tabular text-right whitespace-nowrap text-muted-foreground">{leadTime(i)}</TableCell> : null}
                 <TableCell className="tabular text-right whitespace-nowrap">
                   {i.suggestedQty ? (
                     <>
@@ -105,7 +108,7 @@ export function LowStockList({ items, today, canPurchase }: { items: LowStockIte
                     <span className="text-muted-foreground">-</span>
                   )}
                 </TableCell>
-                <TableCell className="max-w-72 min-w-52">
+                <TableCell className="max-w-60 min-w-40 whitespace-normal">
                   <AlertLevelBadge level={i.level} />
                   <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
                     {i.reasons.map((r) => (

@@ -319,7 +319,7 @@ export function IncomeView({
         pageSize={data.pageSize}
         filters={filters}
         dateRange
-        searchPlaceholder="Search client, number, reference…"
+        searchPlaceholder="Search client or reference…"
         getRowId={(r) => r.id}
         onRowClick={(r) => setPanel({ kind: "view", id: r.id })}
         renderMobileRow={(r) => (

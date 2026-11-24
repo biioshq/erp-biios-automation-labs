@@ -137,8 +137,9 @@ export default async function ManpowerForecastPage() {
         <PeopleTable rows={data.people} showCost={seesSalaries} />
       </Section>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Section title="By department" description="Active employees only. Spare is headcount less the busiest month's allocation; below zero is a shortage." contentClassName="p-0">
+      {/* One table per row: the department table has seven columns and does not fit half the page. */}
+      <div className="grid gap-5">
+        <Section title="By department" description="Active employees only. Spare is headcount less the busiest month's allocation; below zero is a shortage." contentClassName="p-0 sm:p-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -168,7 +169,7 @@ export default async function ManpowerForecastPage() {
             </Table>
           </div>
         </Section>
-        <Section title="By role" description="Roles as entered on project teams." contentClassName="p-0">
+        <Section title="By role" description="Roles as entered on project teams." contentClassName="p-0 sm:p-0">
           {data.roles.length ? (
             <div className="overflow-x-auto">
               <Table>

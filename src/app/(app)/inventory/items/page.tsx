@@ -44,7 +44,7 @@ export default async function ItemsPage({ searchParams }: PageProps<"/inventory/
           <>
             <span className="tabular">{formatNumber(snapshot.items)}</span> items ·{" "}
             <Money value={snapshot.value} className="font-medium text-foreground" /> on hand ·{" "}
-            <span className="tabular">{formatNumber(snapshot.lowStock + snapshot.outOfStock)}</span> need restocking
+            <span className="tabular">{formatNumber(snapshot.lowStock + snapshot.outOfStock)}</span> low or out of stock
           </>
         }
         actions={

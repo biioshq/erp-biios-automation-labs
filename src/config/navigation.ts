@@ -305,11 +305,11 @@ export const MODULES: NavModule[] = [
         ],
       },
       {
-        title: "Inventory analytics",
+        title: "Stock analytics",
         href: "/analytics/inventory",
         permission: "analytics.inventory:view",
         icon: Boxes,
-        keywords: ["stock analytics"],
+        keywords: ["inventory analytics", "stock analytics"],
         children: [
           { title: "Stock movement analysis", tab: "Movement", href: "/analytics/inventory", permission: "analytics.inventory:view", icon: ArrowLeftRight, keywords: ["received", "issued", "trends"] },
           { title: "Fast and slow moving", tab: "Fast / slow", href: "/analytics/inventory/velocity", permission: "analytics.inventory:view", icon: Gauge, keywords: ["non-moving", "frequently used"] },

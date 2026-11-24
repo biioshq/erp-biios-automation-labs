@@ -61,7 +61,7 @@ export function ForecastFilters({ materials, categories, projects, window, onePr
           label="History window"
           from={draft ? draft.from : window.isDefault ? null : window.from}
           to={draft ? draft.to : window.isDefault ? null : window.to}
-          className="max-sm:flex-1"
+          className="text-sm max-sm:flex-1"
           onChange={(range) => {
             if (range.from && !range.to) {
               setDraft(range);
@@ -134,7 +134,7 @@ function MaterialPicker({ options, value, onChange }: { options: FilterOption[];
           role="combobox"
           aria-expanded={open}
           aria-label="Material"
-          className={cn("h-8 w-full justify-between font-normal max-md:h-10 sm:w-56", !current && "border-dashed text-muted-foreground")}
+          className={cn("h-8 w-full justify-between text-sm font-normal max-md:h-10 sm:w-56", !current && "border-dashed text-muted-foreground")}
         >
           <span className="truncate">{current?.label ?? "All materials"}</span>
           <span className="flex items-center gap-1">

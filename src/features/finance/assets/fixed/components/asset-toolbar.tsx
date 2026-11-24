@@ -41,7 +41,7 @@ export function AssetToolbar({
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2 transition-opacity", url.isPending && "opacity-70")}>
-      <div className="relative w-full sm:w-64">
+      <div className="relative w-full sm:w-72">
         <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={searchPlaceholder} className="h-8 pl-8 max-md:h-10" aria-label="Search" />
       </div>
@@ -61,7 +61,7 @@ export function AssetToolbar({
           Reset <X />
         </Button>
       ) : null}
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex flex-wrap items-center gap-2 max-sm:w-full">
         {actions}
         {layout ? (
           <ToggleGroup

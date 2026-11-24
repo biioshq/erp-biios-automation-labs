@@ -35,6 +35,9 @@ const money = (id: string, title: string, pick: (r: ProjectFinanceRow) => number
 /** Profit and forecast per project, sortable by every column. */
 export function ProfitabilityTable({ rows }: { rows: ProjectFinanceRow[] }) {
   const router = useRouter();
+  // Without a contract value, a project's value is its revenue so far, so a Revenue column would
+  // only repeat Project value. It is left out then, which also helps the table fit its card.
+  const anyContract = rows.some((r) => r.outlook.valueBasis === "contract");
   const columns = useMemo<ColumnDef<ProjectFinanceRow>[]>(
     () => [
       {
@@ -65,11 +68,11 @@ export function ProfitabilityTable({ rows }: { rows: ProjectFinanceRow[] }) {
           </div>
         ),
       },
-      money("revenue", "Revenue", (r) => r.finance.revenue.revenue),
+      ...(anyContract ? [money("revenue", "Revenue", (r) => r.finance.revenue.revenue)] : []),
       money("received", "Received", (r) => r.finance.revenue.received),
-      money("spent", "Actual expenses", (r) => r.finance.spent, { strong: true }),
+      money("spent", "Spent", (r) => r.finance.spent, { strong: true }),
       money("remaining", "Est. remaining", (r) => r.outlook.estimatedRemaining),
-      money("finalCost", "Expected final cost", (r) => r.outlook.expectedFinalCost),
+      money("finalCost", "Est. final cost", (r) => r.outlook.expectedFinalCost),
       money("profit", "Est. profit or loss", (r) => r.outlook.estimatedProfit, { tone: true, strong: true }),
       {
         id: "margin",
@@ -89,7 +92,7 @@ export function ProfitabilityTable({ rows }: { rows: ProjectFinanceRow[] }) {
         cell: ({ row }) => (row.original.budget > 0 ? <Money value={row.original.outlook.remainingBudget} tone="auto" /> : <span className="text-muted-foreground">No budget</span>),
       },
     ],
-    [],
+    [anyContract],
   );
   return (
     <DataTable
@@ -100,7 +103,8 @@ export function ProfitabilityTable({ rows }: { rows: ProjectFinanceRow[] }) {
       pageSize={25}
       getRowId={(r) => r.id}
       onRowClick={(r) => router.push(`/finance/projects/${r.id}`)}
-      initialHidden={["received"]}
+      // Hidden at first so the estimated profit and margin fit the card; "Show all" brings them back.
+      initialHidden={["received", "remaining", "variance"]}
       renderMobileRow={(p) => (
         <div className="min-w-0 space-y-2">
           <div className="flex items-start justify-between gap-3">

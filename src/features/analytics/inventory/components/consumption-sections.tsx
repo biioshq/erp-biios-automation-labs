@@ -13,7 +13,13 @@ const PATTERN: Record<NonNullable<MaterialComparison["pattern"]>, { label: strin
 };
 
 export function PatternBadge({ pattern }: { pattern: MaterialComparison["pattern"] }) {
-  if (!pattern) return <span className="text-xs text-muted-foreground">Usual</span>;
+  if (!pattern) {
+    return (
+      <Badge variant="secondary" className="bg-muted text-muted-foreground">
+        Usual
+      </Badge>
+    );
+  }
   const p = PATTERN[pattern];
   return (
     <Badge variant="secondary" className={p.className}>
@@ -27,7 +33,7 @@ export function MaterialComparisonTable({ rows }: { rows: MaterialComparison[] }
     { key: "item", header: "Material", cell: (r) => <ItemCell id={r.itemId} name={r.name} sku={r.sku} /> },
     { key: "current", header: "This period", align: "right", cell: (r) => <Qty value={r.current} unit={r.unit} /> },
     { key: "previous", header: "Previous period", align: "right", cell: (r) => <Qty value={r.previous} unit={r.unit} /> },
-    { key: "change", header: "Change", align: "right", cell: (r) => <Change value={r.change} /> },
+    { key: "change", header: "Change", align: "right", cell: (r) => <Change value={r.change} neutral /> },
     { key: "value", header: "Value this period", align: "right", cell: (r) => <Money value={r.currentValue} className="font-medium" /> },
     { key: "pvalue", header: "Value before", align: "right", hideOnPhone: true, cell: (r) => <Money value={r.previousValue} /> },
     { key: "pattern", header: "Pattern", cell: (r) => <PatternBadge pattern={r.pattern} /> },
@@ -40,7 +46,7 @@ export function ProjectComparisonTable({ rows }: { rows: ProjectComparison[] }) 
     { key: "project", header: "Project", cell: (r) => <ProjectCell id={r.projectId} name={r.name} code={r.code} color={r.color} /> },
     { key: "current", header: "This period", align: "right", cell: (r) => <Money value={r.current} className="font-medium" /> },
     { key: "previous", header: "Previous period", align: "right", cell: (r) => <Money value={r.previous} /> },
-    { key: "change", header: "Change", align: "right", cell: (r) => <Change value={r.change} /> },
+    { key: "change", header: "Change", align: "right", cell: (r) => <Change value={r.change} neutral /> },
   ];
   return <GridTable rows={rows} columns={columns} rowKey={(r) => r.projectId} minWidth={480} />;
 }

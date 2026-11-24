@@ -57,24 +57,24 @@ export default async function ReservesPage() {
       </StatGrid>
 
       <Section title="Reserves" description="Balances today. Add a reserve type (for example a capital redemption reserve) and it is available for transfers straight away." contentClassName="p-0">
-        <Table className="min-w-[520px]">
+        <Table className="sm:min-w-[520px]">
           <TableHeader>
             <TableRow>
               <TableHead className="pl-5">Reserve</TableHead>
-              <TableHead className="text-right">Transfers</TableHead>
+              <TableHead className="hidden text-right sm:table-cell">Transfers</TableHead>
               <TableHead className="pr-5 text-right">Balance</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {reserves.rows.map((r) => (
               <TableRow key={r.key}>
-                <TableCell className="pl-5">
+                <TableCell className="pl-5 whitespace-normal">
                   <div style={{ paddingLeft: `${r.depth * 1.25}rem` }} className="min-w-0">
                     <p className="font-medium">{r.label}</p>
-                    {r.description ? <p className="max-w-md truncate text-xs text-muted-foreground">{r.description}</p> : null}
+                    {r.description ? <p className="max-w-48 truncate text-xs text-muted-foreground sm:max-w-md">{r.description}</p> : null}
                   </div>
                 </TableCell>
-                <TableCell className="text-right tabular text-muted-foreground">{r.transfers}</TableCell>
+                <TableCell className="hidden text-right tabular text-muted-foreground sm:table-cell">{r.transfers}</TableCell>
                 <TableCell className="pr-5 text-right font-medium">
                   <Money value={r.balance} tone={r.balance < 0 ? "negative" : undefined} />
                 </TableCell>
@@ -83,9 +83,8 @@ export default async function ReservesPage() {
           </TableBody>
           <TableFooter>
             <TableRow>
-              <TableCell className="pl-5 font-semibold" colSpan={2}>
-                Total reserves and surplus
-              </TableCell>
+              <TableCell className="pl-5 font-semibold whitespace-normal">Total reserves and surplus</TableCell>
+              <TableCell className="hidden sm:table-cell" />
               <TableCell className="pr-5 text-right font-semibold">
                 <Money value={reserves.total} />
               </TableCell>
@@ -99,7 +98,7 @@ export default async function ReservesPage() {
           id="equity-reserve-transfers"
           entries={transfers}
           show={["reserve", "purpose"]}
-          searchPlaceholder="Search reserve, reason, reference…"
+          searchPlaceholder="Search reserve or reference…"
           emptyState={
             <EmptyState
               icon={Vault}

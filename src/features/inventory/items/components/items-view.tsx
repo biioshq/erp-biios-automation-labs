@@ -43,7 +43,8 @@ import { StockLevelBar } from "@/components/shared/stock-level-bar";
 import { STOCK_STATUSES } from "@/lib/constants";
 import { formatNumber } from "@/lib/format";
 import { emitDataChanged } from "@/lib/events";
-import { PAGE_SIZES, type Paginated } from "@/lib/list-params";
+import { type Paginated } from "@/lib/list-params";
+import { RowsPerPage } from "@/components/data-table/rows-per-page";
 import { cn } from "@/lib/utils";
 import { fetchItem, removeItem } from "../actions";
 import type { ItemFormRecord, ItemRow } from "../types";
@@ -282,7 +283,7 @@ export function ItemsView({
         meta: { label: "Item name" },
         header: ({ column }) => <DataTableColumnHeader column={column} title="Item name" />,
         cell: ({ row }) => (
-          <div className="flex min-w-52 items-center gap-2.5">
+          <div className="flex max-w-80 min-w-52 items-center gap-2.5">
             <ItemThumb src={row.original.photoUrl} name={row.original.name} size="xs" />
             <div className="min-w-0">
               <p className="truncate font-medium">{row.original.name}</p>
@@ -372,7 +373,8 @@ export function ItemsView({
         header: "Status",
         enableSorting: false,
         cell: ({ row }) => (
-          <div className="space-y-1">
+          // The hint wraps under the badge instead of widening the column past the card.
+          <div className="max-w-32 space-y-1 whitespace-normal">
             <StockStatusBadge status={row.original.status} />
             {row.original.status === "out_of_stock" ? <OutOfStockHint /> : null}
           </div>
@@ -433,7 +435,7 @@ export function ItemsView({
           searchPlaceholder="Search name, SKU, vendor…"
           getRowId={(r) => r.id}
           onRowClick={(r) => router.push(`/inventory/items/${r.id}`)}
-          initialHidden={["minStock", "vendor"]}
+          initialHidden={["minStock", "vendor", "level"]}
           renderMobileRow={(item) => <ItemMobileRow item={item} />}
           toolbarActions={layoutToggle}
           emptyState={emptyState}
@@ -526,22 +528,20 @@ function ItemMobileRow({ item }: { item: ItemRow }) {
         <ItemThumb src={item.photoUrl} name={item.name} size="sm" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-medium">{item.name}</p>
-          <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span className="truncate font-mono">{item.sku}</span>
-            {item.category ? (
-              <>
-                <span aria-hidden>·</span>
-                <span className="size-1.5 shrink-0 rounded-full" style={{ background: item.category.color }} />
-                <span className="truncate">{item.category.name}</span>
-              </>
-            ) : null}
-            {item.subcategory ? (
-              <>
-                <span aria-hidden>·</span>
-                <span className="truncate">{item.subcategory}</span>
-              </>
-            ) : null}
-          </p>
+          {/* The SKU on a line of its own so it is never cut; the category keeps its name before the subcategory gives way. */}
+          <p className="truncate font-mono text-[11px] text-muted-foreground">{item.sku}</p>
+          {item.category || item.subcategory ? (
+            <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+              {item.category ? (
+                <>
+                  <span className="size-1.5 shrink-0 rounded-full" style={{ background: item.category.color }} />
+                  <span className="max-w-[85%] shrink-0 truncate">{item.category.name}</span>
+                </>
+              ) : null}
+              {item.category && item.subcategory ? <span aria-hidden>·</span> : null}
+              {item.subcategory ? <span className="min-w-0 truncate">{item.subcategory}</span> : null}
+            </p>
+          ) : null}
           {item.variant ? <p className="truncate text-[11px] text-muted-foreground">{item.variant}</p> : null}
         </div>
         <StockStatusBadge status={item.status} />
@@ -652,18 +652,7 @@ function ItemCardGrid({
             Showing {formatNumber(first)}–{formatNumber(last)} of {formatNumber(total)}
           </p>
           <div className="flex items-center gap-3">
-            <select
-              aria-label="Items per page"
-              value={pageSize}
-              onChange={(e) => url.set({ size: e.target.value, page: null })}
-              className="h-8 rounded-lg border bg-transparent px-2 text-xs max-md:h-10"
-            >
-              {PAGE_SIZES.map((s) => (
-                <option key={s} value={s}>
-                  {s} per page
-                </option>
-              ))}
-            </select>
+            <RowsPerPage label="Per page" value={pageSize} onChange={(n) => url.set({ size: String(n ?? pageSize), page: null })} />
             <span className="tabular text-xs text-muted-foreground">
               Page {page} of {pageCount}
             </span>

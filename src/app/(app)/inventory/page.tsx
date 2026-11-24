@@ -253,7 +253,7 @@ export default async function InventoryDashboardPage({ searchParams }: PageProps
                         "-"
                       )}
                     </span>
-                    <span className="text-right">
+                    <span className="text-right max-sm:col-start-2">
                       <span className={cn("tabular block text-sm font-semibold", still ? "text-muted-foreground" : gain ? "text-success" : "text-danger")}>
                         {still ? formatNumber(m.quantity) : `${gain ? "+" : "-"}${formatNumber(Math.abs(m.availableDelta))}`}
                       </span>

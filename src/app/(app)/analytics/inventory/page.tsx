@@ -162,9 +162,15 @@ export default async function StockMovementPage({ searchParams }: { searchParams
               icon={Scale}
               tone="warning"
               value={
-                <span>
-                  +<Money value={t.adjustedUp.value} /> / -<Money value={t.adjustedDown.value} />
-                </span>
+                t.adjustedUp.value || t.adjustedDown.value ? (
+                  <span>
+                    {t.adjustedUp.value ? "+" : ""}
+                    <Money value={t.adjustedUp.value} /> / {t.adjustedDown.value ? "-" : ""}
+                    <Money value={t.adjustedDown.value} />
+                  </span>
+                ) : (
+                  <Money value={0} />
+                )
               }
               hint={`${plural(t.adjustedUp.count + t.adjustedDown.count, "count correction", "count corrections")}, up and down`}
             />
@@ -207,7 +213,8 @@ export default async function StockMovementPage({ searchParams }: { searchParams
             <MoneyBars data={monthly} labelKey="label" series={MONTH_SERIES} summary={monthlySummary} />
           </Section>
 
-          <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
+          {/* Stacked: the consumption table needs the full width for its money columns. */}
+          <div className="grid gap-5 sm:gap-6">
             <Section title="Project-wise consumption" description="Stock issued to each project in the range, less what came back." contentClassName="p-0 sm:p-0">
               {data.projects.length ? (
                 <ProjectConsumptionTable rows={data.projects} />

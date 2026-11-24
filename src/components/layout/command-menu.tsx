@@ -6,6 +6,7 @@ import { useCanFn } from "@/components/current-user";
 import { useTheme } from "next-themes";
 import { Boxes, FolderKanban, ListTodo, Moon, Receipt, BadgeIndianRupee, Search, Sun, Zap } from "lucide-react";
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -90,6 +91,8 @@ export function CommandMenu() {
       </Button>
 
       <CommandDialog open={open} onOpenChange={setOpen} title="Command palette" description="Search pages, actions and records">
+        {/* The list must sit inside <Command>: cmdk's items read their store from it (without it, opening the menu crashed). */}
+        <Command>
         <CommandInput placeholder="Search projects, expenses, items, tasks… or type a command" value={query} onValueChange={setQuery} />
         <CommandList className="max-h-[calc(100svh-6.5rem)] sm:max-h-[420px]">
           <CommandEmpty>{searching ? "Searching…" : "No results found."}</CommandEmpty>
@@ -169,6 +172,7 @@ export function CommandMenu() {
             </CommandItem>
           </CommandGroup>
         </CommandList>
+        </Command>
       </CommandDialog>
     </>
   );

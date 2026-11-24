@@ -202,7 +202,7 @@ export default async function ConsumptionForecastPage({ searchParams }: Props) {
                 <EmptyState compact icon={Trash2} title="No wastage recorded in the window" description="Wastage recorded under Inventory shows here." />
               )}
             </Section>
-            <Section title="Wastage and adjustments by month" description="Write-offs and manual stock corrections, last 12 months." contentClassName="p-0">
+            <Section title="Wastage and adjustments by month" description="Write-offs and manual stock corrections, last 12 months." contentClassName="p-0 sm:p-0">
               {wastedValue > 0 || adjustments > 0 || months.some((m) => m.wastageCount > 0) ? (
                 <div className="overflow-x-auto">
                   <Table>

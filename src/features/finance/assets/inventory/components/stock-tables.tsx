@@ -20,7 +20,21 @@ const TABS: StockTab[] = ["storage", "in-use", "wasted"];
 
 const day = (d: string | null) => (d ? formatDate(fromDateInput(d)) : "Not recorded");
 const unitLabel = (u: string) => labelOf(INVENTORY_UNITS, u as InventoryUnit).toLowerCase();
-const qty = (n: number, unit: string) => `${formatNumber(n)} ${unitLabel(unit)}`;
+/** The unit for one of it: 1 piece, 1 box, 1 foot. */
+const SINGULAR_UNIT: Partial<Record<InventoryUnit, string>> = {
+  pcs: "piece",
+  set: "set",
+  box: "box",
+  kg: "kilogram",
+  g: "gram",
+  m: "metre",
+  ft: "foot",
+  l: "litre",
+  roll: "roll",
+  sheet: "sheet",
+  pair: "pair",
+};
+const qty = (n: number, unit: string) => `${formatNumber(n)} ${n === 1 ? (SINGULAR_UNIT[unit as InventoryUnit] ?? unitLabel(unit)) : unitLabel(unit)}`;
 
 function ItemCell({ id, name, sku, category }: { id: string; name: string; sku: string; category: string | null }) {
   return (
@@ -258,7 +272,7 @@ function WastedTable({ rows }: { rows: WastedRow[] }) {
       columns={columns}
       data={rows}
       pageSize={20}
-      searchPlaceholder="Search item, person or department…"
+      searchPlaceholder="Search item or person…"
       filters={[
         ...(reasons.length > 1 ? [{ key: "reason", title: "Reason", options: reasons }] : []),
         { key: "from", title: "Where", options: [{ value: "storage", label: "From storage" }, { value: "project", label: "In use on a project" }] },

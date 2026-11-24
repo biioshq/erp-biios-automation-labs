@@ -56,7 +56,7 @@ export function ProjectForecastTable({ rows }: { rows: ProjectForecastRow[] }) {
         header: ({ column }) => <DataTableColumnHeader column={column} title="Remaining at run rate" align="right" />,
         cell: ({ row }) =>
           row.original.runRateRemaining === null ? (
-            <span className="block max-w-44 text-right text-xs text-muted-foreground">{row.original.runRateNote}</span>
+            <span className="ml-auto block max-w-44 text-right text-xs whitespace-normal text-muted-foreground">{row.original.runRateNote}</span>
           ) : (
             <Money value={row.original.runRateRemaining} />
           ),
@@ -69,11 +69,11 @@ export function ProjectForecastTable({ rows }: { rows: ProjectForecastRow[] }) {
         header: ({ column }) => <DataTableColumnHeader column={column} title="Predicted total cost" align="right" />,
         cell: ({ row }) =>
           row.original.predictedTotal === null ? (
-            <span className="block max-w-44 text-right text-xs text-muted-foreground">{row.original.forecastNote}</span>
+            <span className="ml-auto block max-w-44 text-right text-xs whitespace-normal text-muted-foreground">{row.original.forecastNote}</span>
           ) : (
             <div className="flex flex-col items-end gap-0.5" title={row.original.forecastNote}>
               <Money value={row.original.predictedTotal} className="font-semibold" />
-              <span className="text-right text-[11px] text-muted-foreground">{methodText(row.original)}</span>
+              <span className="max-w-32 text-right text-[11px] whitespace-normal text-muted-foreground">{methodText(row.original)}</span>
             </div>
           ),
       },
@@ -81,8 +81,8 @@ export function ProjectForecastTable({ rows }: { rows: ProjectForecastRow[] }) {
         id: "variance",
         accessorFn: (r) => r.variance ?? Number.NEGATIVE_INFINITY,
         meta: { label: "Expected overrun or saving", align: "right" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Expected overrun or saving" align="right" />,
-        cell: ({ row }) => <VarianceText row={row.original} />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Overrun or saving" align="right" />,
+        cell: ({ row }) => <VarianceText row={row.original} className="whitespace-normal" />,
       },
       {
         id: "categories",
@@ -92,7 +92,7 @@ export function ProjectForecastTable({ rows }: { rows: ProjectForecastRow[] }) {
         enableSorting: false,
         cell: ({ row }) =>
           row.original.categories.length ? (
-            <span className="block min-w-44 text-xs text-muted-foreground">
+            <span className="block min-w-44 max-w-60 text-xs whitespace-normal text-muted-foreground">
               {row.original.categories
                 .slice(0, 3)
                 .map((c) => `${c.label} ${formatPercent(c.share)}`)
@@ -117,7 +117,9 @@ export function ProjectForecastTable({ rows }: { rows: ProjectForecastRow[] }) {
       id="forecast-projects"
       columns={columns}
       data={rows}
-      hideToolbar
+      searchPlaceholder="Search projects"
+      // Shown from Columns, and for the selected project in its detail below: keeps the table within the page.
+      initialHidden={["originalBudget", "runRate", "budgetRemaining", "categories"]}
       pageSize={25}
       getRowId={(r) => r.id}
       onRowClick={(r) => open(r.id)}

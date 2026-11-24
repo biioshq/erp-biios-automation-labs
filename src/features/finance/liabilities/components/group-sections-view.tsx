@@ -209,20 +209,13 @@ function SectionCard({
                 Outstanding on {section.totalCount === 1 ? "this record" : `these ${section.totalCount} records`}: <Money value={section.outstanding} className="font-medium text-foreground" />
               </p>
             </>
+          ) : section.totalCount ? (
+            <EmptyState compact icon={Search} title="No records match the filters" />
           ) : (
-            <EmptyState
-              compact
-              icon={section.totalCount ? Search : FolderTree}
-              title={section.totalCount ? "No records match the filters" : "Nothing recorded in this group"}
-              description={section.totalCount ? undefined : "Add an amount owed here, such as TDS, salaries due or a loan, with who it is owed to and when it is due."}
-              action={
-                section.totalCount || !onAdd ? undefined : (
-                  <Button size="sm" variant="outline" onClick={() => onAdd(section.groupKeys.includes(section.key) ? section.key : section.groupKeys[0])}>
-                    <Plus /> Add
-                  </Button>
-                )
-              }
-            />
+            // The header has the Add button, so an empty group needs one quiet line, not a large box.
+            <p className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+              {section.computedLines.length ? `No other amounts entered in ${section.label} yet.` : `Nothing recorded in ${section.label} yet.`}
+            </p>
           )
         ) : null}
       </Section>

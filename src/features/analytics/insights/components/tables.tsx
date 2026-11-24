@@ -6,6 +6,7 @@ import { DEPARTMENTS, PAYMENT_STATUSES, labelOf, type Department, type PaymentSt
 import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import { cn } from "@/lib/utils";
+import { EDGE_CELLS } from "../../inventory/components/table-kit";
 import type { EmployeeLoad, MaintenanceDue, ProjectHealth, PurchaseRequirement } from "../../dashboard/types";
 import type { MaterialRow, PartyBalance, PriceChange, PriceComparison, VendorBill, VendorRow } from "../types";
 
@@ -19,7 +20,7 @@ const PAY_TONE: Record<PaymentStatus, "success" | "warning" | "danger" | "neutra
 /** Projects with money, tasks and delay flags. */
 export function ProjectsTable({ rows }: { rows: ProjectHealth[] }) {
   return (
-    <Table className="min-w-[860px]">
+    <Table className={cn("min-w-[860px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Project</TableHead>
@@ -77,7 +78,7 @@ const ALERT_LABEL = { out: "Out of stock", below_min: "Below minimum", runs_out:
 /** Items to buy, soonest order date first. */
 export function RequirementsTable({ rows }: { rows: PurchaseRequirement[] }) {
   return (
-    <Table className="min-w-[720px]">
+    <Table className={cn("min-w-[720px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Item</TableHead>
@@ -124,7 +125,7 @@ export function RequirementsTable({ rows }: { rows: PurchaseRequirement[] }) {
 /** Customers or suppliers with what is still open. */
 export function PartyTable({ rows, label, countLabel }: { rows: PartyBalance[]; label: string; countLabel: string }) {
   return (
-    <Table className="min-w-[420px]">
+    <Table className={cn("min-w-[420px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>{label}</TableHead>
@@ -152,7 +153,7 @@ export function PartyTable({ rows, label, countLabel }: { rows: PartyBalance[]; 
 /** Vendors by what was bought from them. Names open the vendor's history. */
 export function VendorTable({ rows, hrefOf, showOutstanding }: { rows: VendorRow[]; hrefOf: (key: string) => string; showOutstanding?: boolean }) {
   return (
-    <Table className="min-w-[680px]">
+    <Table className={cn("min-w-[680px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Vendor</TableHead>
@@ -188,7 +189,7 @@ export function VendorTable({ rows, hrefOf, showOutstanding }: { rows: VendorRow
 /** Quantity, value and prices per item bought. */
 export function MaterialTable({ rows }: { rows: MaterialRow[] }) {
   return (
-    <Table className="min-w-[760px]">
+    <Table className={cn("min-w-[760px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Item</TableHead>
@@ -242,7 +243,7 @@ const changeText = (c: number | null) => (c === null ? "Not known" : Math.abs(c)
 /** First and latest price per item: rises in red, falls in green. */
 export function PriceChangeTable({ rows, hrefOf }: { rows: PriceChange[]; hrefOf: (id: string) => string }) {
   return (
-    <Table className="min-w-[640px]">
+    <Table className={cn("min-w-[640px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Item</TableHead>
@@ -281,7 +282,7 @@ export function PriceChangeTable({ rows, hrefOf }: { rows: PriceChange[]; hrefOf
 /** The same item from different vendors: cheapest average first. */
 export function ComparisonTable({ rows }: { rows: PriceComparison[] }) {
   return (
-    <Table className="min-w-[680px]">
+    <Table className={cn("min-w-[680px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Item and vendor</TableHead>
@@ -333,7 +334,7 @@ export function ComparisonTable({ rows }: { rows: PriceComparison[] }) {
 /** One vendor's bills, newest first, each opening the expense. */
 export function BillsTable({ rows }: { rows: VendorBill[] }) {
   return (
-    <Table className="min-w-[680px]">
+    <Table className={cn("min-w-[680px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Bill</TableHead>
@@ -375,7 +376,7 @@ export function BillsTable({ rows }: { rows: VendorBill[] }) {
 /** Stock received against stock used and wasted, per item. */
 export function ItemUseTable({ rows }: { rows: { id: string; name: string; unit: string; received: number; consumed: number; wasted: number; available: number; ratio: number | null }[] }) {
   return (
-    <Table className="min-w-[640px]">
+    <Table className={cn("min-w-[640px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Item</TableHead>
@@ -409,27 +410,27 @@ export function ItemUseTable({ rows }: { rows: { id: string; name: string; unit:
 /** People and how much of their time open projects take. */
 export function PeopleTable({ rows }: { rows: EmployeeLoad[] }) {
   return (
-    <Table className="min-w-[560px]">
+    <Table className={cn("sm:min-w-[480px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Person</TableHead>
-          <TableHead>Projects</TableHead>
           <TableHead className="text-right">Allocated</TableHead>
+          <TableHead>Projects</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((e) => (
           <TableRow key={e.id}>
-            <TableCell>
+            <TableCell className="max-sm:whitespace-normal">
               <Link href={`/finance/employees/${e.id}`} className="font-medium hover:underline">
                 {e.name}
               </Link>
               <p className="text-xs text-muted-foreground">{e.department ? labelOf(DEPARTMENTS, e.department as Department) : ""}</p>
             </TableCell>
-            <TableCell className="text-xs text-muted-foreground">
+            <TableCell className={cn("tabular text-right font-medium", e.allocation > 100 && "text-danger", e.allocation === 0 && "text-muted-foreground")}>{formatNumber(e.allocation)}%</TableCell>
+            <TableCell className="min-w-28 text-xs whitespace-normal text-muted-foreground sm:min-w-48">
               {e.projects.length ? e.projects.map((p) => `${p.name} (${formatNumber(p.allocation)}%)`).join(", ") : "On no current project"}
             </TableCell>
-            <TableCell className={cn("tabular text-right font-medium", e.allocation > 100 && "text-danger", e.allocation === 0 && "text-muted-foreground")}>{formatNumber(e.allocation)}%</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -440,7 +441,7 @@ export function PeopleTable({ rows }: { rows: EmployeeLoad[] }) {
 /** Equipment and where it is today. */
 export function EquipmentTable({ rows }: { rows: { id: string; code: string; name: string; project: { id: string; name: string } | null; until: string | null }[] }) {
   return (
-    <Table className="min-w-[480px]">
+    <Table className={cn("min-w-[480px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Equipment</TableHead>
@@ -476,7 +477,7 @@ export function EquipmentTable({ rows }: { rows: { id: string; code: string; nam
 /** Equipment with a service due soon or past due. */
 export function MaintenanceTable({ rows }: { rows: MaintenanceDue[] }) {
   return (
-    <Table className="min-w-[520px]">
+    <Table className={cn("min-w-[520px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Equipment</TableHead>

@@ -46,13 +46,13 @@ export function SliceTable({
             const href = hrefOf(r);
             return (
               <TableRow key={r.key}>
-                <TableCell className="max-w-56">
+                <TableCell className="max-w-56 whitespace-normal sm:whitespace-nowrap">
                   {href ? (
-                    <Link href={href} className="block truncate font-medium hover:underline">
+                    <Link href={href} className="block font-medium hover:underline sm:truncate">
                       {r.label}
                     </Link>
                   ) : (
-                    <span className="block truncate font-medium">{r.label}</span>
+                    <span className="block font-medium sm:truncate">{r.label}</span>
                   )}
                 </TableCell>
                 <TableCell className="tabular text-right text-muted-foreground">{formatNumber(r.count)}</TableCell>

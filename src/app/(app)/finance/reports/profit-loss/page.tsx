@@ -8,7 +8,7 @@ import { Money } from "@/components/shared/money";
 import { NoAccess } from "@/components/shared/no-access";
 import { DownloadButtons } from "@/features/reports/components/download-buttons";
 import { ReportFilterBar } from "@/features/reports/components/report-filters";
-import { InvertedPeriod, RelatedStatements, StatementMatrix } from "@/features/reports/components/statements/statement-view";
+import { InvertedPeriod, RelatedStatements, StatementMatrix, defaultPeriodLabel } from "@/features/reports/components/statements/statement-view";
 import { filtersForReport, parseReportFilters, reportQueryString } from "@/features/reports/schemas";
 import { PL_NOTES, plColumnsOf, plRows } from "@/features/reports/server/builders/statements";
 import { plColumns } from "@/features/reports/server/pl-columns";
@@ -47,7 +47,7 @@ export default async function ProfitLossPage({ searchParams }: { searchParams: P
         description={`Income earned against costs incurred from ${periodWords}, on the accrual basis. Every figure is computed from the records in Project Manager.`}
         actions={can(user, "finance.statements:export") ? <DownloadButtons type="profit_loss" filters={filters} refreshOnDownload={false} /> : undefined}
       />
-      <ReportFilterBar meta={{ type: "profit_loss", filters: ["date", "columns"] }} filters={filters} options={NO_OPTIONS} />
+      <ReportFilterBar meta={{ type: "profit_loss", filters: ["date", "columns"] }} filters={filters} options={NO_OPTIONS} dateLabel={defaultPeriodLabel(filters, pl.from, pl.to)} />
 
       {pl.sections.length === 0 ? (
         <EmptyState

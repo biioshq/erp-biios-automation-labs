@@ -15,11 +15,10 @@ import {
   type SortingState,
   type VisibilityState,
 } from "@tanstack/react-table";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search, Settings2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, EyeOff, Search, Settings2, X } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -30,7 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/shared/empty-state";
 import { cn } from "@/lib/utils";
-import { PAGE_SIZES } from "@/lib/list-params";
+import { RowsPerPage } from "./rows-per-page";
 import { formatNumber } from "@/lib/format";
 import { FacetedFilter, type FilterDef } from "./faceted-filter";
 import { DateRangeFilter } from "./date-range-filter";
@@ -272,7 +271,7 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size={iconOnly ? "icon" : "sm"} className={iconOnly ? undefined : "h-8"} aria-label="Choose columns">
           <Settings2 className="opacity-70" />
-          {iconOnly ? null : "View"}
+          {iconOnly ? null : "Columns"}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
@@ -297,6 +296,9 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
   );
 
   const showEmptyState = !isFiltered && total === 0 && emptyState;
+  const hiddenColumns = table.getAllLeafColumns().filter((c) => c.getCanHide() && !c.getIsVisible());
+  const columnName = (c: (typeof hiddenColumns)[number]) =>
+    c.columnDef.meta?.label ?? (typeof c.columnDef.header === "string" ? c.columnDef.header : c.id);
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
@@ -353,6 +355,18 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
             <div className="hidden sm:block">{columnsMenu(false)}</div>
             {toolbarActions}
           </div>
+        </div>
+      ) : null}
+
+      {hiddenColumns.length && !showEmptyState ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs text-muted-foreground" data-slot="hidden-columns">
+          <EyeOff className="size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0">
+            {hiddenColumns.length === 1 ? "1 column hidden" : `${hiddenColumns.length} columns hidden`}: {hiddenColumns.map(columnName).join(", ")}
+          </span>
+          <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => hiddenColumns.forEach((c) => c.toggleVisibility(true))}>
+            Show all
+          </Button>
         </div>
       ) : null}
 
@@ -515,21 +529,7 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
             {total === 0 ? "No results" : `Showing ${formatNumber(firstRow)}–${formatNumber(lastRow)} of ${formatNumber(total)}`}
           </p>
           <div className="flex items-center justify-between sm:justify-end sm:gap-4">
-            <div className="hidden items-center gap-2 sm:flex">
-              <span className="text-xs text-muted-foreground">Rows</span>
-              <Select value={String(pageSize)} onValueChange={(v) => table.setPageSize(Number(v))}>
-                <SelectTrigger size="sm" className="h-8 w-[70px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent side="top">
-                  {PAGE_SIZES.map((s) => (
-                    <SelectItem key={s} value={String(s)}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <RowsPerPage className="hidden sm:flex" value={pageSize} onChange={(n) => table.setPageSize(n ?? pageSize)} />
             <span className="tabular text-xs text-muted-foreground max-sm:order-2 max-sm:flex-1 max-sm:text-center">
               Page {pageIndex + 1} of {pageCount}
             </span>

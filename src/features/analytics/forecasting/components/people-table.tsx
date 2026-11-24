@@ -19,10 +19,11 @@ function Outlook({ p }: { p: PersonLoad }) {
   return <StatusBadge tone="success">{100 - p.peak}% free</StatusBadge>;
 }
 
-const pctCol = (id: string, title: string, pick: (p: PersonLoad) => number): ColumnDef<PersonLoad> => ({
+/** `title` is the short header; `label` the full name in the column menu. */
+const pctCol = (id: string, title: string, label: string, pick: (p: PersonLoad) => number): ColumnDef<PersonLoad> => ({
   id,
   accessorFn: pick,
-  meta: { label: title, align: "right" },
+  meta: { label, align: "right" },
   header: ({ column }) => <DataTableColumnHeader column={column} title={title} align="right" />,
   cell: ({ row }) => <LoadText value={pick(row.original)} />,
 });
@@ -39,22 +40,18 @@ export function PeopleTable({ rows, showCost }: { rows: PersonLoad[]; showCost: 
         cell: ({ row }) => (
           <div className="min-w-40">
             <p className="truncate font-medium">{row.original.name}</p>
-            <p className="truncate text-[11px] text-muted-foreground">{[row.original.designation, row.original.departmentLabel].filter(Boolean).join(" · ")}</p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {[row.original.designation, row.original.departmentLabel].filter(Boolean).join(" · ")}
+              {/* Status sits here rather than in its own column, so the table fits the page. */}
+              {row.original.status === "on_leave" ? <span className="font-medium text-warning"> · On leave</span> : null}
+            </p>
           </div>
         ),
         enableHiding: false,
       },
-      {
-        id: "status",
-        accessorKey: "status",
-        meta: { label: "Status" },
-        header: "Status",
-        enableSorting: false,
-        cell: ({ row }) => (row.original.status === "on_leave" ? <StatusBadge tone="warning">On leave</StatusBadge> : <StatusBadge tone="success">Active</StatusBadge>),
-      },
-      pctCol("current", "Allocated now", (p) => p.current),
-      pctCol("upcoming", "On upcoming work", (p) => p.upcoming),
-      pctCol("peak", "Busiest month ahead", (p) => p.peak),
+      pctCol("current", "Now", "Allocated now", (p) => p.current),
+      pctCol("upcoming", "Upcoming", "On upcoming work", (p) => p.upcoming),
+      pctCol("peak", "Busiest month", "Busiest month ahead", (p) => p.peak),
       {
         id: "outlook",
         accessorFn: (p) => p.peak,
@@ -71,9 +68,9 @@ export function PeopleTable({ rows, showCost }: { rows: PersonLoad[]; showCost: 
         enableSorting: false,
         cell: ({ row }) =>
           row.original.projects.length ? (
-            <ul className="min-w-52 space-y-0.5 text-xs">
+            <ul className="min-w-40 max-w-xs space-y-0.5 text-xs whitespace-normal">
               {row.original.projects.map((pr) => (
-                <li key={`${pr.id}-${pr.role}`} className="truncate">
+                <li key={`${pr.id}-${pr.role}`}>
                   {pr.name} <span className="text-muted-foreground">· {pr.role} · {pr.allocation}%{pr.upcoming ? " · upcoming" : ""}</span>
                 </li>
               ))}
@@ -88,7 +85,7 @@ export function PeopleTable({ rows, showCost }: { rows: PersonLoad[]; showCost: 
               id: "cost",
               accessorFn: (p: PersonLoad) => p.excessMonthlyCost ?? 0,
               meta: { label: "Extra labour cost a month", align: "right" as const },
-              header: ({ column }) => <DataTableColumnHeader column={column} title="Extra labour cost a month" align="right" />,
+              header: ({ column }) => <DataTableColumnHeader column={column} title="Extra cost a month" align="right" />,
               cell: ({ row }) => (row.original.excessMonthlyCost ? <Money value={row.original.excessMonthlyCost} /> : <span className="text-muted-foreground">-</span>),
             } satisfies ColumnDef<PersonLoad>,
           ]

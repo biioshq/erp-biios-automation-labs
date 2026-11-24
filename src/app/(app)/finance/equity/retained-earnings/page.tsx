@@ -28,6 +28,11 @@ export default async function RetainedEarningsPage() {
   if (!can(user, "finance.equity:view")) return <NoAccess title="Retained earnings" />;
   const [data, panel] = await Promise.all([getRetainedEarnings(), getPanelData()]);
   const opening = data.entries.filter((e) => e.type === "opening_retained");
+  const beforeBooksNote = data.beforeBooks
+    ? "Opening figure entered below"
+    : opening.length
+      ? "The figures below are dated after the first record, so they count as adjustments in their year"
+      : "No opening figure entered";
 
   return (
     <Page>
@@ -79,65 +84,63 @@ export default async function RetainedEarningsPage() {
       <Section title="Year by year" description="Each year's profit or loss comes from the profit and loss statement. The last closing figure is the balance sheet line." contentClassName="p-0">
         {data.years.length || data.beforeBooks ? (
           <>
-            <Table className="min-w-[760px]">
+            <Table className="sm:min-w-[760px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-5">Financial year</TableHead>
-                  <TableHead className="text-right">Opening</TableHead>
+                  <TableHead className="pl-3 whitespace-normal sm:pl-5">Financial year</TableHead>
+                  <TableHead className="hidden text-right sm:table-cell">Opening</TableHead>
                   <TableHead className="text-right">Profit or loss</TableHead>
-                  <TableHead className="text-right">Adjustments</TableHead>
-                  <TableHead className="text-right">Dividends</TableHead>
-                  <TableHead className="text-right">To reserves</TableHead>
-                  <TableHead className="pr-5 text-right">Closing</TableHead>
+                  <TableHead className="hidden text-right sm:table-cell">Adjustments</TableHead>
+                  <TableHead className="hidden text-right sm:table-cell">Dividends</TableHead>
+                  <TableHead className="hidden text-right sm:table-cell">To reserves</TableHead>
+                  <TableHead className="pr-3 text-right sm:pr-5">Closing</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.years.map((y) => (
                   <TableRow key={y.label}>
-                    <TableCell className="pl-5">
+                    <TableCell className="pl-3 sm:pl-5">
                       <Link href={`/finance/reports/profit-loss?from=${y.from}&to=${y.to}`} className="font-medium hover:underline">
                         {y.label}
                       </Link>
-                      {y.current ? <span className="ml-2 text-xs text-muted-foreground">to date</span> : null}
+                      {y.current ? <span className="block text-xs text-muted-foreground sm:ml-2 sm:inline">to date</span> : null}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="hidden text-right sm:table-cell">
                       <Money value={y.opening} tone="auto" />
                     </TableCell>
                     <TableCell className="text-right">
                       <Money value={y.profit} tone="auto" />
                     </TableCell>
-                    <TableCell className="text-right">{y.adjustments ? <Money value={y.adjustments} tone="auto" /> : <span className="text-muted-foreground">0</span>}</TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="hidden text-right sm:table-cell">{y.adjustments ? <Money value={y.adjustments} tone="auto" /> : <span className="text-muted-foreground">0</span>}</TableCell>
+                    <TableCell className="hidden text-right sm:table-cell">
                       <Less value={y.dividends} />
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="hidden text-right sm:table-cell">
                       <Less value={y.toReserves} />
                     </TableCell>
-                    <TableCell className="pr-5 text-right font-semibold">
+                    <TableCell className="pr-3 text-right font-semibold sm:pr-5">
                       <Money value={y.closing} tone="auto" />
                     </TableCell>
                   </TableRow>
                 ))}
                 <TableRow>
-                  <TableCell className="pl-5 text-muted-foreground">Before the books started</TableCell>
-                  <TableCell colSpan={5} className="text-right text-xs text-muted-foreground">
-                    {data.beforeBooks
-                      ? "Opening figure entered below"
-                      : opening.length
-                        ? "The figures below are dated after the first record, so they count as adjustments in their year"
-                        : "No opening figure entered"}
+                  <TableCell className="pl-3 whitespace-normal text-muted-foreground sm:pl-5">Before the books started</TableCell>
+                  <TableCell colSpan={5} className="hidden text-right text-xs text-muted-foreground sm:table-cell">
+                    {beforeBooksNote}
                   </TableCell>
-                  <TableCell className="pr-5 text-right font-semibold">
+                  <TableCell className="text-right text-xs whitespace-normal text-muted-foreground sm:hidden">{beforeBooksNote}</TableCell>
+                  <TableCell className="pr-3 text-right font-semibold sm:pr-5">
                     <Money value={data.beforeBooks} tone="auto" />
                   </TableCell>
                 </TableRow>
               </TableBody>
               <TableFooter>
                 <TableRow>
-                  <TableCell className="pl-5 font-semibold" colSpan={6}>
+                  <TableCell className="pl-3 font-semibold whitespace-normal sm:pl-5" colSpan={2}>
                     Retained earnings on the balance sheet
                   </TableCell>
-                  <TableCell className="pr-5 text-right font-semibold">
+                  <TableCell className="hidden sm:table-cell" colSpan={4} />
+                  <TableCell className="pr-3 text-right font-semibold sm:pr-5">
                     <Money value={data.balance} tone="auto" />
                   </TableCell>
                 </TableRow>

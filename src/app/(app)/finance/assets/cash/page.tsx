@@ -42,6 +42,8 @@ export default async function CashAndBankPage({ searchParams }: { searchParams: 
   const transferAccounts = transferOptions(overview.accounts);
   const open = overview.accounts.filter((a) => a.id && !a.archived);
   const canCreate = can(user, "finance.cash_bank:create");
+  const bankCount = overview.accounts.filter((a) => a.kind === "bank").length;
+  const cashCount = overview.accounts.filter((a) => a.kind === "cash").length;
 
   return (
     <Page>
@@ -90,8 +92,8 @@ export default async function CashAndBankPage({ searchParams }: { searchParams: 
 
       <StatGrid>
         <StatCard label="Total available cash" value={<Money value={overview.total} tone="auto" />} icon={Wallet} tone="brand" hint="Bank balances plus cash in hand" />
-        <StatCard label="Bank balances" value={<Money value={overview.bankBalance} tone="auto" />} icon={Landmark} tone="info" hint={`${overview.accounts.filter((a) => a.kind === "bank").length} bank accounts`} />
-        <StatCard label="Cash in hand" value={<Money value={overview.cashInHand} tone="auto" />} icon={Banknote} tone="success" hint={`${overview.accounts.filter((a) => a.kind === "cash").length} cash boxes`} />
+        <StatCard label="Bank balances" value={<Money value={overview.bankBalance} tone="auto" />} icon={Landmark} tone="info" hint={bankCount === 1 ? "1 bank account" : `${bankCount} bank accounts`} />
+        <StatCard label="Cash in hand" value={<Money value={overview.cashInHand} tone="auto" />} icon={Banknote} tone="success" hint={cashCount === 1 ? "1 cash box" : `${cashCount} cash boxes`} />
         <StatCard label="Transfers recorded" value={transfers.total} icon={ArrowLeftRight} hint="Between your own accounts" />
       </StatGrid>
 
@@ -121,36 +123,34 @@ export default async function CashAndBankPage({ searchParams }: { searchParams: 
         <AccountsGrid accounts={overview.accounts} transferAccounts={transferAccounts} />
       </Section>
 
-      <div className="grid gap-4 xl:grid-cols-3 xl:items-start">
-        <Section title="How balances are worked out" contentClassName="space-y-3 text-sm text-muted-foreground" className="xl:col-span-1">
-          <p className="flex gap-2">
-            <Info className="mt-0.5 size-4 shrink-0 text-info" />
-            <span>
-              Each account starts from its opening balance on its opening date. Records dated before an account&apos;s opening date are part of that opening
-              balance, so they do not change it again.
-            </span>
-          </p>
-          <p>A record that names an account uses it. One that does not lands in the account set as the default for its payment method:</p>
-          <ul className="divide-y rounded-lg border">
-            {overview.routes.map((r) => (
-              <li key={r.method} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3 py-2">
-                <span className="font-medium text-foreground">{r.label}</span>
-                <span className="text-right text-xs">
-                  <span className={r.reason === "not_set_up" ? "text-warning" : "text-foreground"}>{r.accountName}</span>
-                  <span className="block">{ROUTE_REASON[r.reason]}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="text-xs">Payments through Biios Startup LLP are owed to the group company, and stock taken from inventory moves no money, so neither touches an account.</p>
+      <div id="history" className="min-w-0 scroll-mt-20">
+        <Section title="Transactions" description="One account at a time, newest first, with the balance after each record.">
+          <AccountHistoryPanel accounts={overview.accounts} history={history} />
         </Section>
-
-        <div id="history" className="min-w-0 scroll-mt-20 xl:col-span-2">
-          <Section title="Transactions" description="One account at a time, newest first, with the balance after each record.">
-            <AccountHistoryPanel accounts={overview.accounts} history={history} />
-          </Section>
-        </div>
       </div>
+
+      <Section title="How balances are worked out" contentClassName="max-w-3xl space-y-3 text-sm text-muted-foreground">
+        <p className="flex gap-2">
+          <Info className="mt-0.5 size-4 shrink-0 text-info" />
+          <span>
+            Each account starts from its opening balance on its opening date. Records dated before an account&apos;s opening date are part of that opening
+            balance, so they do not change it again.
+          </span>
+        </p>
+        <p>A record that names an account uses it. One that does not lands in the account set as the default for its payment method:</p>
+        <ul className="divide-y rounded-lg border">
+          {overview.routes.map((r) => (
+            <li key={r.method} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3 py-2">
+              <span className="font-medium text-foreground">{r.label}</span>
+              <span className="text-right text-xs">
+                <span className={r.reason === "not_set_up" ? "text-warning" : "text-foreground"}>{r.accountName}</span>
+                <span className="block">{ROUTE_REASON[r.reason]}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs">Payments through Biios Startup LLP are owed to the group company, and stock taken from inventory moves no money, so neither touches an account.</p>
+      </Section>
 
       <Section
         title="Transfers between own accounts"

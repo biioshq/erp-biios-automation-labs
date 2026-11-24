@@ -5,6 +5,7 @@ import { connectDB } from "@/server/db";
 import { InventoryAllocation, InventoryItem, InventoryMovement } from "@/server/models";
 import { addDays, startOfDayIST, toDateInput } from "@/lib/dates";
 import { getStockStatus } from "@/lib/stock-status";
+import { roundQty } from "@/features/inventory/ledger/stock-cost";
 import type { StockStatus } from "@/lib/constants";
 
 /**
@@ -201,15 +202,18 @@ export async function lookAheadAlerts(asOf: Date = new Date(), days = DEFAULT_WI
     const c = coverage(i.available, u.perDay, i.leadTimeDays, asOf);
     const reasons: string[] = [];
     let level: StockAlert["level"] | null = null;
-    if (i.available <= 0 && (i.minStock > 0 || u.perDay)) {
+    // Every item with nothing available is "out", minimum or not, on the same 3-decimal quantity
+    // as getStockStatus in inventorySnapshot, so the reorder list, the banner and the stock cards agree.
+    const avail = roundQty(i.available);
+    if (avail <= 0) {
       level = "out";
       reasons.push("Nothing available");
-    } else if (i.minStock > 0 && i.available <= i.minStock) {
+    } else if (i.minStock > 0 && avail <= i.minStock) {
       level = "below_min";
       reasons.push(`At or below the minimum of ${i.minStock}`);
     }
     const horizon = (i.leadTimeDays ?? 0) + ALERT_BUFFER_DAYS;
-    if (c.daysOfCover !== null && c.daysOfCover <= horizon && i.available > 0) {
+    if (c.daysOfCover !== null && c.daysOfCover <= horizon && avail > 0) {
       level = level ?? "runs_out";
       reasons.push(
         i.leadTimeDays

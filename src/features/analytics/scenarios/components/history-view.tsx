@@ -101,7 +101,7 @@ export function HistoryView({ data, users }: { data: Paginated<HistoryRow>; user
       pageSize={data.pageSize}
       filters={filters}
       dateRange
-      searchPlaceholder="Search scenario, change or note…"
+      searchPlaceholder="Search history…"
       getRowId={(r) => r.key}
       renderMobileRow={(r) => (
         <div className="min-w-0 space-y-1.5">

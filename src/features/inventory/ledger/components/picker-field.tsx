@@ -60,8 +60,11 @@ export function PickerField<T extends FieldValues>({
           <Field data-invalid={fieldState.invalid || undefined} className={cn("gap-1.5", className)}>
             {label ? (
               <FieldLabel htmlFor={name} className="text-[13px]">
-                {label}
-                {required ? <span className="ml-0.5 text-danger">*</span> : null}
+                {/* One span, as in src/components/forms/fields.tsx, so the label's flex gap does not push the asterisk away. */}
+                <span>
+                  {label}
+                  {required ? <span className="ml-0.5 text-danger">*</span> : null}
+                </span>
               </FieldLabel>
             ) : null}
             <Popover open={open} onOpenChange={setOpen}>

@@ -112,24 +112,44 @@ export default async function FinanceDashboardPage({ searchParams }: PageProps<"
         <ProjectSummaryTable rows={data.projectSummaries} />
       </Section>
 
+      {/* Recent transactions sit under the chart, so the left column runs as long as the cards on the right. */}
       <div className="grid gap-4 xl:grid-cols-3 xl:items-start">
-        <Section title="Monthly expenses" description="Last 6 months by category" className="xl:col-span-2" contentClassName="pt-4">
-          {hasCategories ? (
-            <CategoryChart data={data.categories} />
-          ) : (
-            <EmptyState
-              compact
-              icon={Receipt}
-              title="No expenses in the last 6 months"
-              description="The category breakdown appears after your first expense."
-              action={
-                <Link href="/finance/expenses?new=1" className="text-sm font-medium text-brand-ink hover:underline">
-                  Add expense
+        <div className="flex min-w-0 flex-col gap-4 xl:col-span-2">
+          <Section title="Monthly expenses" description="Last 6 months by category" contentClassName="pt-4">
+            {hasCategories ? (
+              <CategoryChart data={data.categories} />
+            ) : (
+              <EmptyState
+                compact
+                icon={Receipt}
+                title="No expenses in the last 6 months"
+                description="The category breakdown appears after your first expense."
+                action={
+                  <Link href="/finance/expenses?new=1" className="text-sm font-medium text-brand-ink hover:underline">
+                    Add expense
+                  </Link>
+                }
+              />
+            )}
+          </Section>
+          <Section
+            title="Recent transactions"
+            description="Latest income and expenses"
+            contentClassName="px-3 py-1"
+            actions={
+              <div className="flex items-center gap-3 text-xs font-medium">
+                <Link href="/finance/income" className="text-brand-ink hover:underline">
+                  All income
                 </Link>
-              }
-            />
-          )}
-        </Section>
+                <Link href="/finance/expenses" className="text-brand-ink hover:underline">
+                  All expenses
+                </Link>
+              </div>
+            }
+          >
+            <RecentTransactions items={data.transactions} />
+          </Section>
+        </div>
         <div className="flex flex-col gap-4">
           <GstSummary data={data} />
           <RecurringCommitmentsCard data={data} />
@@ -137,24 +157,6 @@ export default async function FinanceDashboardPage({ searchParams }: PageProps<"
           <ShortcutLinks can={(p) => can(user, p)} />
         </div>
       </div>
-
-      <Section
-        title="Recent transactions"
-        description="Latest income and expenses"
-        contentClassName="px-3 py-1"
-        actions={
-          <div className="flex items-center gap-3 text-xs font-medium">
-            <Link href="/finance/income" className="text-brand-ink hover:underline">
-              All income
-            </Link>
-            <Link href="/finance/expenses" className="text-brand-ink hover:underline">
-              All expenses
-            </Link>
-          </div>
-        }
-      >
-        <RecentTransactions items={data.transactions} />
-      </Section>
     </Page>
   );
 }

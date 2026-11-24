@@ -50,6 +50,10 @@ const moneyCol = (id: string, title: string, pick: (r: ProjectFinanceRow) => num
 /** Original and revised budget against actual spend, per project. */
 export function BudgetTrackingTable({ rows }: { rows: ProjectFinanceRow[] }) {
   const router = useRouter();
+  // Columns that would only repeat another one are left out, so the table fits its card: the
+  // original budget when no project's budget was revised, and the overrun when nothing is over.
+  const revised = rows.some((r) => Math.abs(r.originalBudget - r.budget) >= 0.01);
+  const overrun = rows.some((r) => r.outlook.overrun > 0);
   const columns = useMemo<ColumnDef<ProjectFinanceRow>[]>(
     () => [
       {
@@ -68,10 +72,10 @@ export function BudgetTrackingTable({ rows }: { rows: ProjectFinanceRow[] }) {
         enableSorting: false,
         cell: ({ row }) => <ProjectStatusBadge status={row.original.status} />,
       },
-      moneyCol("originalBudget", "Original budget", (r) => r.originalBudget, () => "text-muted-foreground"),
-      moneyCol("budget", "Revised budget", (r) => r.budget),
-      moneyCol("spent", "Actual expenditure", (r) => r.finance.spent, () => "font-medium"),
-      moneyCol("remaining", "Remaining budget", (r) => r.outlook.remainingBudget, (r) => (r.outlook.remainingBudget < 0 ? "text-danger" : undefined)),
+      ...(revised ? [moneyCol("originalBudget", "Original budget", (r) => r.originalBudget, () => "text-muted-foreground")] : []),
+      moneyCol("budget", revised ? "Revised budget" : "Budget", (r) => r.budget),
+      moneyCol("spent", "Spent", (r) => r.finance.spent, () => "font-medium"),
+      moneyCol("remaining", "Remaining", (r) => r.outlook.remainingBudget, (r) => (r.outlook.remainingBudget < 0 ? "text-danger" : undefined)),
       {
         id: "usage",
         accessorFn: (r) => r.outlook.utilisation ?? -1,
@@ -81,20 +85,24 @@ export function BudgetTrackingTable({ rows }: { rows: ProjectFinanceRow[] }) {
           const r = row.original;
           const tone = budgetTone(r.usage, r.budget);
           return (
-            <div className="flex min-w-32 items-center gap-2">
+            <div className="flex min-w-28 items-center gap-2">
               <BudgetBar spent={r.finance.spent} budget={r.budget} />
               <span className={cn("tabular w-12 shrink-0 text-right text-xs", BUDGET_TEXT_CLASS[tone])}>{r.outlook.utilisation === null ? "-" : formatPercent(r.outlook.utilisation)}</span>
             </div>
           );
         },
       },
-      {
-        id: "overrun",
-        accessorFn: (r) => r.outlook.overrun,
-        meta: { label: "Overrun", align: "right" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Overrun" align="right" />,
-        cell: ({ row }) => (row.original.outlook.overrun > 0 ? <Money value={row.original.outlook.overrun} className="font-medium text-danger" /> : <span className="text-muted-foreground">None</span>),
-      },
+      ...(overrun
+        ? [
+            {
+              id: "overrun",
+              accessorFn: (r: ProjectFinanceRow) => r.outlook.overrun,
+              meta: { label: "Overrun", align: "right" as const },
+              header: ({ column }) => <DataTableColumnHeader column={column} title="Overrun" align="right" />,
+              cell: ({ row }) => (row.original.outlook.overrun > 0 ? <Money value={row.original.outlook.overrun} className="font-medium text-danger" /> : <span className="text-muted-foreground">None</span>),
+            } satisfies ColumnDef<ProjectFinanceRow>,
+          ]
+        : []),
       {
         id: "savings",
         accessorFn: (r) => r.outlook.potentialSavings ?? -1,
@@ -107,7 +115,7 @@ export function BudgetTrackingTable({ rows }: { rows: ProjectFinanceRow[] }) {
         },
       },
     ],
-    [],
+    [revised, overrun],
   );
   return (
     <DataTable

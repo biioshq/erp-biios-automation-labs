@@ -76,13 +76,16 @@ export function DemandTable({ rows, showProject }: { rows: DemandRow[]; showProj
         enableSorting: false,
         cell: ({ row }) => (
           <div className="flex min-w-40 flex-col items-start gap-1">
-            <ForecastStatusBadge status={row.original.status} />
+            {/* Both badges on one line, so a row with an overstock note is not taller than the rest. */}
+            <div className="flex flex-wrap items-center gap-1">
+              <ForecastStatusBadge status={row.original.status} />
+              {row.original.overstock ? (
+                <StatusBadge tone="info" dot={false}>
+                  {row.original.overstock}
+                </StatusBadge>
+              ) : null}
+            </div>
             {row.original.reason ? <span className="text-xs text-muted-foreground">{row.original.reason}</span> : null}
-            {row.original.overstock ? (
-              <StatusBadge tone="info" dot={false}>
-                {row.original.overstock}
-              </StatusBadge>
-            ) : null}
           </div>
         ),
       },

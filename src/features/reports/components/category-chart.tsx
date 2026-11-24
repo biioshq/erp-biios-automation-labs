@@ -17,7 +17,7 @@ export function CategoryChart({ categories }: { categories: Pick<CategoryValue, 
     <ChartContainer config={config} className="aspect-auto w-full" style={{ height: Math.max(180, data.length * 38 + 40) }} role="img" aria-label="On-hand stock value by category">
       <BarChart data={data} layout="vertical" margin={{ left: 0, right: 12, top: 4, bottom: 0 }} barCategoryGap={10}>
         <CartesianGrid horizontal={false} strokeDasharray="3 3" />
-        <YAxis dataKey="name" type="category" width={104} tickLine={false} axisLine={false} tickMargin={6} tick={{ fontSize: 12 }} />
+        <YAxis dataKey="name" type="category" width={132} tickLine={false} axisLine={false} tickMargin={6} tick={{ fontSize: 12 }} />
         <XAxis type="number" tickFormatter={(v: number) => formatCompactCurrency(v)} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
         <ChartTooltip
           cursor={{ fill: "var(--muted)", opacity: 0.4 }}

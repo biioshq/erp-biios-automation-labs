@@ -129,7 +129,7 @@ export function PaymentsView({ data, invoiceClients }: { data: Paginated<Invoice
       pageSize={data.pageSize}
       filters={filters}
       dateRange={{ label: "Payment date" }}
-      searchPlaceholder="Search customer, invoice, reference…"
+      searchPlaceholder="Search customer or invoice…"
       getRowId={(r) => r.id}
       onRowClick={(r) => router.push(`/finance/income?view=${r.id}`)}
       initialHidden={["project"]}

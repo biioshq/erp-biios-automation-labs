@@ -304,4 +304,16 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+  /* A thin scrollbar that shows on the dark sidebar (the default thumb is too dark to see there). */
+  .sidebar-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--sidebar-foreground) 30%, transparent) transparent;
+  }
+  .sidebar-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .sidebar-scrollbar::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--sidebar-foreground) 30%, transparent);
+  }
 }

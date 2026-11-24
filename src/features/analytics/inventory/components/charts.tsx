@@ -45,6 +45,7 @@ export function MoneyBars({
   highlightKey,
   summary,
   className,
+  phoneLabelKey,
 }: {
   data: Record<string, string | number | boolean>[];
   labelKey: string;
@@ -53,9 +54,12 @@ export function MoneyBars({
   highlightKey?: string;
   summary: string;
   className?: string;
+  /** Phones: a shorter axis label per bar, so every bar keeps its label. The tooltip keeps the full one. */
+  phoneLabelKey?: string;
 }) {
   const phone = useIsMobile();
   const config = Object.fromEntries(series.map((s) => [s.key, { label: s.label, color: s.color }])) satisfies ChartConfig;
+  const short = phone && phoneLabelKey ? new Map(data.map((d) => [String(d[labelKey]), String(d[phoneLabelKey])])) : null;
   return (
     <ChartContainer config={config} className={cn("aspect-auto h-64 w-full sm:h-72", className)} role="img" aria-label={summary}>
       <BarChart data={data} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
@@ -65,9 +69,10 @@ export function MoneyBars({
           tickLine={false}
           axisLine={false}
           tickMargin={8}
-          interval="preserveStartEnd"
+          interval={short ? 0 : "preserveStartEnd"}
           minTickGap={phone ? 28 : 16}
           tick={{ fontSize: phone ? 11 : 12 }}
+          tickFormatter={short ? (v: string) => short.get(String(v)) ?? String(v) : undefined}
         />
         <YAxis tickFormatter={formatCompactCurrency} tickLine={false} axisLine={false} width={phone ? 44 : 56} tickCount={phone ? 4 : 5} tick={{ fontSize: phone ? 11 : 12 }} />
         <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.5 }} content={<MoneyTip config={config} labelKey={labelKey} />} />

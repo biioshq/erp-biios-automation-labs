@@ -77,19 +77,14 @@ export function YearFlowTable({ rows, current }: { rows: YearFlow[]; current: st
 export function MaterialMovementTable({ rows, historyHref }: { rows: MaterialMovement[]; historyHref: (itemId: string) => string }) {
   const columns: Column<MaterialMovement>[] = [
     { key: "item", header: "Material", cell: (r) => <ItemCell id={r.itemId} name={r.name} sku={r.sku} archived={r.archived} /> },
-    { key: "received", header: "Received", align: "right", cell: (r) => <Qty value={r.received} unit={r.unit} /> },
+    { key: "received", header: "Received", align: "right", cell: (r) => <Qty value={r.received} unit={r.unit} dashZero /> },
     ...(rows.some((r) => r.opening > 0)
-      ? [{ key: "opening", header: "Opening stock", align: "right" as const, cell: (r: MaterialMovement) => (r.opening ? <Qty value={r.opening} unit={r.unit} /> : <span className="text-muted-foreground">None</span>) }]
+      ? [{ key: "opening", header: "Opening stock", align: "right" as const, cell: (r: MaterialMovement) => <Qty value={r.opening} unit={r.unit} dashZero /> }]
       : []),
-    { key: "issued", header: "Issued", align: "right", cell: (r) => <Qty value={r.issued} unit={r.unit} /> },
-    { key: "returned", header: "Returned", align: "right", cell: (r) => <Qty value={r.returned} unit={r.unit} /> },
-    { key: "wasted", header: "Wasted", align: "right", cell: (r) => <Qty value={r.wasted} unit={r.unit} /> },
-    {
-      key: "adjusted",
-      header: "Adjusted",
-      align: "right",
-      cell: (r) => (r.adjusted === 0 ? <span className="text-muted-foreground">None</span> : <Qty value={r.adjusted} unit={r.unit} />),
-    },
+    { key: "issued", header: "Issued", align: "right", cell: (r) => <Qty value={r.issued} unit={r.unit} dashZero /> },
+    { key: "returned", header: "Returned", align: "right", cell: (r) => <Qty value={r.returned} unit={r.unit} dashZero /> },
+    { key: "wasted", header: "Wasted", align: "right", cell: (r) => <Qty value={r.wasted} unit={r.unit} dashZero /> },
+    { key: "adjusted", header: "Adjusted", align: "right", cell: (r) => <Qty value={r.adjusted} unit={r.unit} dashZero /> },
     { key: "moves", header: "Location moves", align: "right", cell: (r) => formatNumber(r.relocations) },
     { key: "net", header: "Net consumed", align: "right", cell: (r) => <Money value={r.netIssuedValue} /> },
     { key: "last", header: "Last movement", cell: (r) => <span className="whitespace-nowrap">{formatDate(fromDateInput(r.lastDay))}</span> },
@@ -105,7 +100,7 @@ export function MaterialMovementTable({ rows, historyHref }: { rows: MaterialMov
       ),
     },
   ];
-  return <GridTable rows={rows} columns={columns} rowKey={(r) => r.itemId} minWidth={1040} />;
+  return <GridTable rows={rows} columns={columns} rowKey={(r) => r.itemId} minWidth={1040} initialRows={20} />;
 }
 
 const TYPE_TONE: Record<string, string> = {

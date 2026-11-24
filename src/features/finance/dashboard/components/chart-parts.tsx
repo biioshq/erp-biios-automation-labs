@@ -6,7 +6,8 @@ import { formatCurrency } from "@/lib/format";
 /** "2026-11" → "Nov 26" */
 export function monthLabel(key: string) {
   const [y, m] = key.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-IN", { month: "short", year: "2-digit", timeZone: "UTC" }).format(new Date(Date.UTC(y, m - 1, 1)));
+  // en-IN writes September as "Sept"; every other month has three letters.
+  return new Intl.DateTimeFormat("en-IN", { month: "short", year: "2-digit", timeZone: "UTC" }).format(new Date(Date.UTC(y, m - 1, 1))).replace("Sept", "Sep");
 }
 
 type Entry = { dataKey?: string | number; value?: number | string; color?: string; name?: string | number };

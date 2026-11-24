@@ -150,7 +150,7 @@ export default async function ProjectCostForecastPage({ searchParams }: Props) {
         <ProjectComparisonChart rows={rows} />
       </Section>
 
-      <Section title="Forecast by project" description="Select a project to see how its forecast is built." contentClassName="p-0 sm:p-0">
+      <Section title="Forecast by project" description="Select a project to see how its forecast is built. Original budget, remaining at run rate, budget left and cost categories can be shown from Columns.">
         <ProjectForecastTable rows={rows} />
       </Section>
 

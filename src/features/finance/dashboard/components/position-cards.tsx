@@ -11,7 +11,7 @@ import { ResponsiveMoney } from "./responsive-money";
 
 function GroupHeading({ title, description }: { title: string; description: React.ReactNode }) {
   return (
-    <div className="-mb-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+    <div className="mb-5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 pt-1">
       <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
       <p className="text-xs text-muted-foreground">{description}</p>
     </div>

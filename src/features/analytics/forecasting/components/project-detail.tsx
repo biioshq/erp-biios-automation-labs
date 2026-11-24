@@ -44,7 +44,7 @@ export function ProjectDetail({ row, points }: { row: ProjectForecastRow; points
           {row.predictedTotal === null ? "-" : <Money value={row.predictedTotal} />}
         </Figure>
         <Figure label="Against the budget" hint={row.budget > 0 ? <>Budget <Money value={row.budget} /></> : undefined}>
-          <VarianceText row={row} />
+          <VarianceText row={row} className="whitespace-normal" />
         </Figure>
       </div>
 

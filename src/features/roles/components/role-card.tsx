@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Copy, Lock, MoreHorizontal, PencilLine, RotateCcw, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, Lock, MoreHorizontal, PencilLine, RotateCcw, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -110,7 +110,10 @@ export function RoleCard({ role, flags, isOwnRole }: { role: Role; flags: RoleCa
           </span>
         </p>
         <details className="group rounded-lg border bg-muted/30 px-3 py-2">
-          <summary className="cursor-pointer text-sm font-medium select-none">Who can see what</summary>
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-medium select-none [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden />
+            Who can see what
+          </summary>
           <div className="pt-3">
             <RoleSummary permissions={role.permissions} />
           </div>

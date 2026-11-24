@@ -132,7 +132,8 @@ export function TaskTable({
         header: ({ column }) => <DataTableColumnHeader column={column} title="Task" />,
         cell: ({ row }) => (
           <div className="min-w-56 max-w-md">
-            <p className="truncate font-medium">{row.original.title}</p>
+            {/* Wraps to a second line when the columns need the room, so the table fits its card. */}
+            <p className="line-clamp-2 font-medium whitespace-normal">{row.original.title}</p>
             <p className="truncate font-mono text-[11px] text-muted-foreground">{row.original.number}</p>
           </div>
         ),
@@ -263,7 +264,7 @@ export function TaskTable({
       getRowId={(r) => r.id}
       onRowClick={(r) => onOpen(r.id)}
       renderMobileRow={(r) => <TaskMobileCard task={r} />}
-      initialHidden={["activity"]}
+      initialHidden={["activity", "updatedAt"]}
       rowClassName={(r) => (r.status === "completed" || r.status === "cancelled" ? "opacity-70" : undefined)}
       toolbarActions={toolbarActions}
       emptyState={

@@ -31,8 +31,10 @@ export function PageHeader({
         {description ? <p className="max-w-2xl text-sm text-pretty text-muted-foreground">{description}</p> : null}
       </div>
       {actions ? (
-        // Phones: a full-width row under the title whose buttons grow, two per line at most.
-        <div className="flex w-full flex-wrap items-center gap-2 max-sm:[&>*]:min-w-[calc(50%-0.25rem)] max-sm:[&>*]:flex-1 md:w-auto md:shrink-0 md:justify-end">
+        // Phones: a full-width row under the title whose buttons grow, two per line at most. Each starts
+        // at half the row and keeps the flex default minimum (its label's width; zero for a scrolling
+        // strip), so a long label moves to a row of its own instead of being squeezed and clipped.
+        <div className="flex w-full flex-wrap items-center gap-2 max-sm:[&>*]:flex-[1_1_calc(50%-0.25rem)] md:w-auto md:shrink-0 md:justify-end">
           {actions}
         </div>
       ) : null}

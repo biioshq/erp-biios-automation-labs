@@ -55,8 +55,18 @@ const STATE_TEXT: Record<DriveReceiptState, string> = {
   unsupported: "Can't be read",
 };
 
-/** Setup steps, shown until GOOGLE_DRIVE_API_KEY is set. */
+/** Setup steps, shown until GOOGLE_DRIVE_API_KEY is set. Only people who manage roles (and admins) see the steps. */
 function SetupNote() {
+  const canSetUp = useCan("settings.roles:edit");
+  if (!canSetUp) {
+    return (
+      <div className="rounded-xl border bg-surface/40 p-4 text-sm">
+        <p className="flex items-center gap-2 font-semibold">
+          <Info className="size-4 text-muted-foreground" /> Google Drive import is not set up. Ask an admin.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="space-y-3 rounded-xl border bg-surface/40 p-4 text-sm">
       <p className="flex items-center gap-2 font-semibold">

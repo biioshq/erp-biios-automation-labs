@@ -17,6 +17,8 @@ export type ListParams = {
 };
 
 export const PAGE_SIZES = [10, 20, 50, 100] as const;
+/** The most rows a person may ask for in one page (the Rows box allows any number up to this). */
+export const MAX_PAGE_SIZE = 500;
 
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
@@ -26,7 +28,8 @@ export function parseListParams(
 ): ListParams {
   const page = Math.max(1, Number.parseInt(first(sp.page), 10) || 1);
   const sizeRaw = Number.parseInt(first(sp.size), 10);
-  const pageSize = (PAGE_SIZES as readonly number[]).includes(sizeRaw) ? sizeRaw : (options.defaultPageSize ?? 20);
+  // Any whole number from 1 to MAX_PAGE_SIZE (the Rows box offers the usual sizes and a custom one).
+  const pageSize = Number.isInteger(sizeRaw) && sizeRaw >= 1 && sizeRaw <= MAX_PAGE_SIZE ? sizeRaw : (options.defaultPageSize ?? 20);
 
   let sort = options.defaultSort ?? null;
   const sortRaw = first(sp.sort);

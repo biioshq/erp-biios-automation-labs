@@ -40,7 +40,7 @@ import type { CashActivity, LedgerAccountMeta, PlSection, Posting, PostingSource
  *    fixed asset costs that asset; a prepaid expense is spread over the days it covers.
  *    Generated stock-assignment and wastage expenses are skipped: the stock movements carry them.
  *    Direct or indirect follows src/lib/expense-nature.ts: an expense on a project is a direct cost
- *    whatever its category (it posts to "expd:<category>", same label, in the direct section);
+ *    whatever its category (it posts to "expd:<category>", labelled "<category> (on projects)", in the direct section);
  *    interest stays a finance cost.
  *  - Stock is an asset until used: assigning it to a project moves its cost into materials
  *    consumed, returns move it back, adjustments and wastage from storage are write-offs. Stock
@@ -228,7 +228,8 @@ async function buildLedger(asOfInput?: Date | null): Promise<Ledger> {
       }
       case "expd":
         // An overhead category booked on a project: a direct cost (src/lib/expense-nature.ts).
-        meta = { code, name: expenseCategoryLabel(categories, rest), type: "expense", pl: "direct" };
+        // Named apart from the category's own account so the trial balance does not list two "Travel" lines.
+        meta = { code, name: `${expenseCategoryLabel(categories, rest)} (on projects)`, type: "expense", pl: "direct" };
         break;
       case "dep":
         meta = { code, name: `Depreciation: ${groupLabel(rest)}`, type: "expense", pl: "depreciation" };

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Info } from "lucide-react";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { LimitedTable } from "@/components/shared/limited-table";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +10,12 @@ import { cn } from "@/lib/utils";
  * scrolls inside its own box on phones, item and project cells that link to their records, and
  * the note used where the ERP does not record something.
  */
+
+/**
+ * For tables placed edge to edge in a card (Section with `p-0 sm:p-0`): the first and last cells line
+ * up with the card title instead of hugging the border.
+ */
+export const EDGE_CELLS = "[&_tr>*:first-child]:pl-4 sm:[&_tr>*:first-child]:pl-5 [&_tr>*:last-child]:pr-4 sm:[&_tr>*:last-child]:pr-5";
 
 export type Column<T> = {
   key: string;
@@ -27,6 +34,7 @@ export function GridTable<T>({
   minWidth = 560,
   footer,
   rowClassName,
+  initialRows,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -34,33 +42,51 @@ export function GridTable<T>({
   minWidth?: number;
   footer?: React.ReactNode;
   rowClassName?: (row: T) => string | undefined;
+  /** Long lists: show this many rows first, with a Rows box under the table to show more. */
+  initialRows?: number;
 }) {
   const cls = (c: Column<T>) => cn(c.align === "right" && "text-right", c.hideOnPhone && "hidden sm:table-cell", c.className);
-  return (
-    <Table style={{ minWidth }}>
-      <TableHeader>
-        <TableRow>
-          {columns.map((c) => (
-            <TableHead key={c.key} className={cls(c)}>
-              {c.header}
-            </TableHead>
-          ))}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((r) => (
-          <TableRow key={rowKey(r)} className={rowClassName?.(r)}>
-            {columns.map((c) => (
-              <TableCell key={c.key} className={cn(cls(c), c.align === "right" && "tabular")}>
-                {c.cell(r)}
-              </TableCell>
-            ))}
-          </TableRow>
+  const header = (
+    <TableHeader>
+      <TableRow>
+        {columns.map((c) => (
+          <TableHead key={c.key} className={cls(c)}>
+            {c.header}
+          </TableHead>
         ))}
-      </TableBody>
-      {footer ? <TableFooter>{footer}</TableFooter> : null}
+      </TableRow>
+    </TableHeader>
+  );
+  const body = rows.map((r) => (
+    <TableRow key={rowKey(r)} className={rowClassName?.(r)}>
+      {columns.map((c) => (
+        <TableCell key={c.key} className={cn(cls(c), c.align === "right" && "tabular")}>
+          {c.cell(r)}
+        </TableCell>
+      ))}
+    </TableRow>
+  ));
+  const foot = footer ? <TableFooter>{footer}</TableFooter> : null;
+  if (initialRows && rows.length > initialRows) {
+    // The limited table sets its own classes, so the minimum width reaches it through a variable.
+    return (
+      <div style={{ "--grid-min": `${minWidth}px` } as React.CSSProperties} className="[&_table]:min-w-(--grid-min)">
+        <LimitedTable className={EDGE_CELLS} header={header} rows={body} footer={foot} initialRows={initialRows} />
+      </div>
+    );
+  }
+  return (
+    <Table style={{ minWidth }} className={EDGE_CELLS}>
+      {header}
+      <TableBody>{body}</TableBody>
+      {foot}
     </Table>
   );
+}
+
+/** A column header that may wrap onto two lines, so a long header does not widen its table. */
+export function WrapHead({ children }: { children: React.ReactNode }) {
+  return <span className="inline-block min-w-14 whitespace-normal">{children}</span>;
 }
 
 /** A footer row: `cells` fill the columns in order; a cell may span several. */
@@ -108,9 +134,10 @@ export function ProjectCell({ id, name, code, color }: { id: string; name: strin
   );
 }
 
-/** A quantity with its unit: "12.5 m". */
-export function Qty({ value, unit, className }: { value: number | null | undefined; unit: string; className?: string }) {
+/** A quantity with its unit: "12.5 m". `dashZero` shows a zero as a muted "-", like the other empty cells. */
+export function Qty({ value, unit, className, dashZero }: { value: number | null | undefined; unit: string; className?: string; dashZero?: boolean }) {
   if (value === null || value === undefined) return <span className="text-muted-foreground">Not known</span>;
+  if (dashZero && value === 0) return <span className="text-muted-foreground">-</span>;
   return (
     <span className={cn("tabular whitespace-nowrap", className)}>
       {formatNumber(value)} <span className="text-muted-foreground">{unit}</span>
@@ -118,13 +145,16 @@ export function Qty({ value, unit, className }: { value: number | null | undefin
   );
 }
 
-/** A signed change as a percentage, coloured; `invert` when a rise is bad. */
-export function Change({ value, invert }: { value: number | null; invert?: boolean }) {
+/**
+ * A signed change as a percentage, coloured; `invert` when a rise is bad, `neutral` when neither
+ * direction is good or bad (use of stock), so it is not coloured at all.
+ */
+export function Change({ value, invert, neutral }: { value: number | null; invert?: boolean; neutral?: boolean }) {
   if (value === null || !Number.isFinite(value)) return <span className="text-muted-foreground">No earlier use</span>;
   const up = value >= 0;
   const good = invert ? !up : up;
   return (
-    <span className={cn("tabular whitespace-nowrap font-medium", value === 0 ? "text-muted-foreground" : good ? "text-success" : "text-danger")}>
+    <span className={cn("tabular whitespace-nowrap font-medium", value === 0 ? "text-muted-foreground" : neutral ? "text-foreground" : good ? "text-success" : "text-danger")}>
       {up ? "+" : "-"}
       {formatPercent(Math.abs(value))}
     </span>

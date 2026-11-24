@@ -34,6 +34,7 @@ export function ReportFilterBar({
   options,
   className,
   only,
+  dateLabel = "Period",
 }: {
   /** Plain fields only: a client component cannot receive the meta's icon component. */
   meta: FilterMeta;
@@ -42,6 +43,8 @@ export function ReportFilterBar({
   className?: string;
   /** Limits the bar to these filters (a page that shares its URL with other controls). */
   only?: ReportFilterKey[];
+  /** The date button's text while no start date is picked, such as the default period the page shows. */
+  dateLabel?: string;
 }) {
   const url = useTableUrl();
   const shown = only ?? activeFilters(meta, filters.movements);
@@ -60,7 +63,7 @@ export function ReportFilterBar({
     >
       {has("date") ? (
         <div className="col-span-2 sm:col-auto max-sm:[&>button]:w-full max-sm:[&>button]:justify-start">
-          <DateRangeFilter from={filters.from} to={filters.to} onChange={(r) => url.set({ from: r.from, to: r.to })} label="Period" />
+          <DateRangeFilter from={filters.from} to={filters.to} onChange={(r) => url.set({ from: r.from, to: r.to })} label={dateLabel} />
         </div>
       ) : null}
       {has("asOf") ? (

@@ -55,7 +55,7 @@ function FlowRow({ label, sign, flow, strong, hint }: { label: string; sign?: "+
         </span>
       </td>
       <td className="tabular py-2.5 pr-3 text-right whitespace-nowrap">{formatNumber(flow.quantity)}</td>
-      <td className="py-2.5 pr-3 text-right sm:pr-4">
+      <td className="py-2.5 pr-3 text-right whitespace-nowrap sm:pr-4">
         <Money value={flow.value} tone={flow.value < 0 ? "auto" : undefined} />
       </td>
     </tr>
@@ -203,7 +203,7 @@ export default async function InventoryValuationPage({ searchParams }: { searchP
         contentClassName="space-y-4"
       >
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full min-w-[420px] text-sm">
+          <table className="w-full text-sm">
             <thead className="bg-muted/40 text-xs text-muted-foreground">
               <tr className="border-b">
                 <th className="py-2 pr-3 pl-3 text-left font-medium sm:pl-4">In storage</th>

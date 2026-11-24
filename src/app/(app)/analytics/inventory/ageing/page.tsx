@@ -31,7 +31,8 @@ export default async function AgeingPage({ searchParams }: { searchParams: Promi
   const isDefault = edges.join(",") === DEFAULT_AGE_EDGES.join(",");
   const data = await getAgeing(edges);
   const oldest = data.totals[data.totals.length - 1];
-  const chart = data.totals.map((t) => ({ label: t.label, value: t.value, old: t.key === oldest.key }));
+  // Phone axis labels: "0-30", "Over 90" (the tooltip keeps the full band name).
+  const chart = data.totals.map((t) => ({ label: t.label, short: t.label.replace(/ days$/, "").replace(/^More than /, "Over "), value: t.value, old: t.key === oldest.key }));
   const summary = `Stock value by age. ${data.totals.map((t) => `${t.label}: ${formatCompactCurrency(t.value)}`).join("; ")}.`;
 
   return (
@@ -84,7 +85,7 @@ export default async function AgeingPage({ searchParams }: { searchParams: Promi
 
           <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
             <Section title="Value by age" description="Stock value held in each age band.">
-              <MoneyBars data={chart} labelKey="label" series={[{ key: "value", label: "Stock value", color: "var(--chart-1)" }]} highlightKey="old" summary={summary} />
+              <MoneyBars data={chart} labelKey="label" series={[{ key: "value", label: "Stock value", color: "var(--chart-1)" }]} highlightKey="old" phoneLabelKey="short" summary={summary} />
             </Section>
             <Section title="Totals per age band" description="Materials and value in each band. A material can sit in more than one." contentClassName="p-0 sm:p-0">
               <BucketTable totals={data.totals} undated={data.undated} totalValue={data.totalValue} />

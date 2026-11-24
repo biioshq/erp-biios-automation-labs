@@ -35,7 +35,7 @@ export function StockHealthChart({ snapshot }: { snapshot: DashboardSnapshot }) 
     return <EmptyState compact icon={BarChart3} title="No items yet" description="Stock health appears once you add inventory." />;
   }
   return (
-    <div className="flex flex-col items-center gap-5 sm:flex-row lg:flex-col xl:flex-row">
+    <div className="flex flex-col items-center gap-5 sm:flex-row lg:flex-col">
       <div className="relative size-44 shrink-0">
         <ChartContainer config={healthConfig} className="aspect-square size-44" role="img" aria-label="Items by stock status">
           <PieChart>

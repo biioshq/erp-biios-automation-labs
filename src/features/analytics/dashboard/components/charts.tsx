@@ -111,7 +111,7 @@ export function BarsChart({
   title,
   reference,
   noteKey,
-  labelWidth = 120,
+  labelWidth = 150,
   className,
 }: {
   data: Row[];
@@ -128,7 +128,10 @@ export function BarsChart({
   const stacked = series.some((s) => s.stack);
   const perRow = stacked ? 34 : 18 * series.length + 18;
   const height = Math.max(160, data.length * perRow + (series.length > 1 ? 72 : 40));
-  const width = phone ? Math.min(labelWidth, 96) : labelWidth;
+  const width = phone ? Math.min(labelWidth, 104) : labelWidth;
+  // Cut long names to one line that fits the label width (an allowance of about 7px a character);
+  // the tooltip shows the full name.
+  const maxChars = Math.floor(width / (phone ? 6.6 : 7));
   const same = (l: string) => l;
   return (
     <ChartContainer config={config} className={cn("aspect-auto w-full", className)} style={{ height }} role="img" aria-label={`${title}. ${summaryOf(data, "label", series, format, same)}.`}>
@@ -142,7 +145,7 @@ export function BarsChart({
           tickLine={false}
           axisLine={false}
           tick={{ fontSize: phone ? 11 : 12 }}
-          tickFormatter={(v: string) => (v.length > (phone ? 13 : 18) ? `${v.slice(0, phone ? 12 : 17)}…` : v)}
+          tickFormatter={(v: string) => (v.length > maxChars ? `${v.slice(0, maxChars - 1).trimEnd()}…` : v)}
         />
         <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.4 }} content={<Tip series={series} format={format} heading={same} noteKey={noteKey} />} />
         {series.length > 1 ? <ChartLegend content={<ChartLegendContent />} /> : null}
@@ -171,6 +174,9 @@ export function PriceChart({ points, unit, title }: { points: PricePointProps[];
   const phone = useIsMobile();
   const config = { price: { label: `Price per ${unit}`, color: "var(--chart-1)" } } satisfies ChartConfig;
   const data = points.map((p, i) => ({ ...p, n: i }));
+  // One date label per day: several purchases on the same day share the first one's label. The
+  // right margin leaves room for half a date label, so the last one is not cut off.
+  const ticks = data.filter((d, i) => i === 0 || d.date !== data[i - 1].date).map((d) => d.n);
   return (
     <ChartContainer
       config={config}
@@ -178,13 +184,13 @@ export function PriceChart({ points, unit, title }: { points: PricePointProps[];
       role="img"
       aria-label={`${title}. ${points.map((p) => `${formatDate(fromDateInput(p.date))}: ${formatCurrency(p.price)} from ${p.vendor}`).join("; ")}.`}
     >
-      <LineChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+      <LineChart data={data} margin={{ top: 12, right: 28, left: 0, bottom: 0 }}>
         <CartesianGrid vertical={false} strokeDasharray="3 4" />
         <XAxis
           dataKey="n"
           type="number"
           domain={[0, Math.max(0, data.length - 1)]}
-          ticks={data.map((d) => d.n)}
+          ticks={ticks}
           tickFormatter={(n: number) => (data[n] ? formatDate(fromDateInput(data[n].date)) : "")}
           tickLine={false}
           axisLine={false}

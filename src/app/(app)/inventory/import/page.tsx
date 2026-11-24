@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Info } from "lucide-react";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { EmptyState } from "@/components/shared/empty-state";
 import { can, requireUser } from "@/server/auth/session";
@@ -16,6 +17,7 @@ export default async function InventoryImportPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
   if (!can(user, "inventory.import:view")) return <NoAccess eyebrow="Inventory" title="Import" />;
+  const drive = driveConfigured();
   return (
     <Page>
       <PageHeader
@@ -31,7 +33,14 @@ export default async function InventoryImportPage() {
             <CsvImport kinds={["items"]} />
           </Section>
           <Section title="Item photos from Google Drive" description="Images named after an item's SKU or name become that item's photo.">
-            <DrivePhotosImport configured={driveConfigured()} />
+            {/* The setup steps are for admins; everyone else gets one line until Drive import is switched on. */}
+            {drive || user.isAdmin ? (
+              <DrivePhotosImport configured={drive} />
+            ) : (
+              <p className="flex items-center gap-2 rounded-xl border bg-surface/40 p-4 text-sm text-muted-foreground">
+                <Info className="size-4 shrink-0" /> Google Drive photo import is not switched on. Ask your administrator.
+              </p>
+            )}
           </Section>
         </div>
       )}

@@ -424,7 +424,8 @@ export function RecurringView({
         searchPlaceholder="Search name, vendor, code"
         getRowId={(r) => r.id}
         onRowClick={(r) => setPanel({ kind: "view", id: r.id })}
-        initialHidden={["occurrences"]}
+        // Project / person is hidden at first so Status and the actions fit the card; "Show all" brings it back.
+        initialHidden={["occurrences", "assignee"]}
         emptyState={summary.total === 0 ? emptyState : undefined}
         renderMobileRow={(r) => (
           <div className="flex min-w-0 flex-col gap-1.5">

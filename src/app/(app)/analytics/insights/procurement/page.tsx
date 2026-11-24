@@ -94,7 +94,8 @@ export default async function ProcurementPage({ searchParams }: { searchParams: 
         </Section>
       ) : null}
 
-      <div className="grid gap-5 sm:gap-6 xl:grid-cols-2">
+      {/* Stacked: both tables have six columns and do not fit half the page. */}
+      <div className="grid gap-5 sm:gap-6">
         {open("/analytics/insights/vendors") ? (
           <Section title="Vendor-wise purchases" description="Purchase value per vendor. Open a vendor for its full history." contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/analytics/insights/vendors">Vendor performance</DetailsLink>}>
             {data.vendors.length ? (

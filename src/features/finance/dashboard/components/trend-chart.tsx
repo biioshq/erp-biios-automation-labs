@@ -56,7 +56,7 @@ export function TrendChart({ trends }: { trends: Trends }) {
             tickLine={false}
             axisLine={false}
             tickMargin={8}
-            interval="preserveStartEnd"
+            interval={phone ? "preserveStartEnd" : 0}
             minTickGap={phone ? 28 : 16}
             tick={{ fontSize: phone ? 11 : 12 }}
           />

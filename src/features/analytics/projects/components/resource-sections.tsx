@@ -6,7 +6,7 @@ import { ASSET_CONDITIONS, labelOf } from "@/lib/constants";
 import { fromDateInput } from "@/lib/dates";
 import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { FooterRow, GridTable, ItemCell, ProjectCell, Qty, type Column } from "@/features/analytics/inventory/components/table-kit";
+import { FooterRow, GridTable, ItemCell, ProjectCell, Qty, WrapHead, type Column } from "@/features/analytics/inventory/components/table-kit";
 import { sumOf } from "../model";
 import type { EquipmentLine, MaterialLine, PersonLoad, ProjectResources } from "../resource-queries";
 
@@ -19,19 +19,20 @@ export function MaterialsByProjectTable({ rows }: { rows: ProjectResources[] }) 
     { key: "project", header: "Project", cell: (r) => <ProjectCell id={r.id} name={r.name} code={r.code} color={r.color} /> },
     { key: "status", header: "Status", hideOnPhone: true, cell: (r) => <ProjectStatusBadge status={r.status} /> },
     { key: "assigned", header: "Allocated", align: "right", cell: (r) => <Money value={r.materials.assigned} /> },
-    { key: "returned", header: "Returned to storage", align: "right", cell: (r) => <Money value={r.materials.returned} /> },
-    { key: "moved", header: "Moved to other projects", align: "right", cell: (r) => <Money value={r.materials.movedOut} /> },
-    { key: "wasted", header: "Wasted on site", align: "right", cell: (r) => <Money value={r.materials.wasted} /> },
-    { key: "inUse", header: "In use (consumed)", align: "right", cell: (r) => <Money value={r.materials.inUse} className="font-medium" /> },
-    { key: "rr", header: "Returned share", align: "right", cell: (r) => share(r.materials.returned, r.materials.assigned) },
-    { key: "wr", header: "Wasted share", align: "right", cell: (r) => share(r.materials.wasted, r.materials.assigned) },
+    // Long headers wrap so all nine columns fit a full-width card at 1440px.
+    { key: "returned", header: <WrapHead>Returned to storage</WrapHead>, align: "right", cell: (r) => <Money value={r.materials.returned} /> },
+    { key: "moved", header: <WrapHead>Moved to other projects</WrapHead>, align: "right", cell: (r) => <Money value={r.materials.movedOut} /> },
+    { key: "wasted", header: <WrapHead>Wasted on site</WrapHead>, align: "right", cell: (r) => <Money value={r.materials.wasted} /> },
+    { key: "inUse", header: <WrapHead>In use (consumed)</WrapHead>, align: "right", cell: (r) => <Money value={r.materials.inUse} className="font-medium" /> },
+    { key: "rr", header: <WrapHead>Returned share</WrapHead>, align: "right", cell: (r) => share(r.materials.returned, r.materials.assigned) },
+    { key: "wr", header: <WrapHead>Wasted share</WrapHead>, align: "right", cell: (r) => share(r.materials.wasted, r.materials.assigned) },
   ];
   return (
     <GridTable
       rows={rows}
       columns={columns}
       rowKey={(r) => r.id}
-      minWidth={1020}
+      minWidth={900}
       footer={
         <FooterRow
           cells={[

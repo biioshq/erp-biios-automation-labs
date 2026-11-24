@@ -184,10 +184,10 @@ export default async function BusinessPerformancePage() {
         </Section>
       ) : null}
 
-      <div className="grid gap-5 sm:gap-6 xl:grid-cols-5">
+      {/* Stacked: the procurement table needs the full width for its cost column. */}
+      <div className="grid gap-5 sm:gap-6">
         {open("/analytics/forecasting/purchases") ? (
           <Section
-            className="xl:col-span-3"
             title="Upcoming procurement"
             description="Items to buy so stock lasts the next 30 days, soonest order date first."
             contentClassName="p-0 sm:p-0"
@@ -205,7 +205,6 @@ export default async function BusinessPerformancePage() {
         ) : null}
         {open("/finance/payments") ? (
           <Section
-            className="xl:col-span-2"
             title="Owed to vendors"
             description={data.salariesHidden ? "Suppliers with unpaid bills, largest first." : "Unpaid bills by payee, largest first. Unpaid salary bills are included."}
             contentClassName="p-0 sm:p-0"

@@ -66,7 +66,7 @@ export function ShortcutLinks({ can }: { can: (permission: string) => boolean })
               href={s.href}
               className="flex min-h-10 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-sm transition-colors hover:bg-muted/60 hover:text-foreground"
             >
-              <span className="min-w-0 truncate">{s.title}</span>
+              <span className="min-w-0">{s.title}</span>
               <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
             </Link>
           </li>

@@ -9,7 +9,7 @@ import { Money } from "@/components/shared/money";
 import { NoAccess } from "@/components/shared/no-access";
 import { DownloadButtons } from "@/features/reports/components/download-buttons";
 import { ReportFilterBar } from "@/features/reports/components/report-filters";
-import { CheckBadge, GrandTotal, InvertedPeriod, RelatedStatements, StatementBlock, StatementMatrix } from "@/features/reports/components/statements/statement-view";
+import { CheckBadge, GrandTotal, InvertedPeriod, RelatedStatements, StatementBlock, StatementMatrix, defaultPeriodLabel } from "@/features/reports/components/statements/statement-view";
 import { filtersForReport, parseReportFilters } from "@/features/reports/schemas";
 import type { ReportColumn, ReportRow } from "@/features/reports/types";
 import { cashFlow, periodFromInputs } from "@/server/accounting/statements";
@@ -60,7 +60,7 @@ export default async function CashFlowPage({ searchParams }: { searchParams: Pro
         description={`Cash received and paid from ${periodWords}, by activity (direct method). Only money that moved through a cash or bank account counts.`}
         actions={can(user, "finance.statements:export") ? <DownloadButtons type="cash_flow" filters={filters} refreshOnDownload={false} /> : undefined}
       />
-      <ReportFilterBar meta={{ type: "cash_flow", filters: ["date"] }} filters={filters} options={NO_OPTIONS} />
+      <ReportFilterBar meta={{ type: "cash_flow", filters: ["date"] }} filters={filters} options={NO_OPTIONS} dateLabel={defaultPeriodLabel(filters, cf.from, cf.to)} />
 
       {cf.accounts.length === 0 ? (
         <EmptyState

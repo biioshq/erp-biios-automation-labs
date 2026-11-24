@@ -16,6 +16,11 @@ import type { IncomeCategory } from "@/lib/constants";
 
 const TZ = "Asia/Kolkata";
 
+/** Days with receipts listed on the summary (newest first); the table shows 10 and the Rows box shows more. */
+export const DAY_LIMIT = 400;
+/** Open invoices listed on the summary, due first. */
+const OPEN_INVOICE_LIMIT = 200;
+
 export type SummaryRange = { from: string; to: string };
 
 /** The range from the URL, or the current financial year up to today. */
@@ -104,7 +109,7 @@ export async function incomeSummary(range: SummaryRange, now: Date = new Date())
         { $match: incomeMatch },
         { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: TZ } }, total: { $sum: "$amount" }, count: { $sum: 1 } } },
         { $sort: { _id: -1 } },
-        { $limit: 31 },
+        { $limit: DAY_LIMIT },
       ]),
       Income.aggregate<{ _id: IncomeCategory; total: number; count: number }>([
         { $match: incomeMatch },
@@ -247,7 +252,7 @@ export async function incomeSummary(range: SummaryRange, now: Date = new Date())
     openInvoices: open
       .slice()
       .sort((a, b) => (a.dueDate ?? a.date).localeCompare(b.dueDate ?? b.date))
-      .slice(0, 10)
+      .slice(0, OPEN_INVOICE_LIMIT)
       .map((b) => ({ id: b.id, number: b.number, client: b.client, date: b.date, dueDate: b.dueDate, outstanding: b.outstanding, overdue: b.status === "overdue" })),
   };
 }

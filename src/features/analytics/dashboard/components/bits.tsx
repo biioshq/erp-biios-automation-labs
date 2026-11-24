@@ -77,7 +77,9 @@ export function NotRecorded({ title, description, className }: { title: string; 
 /** A "see details" button for section headers. */
 export function DetailsLink({ href, children = "Details" }: { href: string; children?: React.ReactNode }) {
   return (
-    <Button asChild variant="ghost" size="sm" className="-my-1 text-muted-foreground hover:text-foreground">
+    // Negative margins cancel the button's padding, so its text lines up with the card edge whether it
+    // sits beside the title or wraps under it.
+    <Button asChild variant="ghost" size="sm" className="-mx-2.5 -my-1 text-muted-foreground hover:text-foreground">
       <Link href={href}>
         {children} <ArrowUpRight className="size-3.5" aria-hidden />
       </Link>

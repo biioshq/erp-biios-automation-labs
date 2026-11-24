@@ -19,6 +19,7 @@ import { monthLabel } from "@/features/analytics/dashboard/rules";
 import { DetailsLink, Footnote, InsightCard } from "@/features/analytics/dashboard/components/bits";
 import { BarsChart, MonthChart } from "@/features/analytics/dashboard/components/charts";
 import { PartyTable } from "@/features/analytics/insights/components/tables";
+import { EDGE_CELLS } from "@/features/analytics/inventory/components/table-kit";
 import type { FinancialInsights } from "@/features/analytics/insights/types";
 
 export const metadata: Metadata = { title: "Financial performance" };
@@ -27,7 +28,7 @@ const BUDGET_ROWS = 10;
 
 function PlTable({ months, fy, fyLabel }: { months: NonNullable<FinancialInsights["pl"]>["months"]; fy: NonNullable<FinancialInsights["pl"]>["fy"]; fyLabel: string }) {
   return (
-    <Table className="min-w-[560px]">
+    <Table className={cn("min-w-[560px]", EDGE_CELLS)}>
       <TableHeader>
         <TableRow>
           <TableHead>Month</TableHead>
@@ -122,6 +123,8 @@ export default async function FinancialPerformancePage() {
   const open = (href: string) => userCanOpen(user, href);
   const hasMonthly = data.monthly.some((m) => m.income > 0 || m.expenses > 0);
   const budgetRows = [...data.budget.rows].sort((a, b) => b.spent - a.spent).slice(0, BUDGET_ROWS);
+  // "FY 2026-27" kept on one line in the card labels: a no-break space, and word joiners around the hyphen.
+  const fyCard = data.fyLabel.replace(/ /g, "\u00a0").replace(/-/g, "\u2060-\u2060");
 
   return (
     <Page>
@@ -155,16 +158,16 @@ export default async function FinancialPerformancePage() {
 
       <StatGrid>
         {open("/finance/income/summary") ? (
-          <InsightCard href="/finance/income/summary" label={`Income received, ${data.fyLabel}`} value={<Money value={data.fy.income} />} icon={ArrowDownRight} tone="success" hint="From income records" linkLabel="Income summary" />
+          <InsightCard href="/finance/income/summary" label={`Income received, ${fyCard}`} value={<Money value={data.fy.income} />} icon={ArrowDownRight} tone="success" hint="From income records" linkLabel="Income summary" />
         ) : null}
         {open("/finance/expenses/summary") ? (
-          <InsightCard href="/finance/expenses/summary" label={`Expenses recorded, ${data.fyLabel}`} value={<Money value={data.fy.expenses} />} icon={ArrowUpRight} tone="warning" hint="Company expenses, by expense date" linkLabel="Expense summary" />
+          <InsightCard href="/finance/expenses/summary" label={`Expenses recorded, ${fyCard}`} value={<Money value={data.fy.expenses} />} icon={ArrowUpRight} tone="warning" hint="Company expenses, by expense date" linkLabel="Expense summary" />
         ) : null}
         {data.pl ? (
           open("/finance/reports/profit-loss") ? (
             <InsightCard
               href={`/finance/reports/profit-loss?from=${data.pl.fy.from}&to=${data.pl.fy.to}`}
-              label={`Profit (P&L), ${data.fyLabel}`}
+              label={`Profit (P&L), ${fyCard}`}
               value={<Money value={data.pl.fy.profit} tone="auto" />}
               icon={TrendingUp}
               tone={data.pl.fy.profit < 0 ? "danger" : "success"}

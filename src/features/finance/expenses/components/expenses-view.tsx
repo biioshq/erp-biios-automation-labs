@@ -162,7 +162,7 @@ export function ExpensesView({
         meta: { label: "Vendor" },
         header: ({ column }) => <DataTableColumnHeader column={column} title="Vendor" />,
         cell: ({ row }) => (
-          <div className="flex min-w-48 items-center gap-3">
+          <div className="flex min-w-48 max-w-72 items-center gap-3">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-surface text-muted-foreground">
               {row.original.source === "inventory_assignment" ? (
                 <Boxes className="size-4 text-brand-ink" />
@@ -212,10 +212,10 @@ export function ExpensesView({
         enableSorting: false,
         cell: ({ row }) =>
           row.original.project ? (
-            <div className="min-w-36">
-              <p className="flex items-center gap-1.5 truncate text-sm">
+            <div className="min-w-36 max-w-48">
+              <p className="flex items-center gap-1.5 text-sm">
                 <span className="size-2 shrink-0 rounded-full" style={{ background: row.original.project.color }} />
-                {row.original.project.name}
+                <span className="truncate">{row.original.project.name}</span>
               </p>
               {row.original.stage ? (
                 <p className="pl-3.5 text-xs text-muted-foreground">{labelOf(PROJECT_STAGES, row.original.stage)}</p>
@@ -281,6 +281,27 @@ export function ExpensesView({
         },
       },
       {
+        id: "amount",
+        accessorKey: "amount",
+        meta: { label: "Amount", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" align="right" />,
+        cell: ({ row }) =>
+          row.original.countedAtPurchase ? (
+            // Shown for the project's sake, but not in the totals above: the purchase is already counted.
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Money value={row.original.amount} className="font-semibold text-muted-foreground" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Counted when the stock was bought, so not added to the totals again</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Money value={row.original.amount} className="font-semibold" />
+          ),
+        enableHiding: false,
+      },
+      {
         id: "gst",
         meta: { label: "GST", align: "right" },
         header: () => <div className="text-right text-xs">GST</div>,
@@ -301,27 +322,6 @@ export function ExpensesView({
           ) : (
             <span className="text-muted-foreground/60">-</span>
           ),
-      },
-      {
-        id: "amount",
-        accessorKey: "amount",
-        meta: { label: "Amount", align: "right" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" align="right" />,
-        cell: ({ row }) =>
-          row.original.countedAtPurchase ? (
-            // Shown for the project's sake, but not in the totals above: the purchase is already counted.
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <Money value={row.original.amount} className="font-semibold text-muted-foreground" />
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>Counted when the stock was bought, so not added to the totals again</TooltipContent>
-            </Tooltip>
-          ) : (
-            <Money value={row.original.amount} className="font-semibold" />
-          ),
-        enableHiding: false,
       },
       {
         id: "actions",
@@ -422,7 +422,7 @@ export function ExpensesView({
         getRowId={(r) => r.id}
         onRowClick={(r) => setPanel({ kind: "view", id: r.id })}
         renderMobileRow={(r) => <ExpenseMobileCard row={r} mutedIfCounted />}
-        initialHidden={["paymentMethod", "department"]}
+        initialHidden={["paymentMethod", "department", "gst"]}
         toolbarActions={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

@@ -277,7 +277,7 @@ export function WastageForm({
             render={({ field }) => (
               <Field className="gap-1.5">
                 <FieldLabel className="text-[13px]">
-                  Where was the stock<span className="ml-0.5 text-danger">*</span>
+                  <span>Where was the stock<span className="ml-0.5 text-danger">*</span></span>
                 </FieldLabel>
                 <ToggleGroup
                   type="single"

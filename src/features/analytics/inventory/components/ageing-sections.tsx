@@ -2,7 +2,7 @@ import { Money } from "@/components/shared/money";
 import { fromDateInput } from "@/lib/dates";
 import { formatDate, formatNumber } from "@/lib/format";
 import { UNDATED, type AgeBucket, type AgeingRow, type BucketTotal } from "../ageing-queries";
-import { FooterRow, GridTable, ItemCell, Qty, type Column } from "./table-kit";
+import { FooterRow, GridTable, ItemCell, Qty, WrapHead, type Column } from "./table-kit";
 
 /** Tables of the inventory ageing page. Server components. */
 
@@ -48,29 +48,41 @@ export function AgeingTable({ rows, buckets }: { rows: AgeingRow[]; buckets: Age
   const hasUndated = rows.some((r) => r.undatedQty > 0);
   const columns: Column<AgeingRow>[] = [
     { key: "item", header: "Material", cell: (r) => <ItemCell id={r.id} name={r.name} sku={r.sku} /> },
-    { key: "qty", header: "In storage", align: "right", cell: (r) => <Qty value={r.available} unit={r.unit} /> },
+    { key: "qty", header: <WrapHead>In storage</WrapHead>, align: "right", cell: (r) => <Qty value={r.available} unit={r.unit} /> },
     ...buckets.map((b) => ({
       key: b.key,
-      header: b.label,
+      header: <WrapHead>{b.label}</WrapHead>,
       align: "right" as const,
-      cell: (r: AgeingRow) => (r.qtyByBucket[b.key] ? <Qty value={r.qtyByBucket[b.key]} unit={r.unit} /> : <span className="text-muted-foreground">0</span>),
+      cell: (r: AgeingRow) => <Qty value={r.qtyByBucket[b.key] ?? 0} unit={r.unit} dashZero />,
     })),
     ...(hasUndated
       ? [
           {
             key: UNDATED,
-            header: "Age not recorded",
+            header: <WrapHead>Age not recorded</WrapHead>,
             align: "right" as const,
-            cell: (r: AgeingRow) => (r.undatedQty ? <Qty value={r.undatedQty} unit={r.unit} /> : <span className="text-muted-foreground">0</span>),
+            cell: (r: AgeingRow) => <Qty value={r.undatedQty} unit={r.unit} dashZero />,
           },
         ]
       : []),
-    { key: "avg", header: "Average age", align: "right", cell: (r) => (r.averageAge === null ? <span className="text-muted-foreground">Not known</span> : `${formatNumber(r.averageAge)} days`) },
-    { key: "oldest", header: "Oldest purchase held", cell: (r) => day(r.oldestDay) },
-    { key: "newest", header: "Latest purchase", cell: (r) => day(r.newestDay) },
+    { key: "avg", header: <WrapHead>Average age</WrapHead>, align: "right", cell: (r) => (r.averageAge === null ? <span className="text-muted-foreground">Not known</span> : `${formatNumber(r.averageAge)} days`) },
+    {
+      // Oldest and latest purchase still held, in one cell to keep the table within the page.
+      key: "dates",
+      header: "Purchases held",
+      cell: (r) =>
+        r.oldestDay ? (
+          <div className="text-xs leading-5 whitespace-nowrap">
+            <p>Oldest {formatDate(fromDateInput(r.oldestDay))}</p>
+            {r.newestDay && r.newestDay !== r.oldestDay ? <p className="text-muted-foreground">Latest {formatDate(fromDateInput(r.newestDay))}</p> : null}
+          </div>
+        ) : (
+          <span className="text-muted-foreground">Not recorded</span>
+        ),
+    },
     { key: "value", header: "Stock value", align: "right", cell: (r) => <Money value={r.value} className="font-medium" /> },
   ];
-  return <GridTable rows={rows} columns={columns} rowKey={(r) => r.id} minWidth={760 + buckets.length * 90} />;
+  return <GridTable rows={rows} columns={columns} rowKey={(r) => r.id} minWidth={640 + buckets.length * 70} />;
 }
 
 /** Materials holding units older than the last edge. */

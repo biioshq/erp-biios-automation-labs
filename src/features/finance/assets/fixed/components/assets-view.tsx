@@ -317,7 +317,7 @@ export function AssetsView({
       <AssetToolbar
         filters={filters}
         layout={layout}
-        searchPlaceholder="Search name, code, location, vendor…"
+        searchPlaceholder="Search name, code, vendor…"
         actions={<AddSubgroupButton parents={rootGroups} defaultParent={labels.root} label={`Add subgroup under ${labels.page}`} />}
       />
 

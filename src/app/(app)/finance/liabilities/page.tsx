@@ -75,7 +75,7 @@ export default async function LiabilitiesOverviewPage() {
       <StatGrid className="xl:grid-cols-5">
         <StatCard label="Total liabilities" value={<Money value={data.total} />} icon={Scale} tone="brand" hint="Current and non-current" />
         <StatCard label="Current liabilities" value={<Money value={data.current} />} icon={TrendingDown} hint="Due within a year" />
-        <StatCard label="Non-current liabilities" value={<Money value={data.nonCurrent} />} icon={Landmark} hint="Due after a year" />
+        <StatCard label="Non-current" value={<Money value={data.nonCurrent} />} icon={Landmark} hint="Liabilities due after a year" />
         <StatCard
           label="Overdue payments"
           value={<Money value={data.overdue} />}
@@ -83,7 +83,7 @@ export default async function LiabilitiesOverviewPage() {
           tone={data.overdue > 0 ? "danger" : "default"}
           hint={`${formatNumber(data.overdueCount)} ${data.overdueCount === 1 ? "item" : "items"} past the due date`}
         />
-        <StatCard label="Due in the next 30 days" value={<Money value={data.upcoming} />} icon={CalendarClock} tone="warning" hint={`${formatNumber(data.upcomingItems.length)} ${data.upcomingItems.length === 1 ? "item" : "items"}, not overdue yet`} />
+        <StatCard label="Due in 30 days" value={<Money value={data.upcoming} />} icon={CalendarClock} tone="warning" hint={`${formatNumber(data.upcomingItems.length)} ${data.upcomingItems.length === 1 ? "item" : "items"}, not overdue yet`} />
       </StatGrid>
 
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">

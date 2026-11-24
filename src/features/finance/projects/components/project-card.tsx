@@ -10,7 +10,7 @@ import { ProjectStatusBadge } from "@/components/shared/status-badge";
 import { cn } from "@/lib/utils";
 import { formatDateShort, formatNumber, formatPercent } from "@/lib/format";
 import { BUDGET_TEXT_CLASS, budgetTone, deadlineLabel } from "../utils";
-import type { ProjectRow } from "../types";
+import type { ProjectFinanceRow } from "../types";
 import { BudgetBar } from "./project-budget-bar";
 
 export function ProjectCard({
@@ -19,7 +19,7 @@ export function ProjectCard({
   onEdit,
   onDelete,
 }: {
-  project: ProjectRow;
+  project: ProjectFinanceRow;
   index: number;
   onEdit: () => void;
   /** Omit for non-admins: the delete item is then hidden. */
@@ -102,8 +102,32 @@ export function ProjectCard({
                 <Money value={project.remaining} compact className="font-medium text-foreground" /> remaining
               </>
             )}
+            {project.originalBudget !== project.budget ? (
+              <>
+                {" · "}original budget <Money value={project.originalBudget} compact />
+              </>
+            ) : null}
           </p>
         </div>
+
+        <dl className="grid grid-cols-2 gap-3 text-xs">
+          <div className="min-w-0">
+            <dt className="text-muted-foreground">Project value</dt>
+            <dd className="mt-0.5 font-medium">{project.contractValue === null ? <span className="font-normal text-muted-foreground">Not set</span> : <Money value={project.contractValue} compact />}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-muted-foreground">Received</dt>
+            <dd className="mt-0.5 font-medium">
+              <Money value={project.finance.revenue.received} compact />
+              {project.finance.revenue.outstanding > 0 ? (
+                <span className="font-normal text-muted-foreground">
+                  {" "}
+                  · <Money value={project.finance.revenue.outstanding} compact /> due
+                </span>
+              ) : null}
+            </dd>
+          </div>
+        </dl>
 
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-t pt-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">

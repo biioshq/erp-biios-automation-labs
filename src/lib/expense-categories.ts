@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { EXPENSE_CATEGORIES } from "@/lib/constants";
+import { EXPENSE_CATEGORIES, type ExpenseNature } from "@/lib/constants";
+import { defaultNature } from "@/lib/expense-nature";
 
 /**
  * Expense categories: the built-in list in constants plus the ones admins add, with admins'
@@ -16,6 +17,11 @@ export type ExpenseCategoryOption = {
   hidden: boolean;
   /** One of EXPENSE_CATEGORIES. Built-ins can be renamed or hidden but not deleted. */
   builtIn: boolean;
+  /**
+   * Direct (project delivery) or indirect (overhead) for expenses of this category that are not on
+   * a project. The admin's setting, or the default (src/lib/expense-nature.ts).
+   */
+  nature: ExpenseNature;
 };
 
 /** What the expenseCategories collection holds: a custom category, or a rename or hide of a built-in. */
@@ -23,6 +29,7 @@ export type ExpenseCategorySetting = {
   value: string;
   label?: string | null;
   hidden?: boolean | null;
+  nature?: string | null;
   createdAt?: Date | string | null;
   updatedAt?: Date | string | null;
 };
@@ -44,6 +51,10 @@ export const isBuiltInExpenseCategory = (value: string) => BUILT_IN.has(value);
 
 const time = (d: Date | string | null | undefined) => (d ? new Date(d).getTime() || 0 : 0);
 
+/** The stored setting when it is a known value, else the default for the category. */
+const natureOf = (value: string, stored: string | null | undefined): ExpenseNature =>
+  stored === "direct" || stored === "indirect" ? stored : defaultNature(value);
+
 /**
  * Built-ins in their usual order with any overrides applied, then custom categories in the order
  * they were added, with "Other" kept last. With no stored settings this is exactly EXPENSE_CATEGORIES.
@@ -61,18 +72,32 @@ export function mergeExpenseCategories(settings: readonly ExpenseCategorySetting
       label: s?.label?.trim() || c.label,
       hidden: canHideExpenseCategory(c.value) ? Boolean(s?.hidden) : false,
       builtIn: true,
+      nature: natureOf(c.value, s?.nature),
     };
   });
   const custom: ExpenseCategoryOption[] = [...byValue.values()]
     .filter((s) => !BUILT_IN.has(s.value))
     .sort((a, b) => time(a.createdAt) - time(b.createdAt) || a.value.localeCompare(b.value))
-    .map((s) => ({ value: s.value, label: s.label?.trim() || s.value, hidden: Boolean(s.hidden), builtIn: false }));
+    .map((s) => ({ value: s.value, label: s.label?.trim() || s.value, hidden: Boolean(s.hidden), builtIn: false, nature: natureOf(s.value, s.nature) }));
   const otherAt = builtIns.findIndex((c) => c.value === "other");
   return [...builtIns.slice(0, otherAt), ...custom, ...builtIns.slice(otherAt)];
 }
 
 /** The built-in list as options, for a client component whose page did not pass the merged list. */
 export const DEFAULT_EXPENSE_CATEGORIES: ExpenseCategoryOption[] = mergeExpenseCategories([]);
+
+/**
+ * Category values whose expenses count as direct when they are not on a project. Unknown values
+ * (a category deleted since) fall back to their default, which is indirect for anything custom.
+ */
+export function directCategoryValues(categories: readonly ExpenseCategoryOption[]): string[] {
+  return categories.filter((c) => c.nature === "direct").map((c) => c.value);
+}
+
+/** The nature setting of a stored category value, for expenseNature(). */
+export function categoryNature(categories: readonly ExpenseCategoryOption[], value: string): ExpenseNature {
+  return categories.find((c) => c.value === value)?.nature ?? defaultNature(value);
+}
 
 /** The label to show for a stored value. Unknown values show as stored, so no record ever shows blank. */
 export function expenseCategoryLabel(categories: readonly ExpenseCategoryOption[], value: string | null | undefined): string {

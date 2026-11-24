@@ -75,6 +75,8 @@ const fixedAssetSchema = new Schema(
           amount: { type: Number, min: 0, default: 0 },
           account: { type: Schema.Types.ObjectId, ref: "BankAccount" },
           notes: { type: String, trim: true, maxlength: 1000 },
+          /** The condition before the disposal, put back if the disposal is removed. Older disposals lack it ("good" then). */
+          previousCondition: { type: String, enum: valuesOf(ASSET_CONDITIONS) },
         },
         { _id: false },
       ),

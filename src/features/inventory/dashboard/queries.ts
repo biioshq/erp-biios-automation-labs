@@ -5,12 +5,13 @@ import { connectDB } from "@/server/db";
 import { InventoryCategory, InventoryItem, InventoryMovement } from "@/server/models";
 import { roundQty } from "@/server/services/inventory-ledger";
 import { inventorySnapshot } from "@/server/services/metrics";
+import { lookAheadAlerts } from "@/server/analytics/core";
 import { iso } from "@/server/serialize";
 import { addDays, startOfDayIST } from "@/lib/dates";
 import { formatDateShort, round2 } from "@/lib/format";
 import { getStockStatus } from "@/lib/stock-status";
 import type { InventoryUnit, MovementType } from "@/lib/constants";
-import type { AttentionItem, CategoryValue, InventoryDashboardData, RecentMovement, WeeklyMovement } from "./types";
+import type { AttentionItem, AttentionLevels, CategoryValue, InventoryDashboardData, RecentMovement, WeeklyMovement } from "./types";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const WINDOW_DAYS = 30;
@@ -72,21 +73,22 @@ async function weeklyMovement(): Promise<WeeklyMovement[]> {
   });
 }
 
-async function needsAttention(): Promise<AttentionItem[]> {
-  const items = await InventoryItem.find({ archivedAt: null, $expr: { $lte: ["$available", "$minStock"] } })
-    .sort({ available: 1, name: 1 })
-    .limit(8)
-    .lean();
-  return items.map((i) => ({
-    id: String(i._id),
-    name: i.name,
-    sku: i.sku,
-    unit: (i.unit ?? "pcs") as InventoryUnit,
-    available: roundQty(i.available),
-    minStock: i.minStock,
-    status: getStockStatus(roundQty(i.available), i.minStock),
-    quantity: roundQty(i.quantity),
+/** The reorder list's first items (the shared look-ahead rule), and how many there are in all. */
+async function needsAttention(): Promise<{ items: AttentionItem[]; total: number; levels: AttentionLevels }> {
+  const alerts = await lookAheadAlerts();
+  const items = alerts.slice(0, 8).map((a) => ({
+    id: a.id,
+    name: a.name,
+    sku: a.sku,
+    unit: a.unit as InventoryUnit,
+    available: roundQty(a.available),
+    minStock: a.minStock,
+    status: getStockStatus(roundQty(a.available), a.minStock),
+    quantity: roundQty(a.available + a.allocated),
+    reason: a.reasons[0] ?? null,
   }));
+  const count = (level: string) => alerts.filter((a) => a.level === level).length;
+  return { items, total: alerts.length, levels: { out: count("out"), belowMin: count("below_min"), runsOut: count("runs_out") } };
 }
 
 async function recentMovements(): Promise<RecentMovement[]> {
@@ -123,5 +125,5 @@ export async function getInventoryDashboard(): Promise<InventoryDashboardData> {
     needsAttention(),
     recentMovements(),
   ]);
-  return { snapshot, valueByCategory: categories, weekly, attention, recent };
+  return { snapshot, valueByCategory: categories, weekly, attention: attention.items, attentionTotal: attention.total, attentionLevels: attention.levels, recent };
 }

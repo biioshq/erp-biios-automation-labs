@@ -127,7 +127,9 @@ export async function balanceSheet(asOf?: Date | null): Promise<BalanceSheet> {
   type Bucket = { key: string; label: string; amount: number; children: Map<string, StatementLine> };
   const buckets = new Map<string, Bucket>();
   const add = (groupKey: string, line: StatementLine, sign: 1 | -1) => {
-    const section = sectionOf(groupKey, nodes);
+    // Equity groups gather under their root (Reserves and surplus holds every reserve as a child line).
+    const root = rootOf(groupKey, nodes);
+    const section = nodes.get(root)?.kind === "equity" ? root : sectionOf(groupKey, nodes);
     const b = buckets.get(section) ?? { key: section, label: nodes.get(section)?.label ?? groupKey, amount: 0, children: new Map() };
     b.amount = round2(b.amount + sign * line.amount);
     const existing = b.children.get(line.key);

@@ -39,14 +39,21 @@ import type { CashActivity, LedgerAccountMeta, PlSection, Posting, PostingSource
  *    a cash or bank account. Stock purchases cost Inventory instead; an expense that paid for a
  *    fixed asset costs that asset; a prepaid expense is spread over the days it covers.
  *    Generated stock-assignment and wastage expenses are skipped: the stock movements carry them.
+ *    Direct or indirect follows src/lib/expense-nature.ts: an expense on a project is a direct cost
+ *    whatever its category (it posts to "expd:<category>", same label, in the direct section);
+ *    interest stays a finance cost.
  *  - Stock is an asset until used: assigning it to a project moves its cost into materials
  *    consumed, returns move it back, adjustments and wastage from storage are write-offs. Stock
  *    entered as already on hand is part of the opening balances.
  *  - Income received: revenue of its category, or a settlement of the invoice it is linked to.
+ *    Linked receipts settle an invoice up to its total, in date then creation order; anything
+ *    received above the total is a customer advance (money paid ahead), never a negative receivable.
  *    Advances are a liability (customer advances) until linked to an invoice or until their project
  *    is completed. Invoices are revenue (and output GST) on their date.
  *  - Capital, drawings, dividends and reserves move equity only; loans are liabilities (only their
- *    interest is an expense, booked by the loan as an expense record); investments and fixed assets
+ *    interest is an expense, booked by the loan as an expense record). An accrued liability (a cost
+ *    of the period not paid yet: salaries, TDS or rent due) is an expense of its category on its
+ *    date, owed in its group until repaid. Investments and fixed assets
  *    are assets, with depreciation accrued month by month up to the day asked for.
  *  - Cash and bank accounts start from their opening balance; records dated before an account's
  *    opening date are history already in that balance, so their cash side goes to opening equity.
@@ -149,6 +156,29 @@ async function buildLedger(asOfInput?: Date | null): Promise<Ledger> {
   const loadedExpenses = new Set(expenses.map((e) => String(e._id)));
 
   const groupLabel = (key: string) => builtInGroup(key)?.label ?? subgroupName.get(key) ?? key;
+  const subgroupParent = new Map(groups.map((g) => [String(g._id), g.parent ?? null]));
+
+  /** The top group a group sits under (current_liabilities, non_current_liabilities...), walking subgroups up. */
+  const rootGroup = (key: string): string | null => {
+    let k = key;
+    for (let i = 0; i < 20; i++) {
+      const parent = builtInGroup(k) ? builtInGroup(k)!.parent : subgroupParent.get(k);
+      if (parent === undefined) return null;
+      if (!parent) return k;
+      k = parent;
+    }
+    return null;
+  };
+
+  /**
+   * The P&L account of an expense. An expense on a project is a direct cost whatever its category
+   * (src/lib/expense-nature.ts), so an overhead category on a project posts to its direct-cost
+   * account. Interest stays a finance cost.
+   */
+  const expenseAccount = (category: string, project?: unknown): string => {
+    const nature = natureOf.get(category) ?? defaultNature(category);
+    return project && category !== "interest" && nature === "indirect" ? `expd:${category}` : `exp:${category}`;
+  };
 
   /** Registers an account's metadata the first time it is used. */
   const ensure = (code: string) => {
@@ -196,6 +226,10 @@ async function buildLedger(asOfInput?: Date | null): Promise<Ledger> {
         meta = { code, name: expenseCategoryLabel(categories, rest), type: "expense", pl };
         break;
       }
+      case "expd":
+        // An overhead category booked on a project: a direct cost (src/lib/expense-nature.ts).
+        meta = { code, name: expenseCategoryLabel(categories, rest), type: "expense", pl: "direct" };
+        break;
       case "dep":
         meta = { code, name: `Depreciation: ${groupLabel(rest)}`, type: "expense", pl: "depreciation" };
         break;
@@ -271,12 +305,12 @@ async function buildLedger(asOfInput?: Date | null): Promise<Ledger> {
       // Spread over the days it covers, up to the day asked for.
       for (const piece of spread(net, e.prepaid.from, e.prepaid.to, asOf)) {
         post(piece.date, { kind: "accrual", id, label: `${e.number} ${e.vendor}: prepaid expense used`, href: source.href }, [
-          [`exp:${e.category}`, piece.amount],
+          [expenseAccount(e.category, e.project), piece.amount],
           ["prepaid", -piece.amount],
         ]);
       }
     } else {
-      lines.push([`exp:${e.category}`, net], ["gst_input", gst]);
+      lines.push([expenseAccount(e.category, e.project), net], ["gst_input", gst]);
       if (e.source === "liability_interest" || e.category === "interest") {
         activity = e.source === "liability_interest" ? "financing" : "operating";
         line = e.source === "liability_interest" ? "Interest paid" : DIRECT_LINE;
@@ -339,8 +373,18 @@ async function buildLedger(asOfInput?: Date | null): Promise<Ledger> {
     ]);
   }
 
-  // Income received.
-  for (const r of incomes) {
+  // Income received. Receipts linked to an invoice settle it up to its total, in date then creation
+  // order; what is received above the total stays a customer advance.
+  const settled = new Map<string, number>();
+  const settle = (invoiceId: string, amount: number): number => {
+    const total = invoiceById.get(invoiceId)?.total ?? 0;
+    const before = settled.get(invoiceId) ?? 0;
+    const part = round2(Math.max(0, Math.min(amount, total - before)));
+    settled.set(invoiceId, round2(before + part));
+    return part;
+  };
+  const byDate = [...incomes].sort((a, b) => a.date.getTime() - b.date.getTime() || String(a._id).localeCompare(String(b._id)));
+  for (const r of byDate) {
     const id = String(r._id);
     const source: PostingSource = { kind: "income", id, label: `${r.number} ${r.client}`, href: `/finance/income?view=${id}` };
     const cash = cashSide(r.paymentMethod, r.account, r.date);
@@ -350,11 +394,22 @@ async function buildLedger(asOfInput?: Date | null): Promise<Ledger> {
     const invDate = invoiceId ? invoiceDate.get(invoiceId) : undefined;
     if (invoiceId && invDate) {
       if (invDate.getTime() <= r.date.getTime()) {
-        post(r.date, source, [[cash, r.amount, inflow("Receipts from customers")], ["receivables", -r.amount]]);
+        const part = settle(invoiceId, r.amount);
+        const excess = round2(r.amount - part);
+        post(r.date, source, [
+          [cash, part, inflow("Receipts from customers")],
+          [cash, excess, inflow("Advances received from customers")],
+          ["receivables", -part],
+          ["customer_advances", -excess],
+        ]);
       } else {
-        // Received before the invoice was raised: an advance until the invoice date.
+        // Received before the invoice was raised: an advance until the invoice date, then it settles
+        // the invoice up to what is left of its total.
         post(r.date, source, [[cash, r.amount, inflow("Advances received from customers")], ["customer_advances", -r.amount]]);
-        if (invDate.getTime() <= asOf.getTime()) post(invDate, { ...source, label: `${r.number} applied to ${invoiceById.get(invoiceId)?.number ?? "invoice"}` }, [["customer_advances", r.amount], ["receivables", -r.amount]]);
+        if (invDate.getTime() <= asOf.getTime()) {
+          const part = settle(invoiceId, r.amount);
+          post(invDate, { ...source, label: `${r.number} applied to ${invoiceById.get(invoiceId)?.number ?? "invoice"}` }, [["customer_advances", part], ["receivables", -part]]);
+        }
       }
     } else if (r.category === "advance") {
       post(r.date, source, [[cash, r.amount, inflow("Advances received from customers")], ["customer_advances", -r.amount]]);
@@ -428,15 +483,32 @@ async function buildLedger(asOfInput?: Date | null): Promise<Ledger> {
   // Loans and other liabilities: taken on, then repaid (interest is booked by its own expense record).
   for (const l of liabilities) {
     const id = String(l._id);
-    const source: PostingSource = { kind: "liability", id, label: `${l.code} ${l.name}`, href: `/finance/liabilities/loans?view=${id}` };
-    const into = l.source?.mode === "account" ? cashSide(l.source.paymentMethod ?? "bank_transfer", l.source.account, l.date) ?? "opening_equity" : "opening_equity";
-    post(l.date, source, [[into, l.originalAmount, into.startsWith("cash:") ? cf("financing", "Loans and borrowings received") : undefined], [`liab:${l.group}`, -l.originalAmount]]);
+    // Loans open on the loans page; other obligations on their side's page (Current or Non-current).
+    const root = (l.kind ?? "loan") === "other" ? rootGroup(l.group) : null;
+    const href =
+      root === "current_liabilities"
+        ? `/finance/liabilities/current?view=${id}`
+        : root === "non_current_liabilities"
+          ? `/finance/liabilities/non-current?view=${id}`
+          : `/finance/liabilities/loans?view=${id}`;
+    const source: PostingSource = { kind: "liability", id, label: `${l.code} ${l.name}`, href };
+    const accrued = l.source?.mode === "accrued";
+    if (accrued) {
+      // A cost of the period not paid yet: an expense of its category, owed in its group. No money moves.
+      const category = l.source?.category;
+      post(l.date, source, [[category ? expenseAccount(category) : "opening_equity", l.originalAmount], [`liab:${l.group}`, -l.originalAmount]]);
+    } else {
+      const into = l.source?.mode === "account" ? cashSide(l.source.paymentMethod ?? "bank_transfer", l.source.account, l.date) ?? "opening_equity" : "opening_equity";
+      post(l.date, source, [[into, l.originalAmount, into.startsWith("cash:") ? cf("financing", "Loans and borrowings received") : undefined], [`liab:${l.group}`, -l.originalAmount]]);
+    }
+    // Paying an accrued expense is an operating payment; repaying a loan or borrowing is financing.
+    const repaid = accrued ? cf("operating", DIRECT_LINE) : cf("financing", "Loans and borrowings repaid");
     for (const [i, p] of (l.payments ?? []).entries()) {
       if (!p.principal || p.date.getTime() > asOf.getTime()) continue;
       const cash = cashSide(p.paymentMethod ?? "bank_transfer", p.account, p.date) ?? "opening_equity";
-      post(p.date, { kind: "liability_payment", id: `${id}:${i}`, label: `Repayment, ${l.code} ${l.name}`, href: source.href }, [
+      post(p.date, { kind: "liability_payment", id: `${id}:${i}`, label: `${accrued ? "Payment" : "Repayment"}, ${l.code} ${l.name}`, href: source.href }, [
         [`liab:${l.group}`, p.principal],
-        [cash, -p.principal, cash.startsWith("cash:") ? cf("financing", "Loans and borrowings repaid") : undefined],
+        [cash, -p.principal, cash.startsWith("cash:") ? repaid : undefined],
       ]);
     }
   }

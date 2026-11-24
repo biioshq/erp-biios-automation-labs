@@ -149,7 +149,7 @@ export function PreviewTable({
   );
 }
 
-const MONEY = new Set(["amount", "taxableAmount", "cgst", "sgst", "igst", "cess", "gstTotal", "unitPrice", "quantity", "minStock"]);
+const MONEY = new Set(["amount", "taxableAmount", "cgst", "sgst", "igst", "cess", "gstTotal", "unitPrice", "quantity", "minStock", "leadTimeDays"]);
 const isMoney = (key: string) => MONEY.has(key);
 
 function Th({ className, children }: { className?: string; children: React.ReactNode }) {

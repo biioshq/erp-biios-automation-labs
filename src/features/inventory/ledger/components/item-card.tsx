@@ -31,7 +31,7 @@ export function ItemCard({ item, title = "Current stock", showExpensed = false }
       <StockLevelBar available={item.available} minStock={item.minStock} quantity={item.quantity} className="mt-4" />
       <dl className="mt-4 grid grid-cols-3 gap-3 text-sm">
         <Stat label="Available" value={`${formatNumber(item.available)} ${item.unit}`} />
-        <Stat label="Allocated" value={`${formatNumber(item.allocated)} ${item.unit}`} />
+        <Stat label="In use" value={`${formatNumber(item.allocated)} ${item.unit}`} />
         <Stat label="Minimum" value={`${formatNumber(item.minStock)} ${item.unit}`} />
       </dl>
       <p className="mt-4 flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { ArrowDownToLine, ArrowUpFromLine, PackagePlus, SlidersHorizontal } from "lucide-react";
+import Link from "next/link";
+import { ArrowDownToLine, ArrowUpFromLine, PackagePlus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Page, PageHeader } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
@@ -37,7 +38,7 @@ export default async function MovementsPage({ searchParams }: PageProps<"/invent
           </>
         }
       />
-      <StatGrid>
+      <StatGrid className="xl:grid-cols-5">
         <StatCard
           label="Purchased"
           icon={PackagePlus}
@@ -77,6 +78,20 @@ export default async function MovementsPage({ searchParams }: PageProps<"/invent
           value={`${net > 0 ? "+" : ""}${formatNumber(net)}`}
           hint={`${formatNumber(summary.adjustment.count)} adjustments, net units`}
         />
+        <Link href="/inventory/wastage" className="block rounded-xl focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
+          <StatCard
+            label="Wasted"
+            icon={Trash2}
+            tone="danger"
+            className="h-full"
+            value={formatNumber(summary.wastage.units)}
+            hint={
+              <>
+                <Money value={summary.wastage.value} compact /> at cost, {formatNumber(summary.wastage.count)} write-offs
+              </>
+            }
+          />
+        </Link>
       </StatGrid>
       <MovementsView
         data={data}

@@ -51,7 +51,15 @@ function toCell(type: ColumnType, value: ReportCell): string | number | Date | n
 }
 
 function sheetName(title: string, taken: Set<string>): string {
-  const base = title.replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 28) || "Sheet";
+  // Excel also refuses a name that starts or ends with an apostrophe ("Partners' ..." cut at 28 characters can).
+  const cleaned =
+    title
+      .replace(/[\\/?*[\]:]/g, " ")
+      .trim()
+      .slice(0, 28)
+      .replace(/^[\s']+|[\s']+$/g, "") || "Sheet";
+  // Excel reserves "History" (ExcelJS throws 'The name "History" is protected'), in any case.
+  const base = cleaned.toLowerCase() === "history" ? "History log" : cleaned;
   let name = base;
   for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${base} ${n}`;
   taken.add(name.toLowerCase());

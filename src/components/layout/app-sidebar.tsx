@@ -82,14 +82,14 @@ export function AppSidebar({ user }: { user: SessionUser }) {
                       <SidebarMenuSub className="mr-0 gap-0.5 py-1 pr-0">
                         {visibleItems(mod.items, user.role === "admin").map((item) =>
                           item.children?.length ? (
-                            <SubGroup key={item.title} item={item} active={item.title === activeItem?.title} activeChild={item.title === activeItem?.title ? activeChild : null} onNavigate={closeOnMobile} />
+                            <SubGroup key={item.title} item={item} active={item.href === activeItem?.href} activeChild={item.href === activeItem?.href ? activeChild : null} onNavigate={closeOnMobile} />
                           ) : (
                             <SidebarMenuSubItem key={item.href}>
-                              <SidebarMenuSubButton asChild isActive={item.title === activeItem?.title} className="h-8 data-active:shadow-[inset_2px_0_0_var(--brand)] max-lg:h-10">
+                              <SidebarMenuSubButton asChild isActive={item.href === activeItem?.href} className="h-8 data-active:shadow-[inset_2px_0_0_var(--brand)] max-lg:h-10">
                                 <Link href={item.href} onClick={closeOnMobile} prefetch>
                                   <item.icon className="opacity-70" />
                                   <span>{item.title}</span>
-                                  {item.title === activeItem?.title ? <ActiveDot /> : null}
+                                  {item.href === activeItem?.href ? <ActiveDot /> : null}
                                 </Link>
                               </SidebarMenuSubButton>
                             </SidebarMenuSubItem>

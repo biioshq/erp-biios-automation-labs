@@ -7,7 +7,7 @@ import { iso } from "@/server/serialize";
 import { dateRangeFilter } from "@/lib/dates";
 import { mongoSort, searchRegex, type ListParams, type Paginated } from "@/lib/list-params";
 import { round2 } from "@/lib/format";
-import type { MovementType, ProjectStage } from "@/lib/constants";
+import type { MovementType, ProjectStage, WastageReason } from "@/lib/constants";
 import type { MovementRow, MovementSummary } from "./types";
 
 type PopulatedItem = { _id: Types.ObjectId; name: string; sku: string; unit?: string } | null;
@@ -32,6 +32,8 @@ function toRow(m: InventoryMovementDoc): MovementRow {
     unitCost: m.unitCost ?? 0,
     totalCost: m.totalCost ?? 0,
     vendor: m.vendor ?? null,
+    wastage: m.wastage ? { reason: m.wastage.reason as WastageReason, from: m.wastage.from === "project" ? "project" : "storage" } : null,
+    relocation: m.relocation ? { from: m.relocation.from ?? null, to: m.relocation.to ?? null } : null,
     balance: { available: m.balance?.available ?? 0, allocated: m.balance?.allocated ?? 0 },
     by: by?.name ?? null,
     note: m.note ?? null,

@@ -10,6 +10,7 @@ import {
   InventoryMovement,
   Project,
   Task,
+  User,
   type FileDoc,
   ProjectMember,
   RecurringExpense,
@@ -26,6 +27,7 @@ import type { ExpenseRow } from "@/features/finance/expenses/types";
 import { PROJECT_DOCUMENT_TYPES, PROJECT_STAGES, labelOf, type ProjectDocumentType, type ProjectStage, type ProjectStatus } from "@/lib/constants";
 import { formatNumber, round2 } from "@/lib/format";
 import { toDateInput } from "@/lib/dates";
+import { roundQty } from "@/features/inventory/ledger/stock-cost";
 import type { ProjectSort } from "./schemas";
 import type {
   ExpenseReceipt,
@@ -39,6 +41,9 @@ import type {
   TimelineEvent,
 } from "./types";
 import { currentMembership } from "@/features/employees/membership";
+import { originalBudgetOf, projectOutlook, sumBy, type ProjectFinance } from "./finance";
+import { projectFinances } from "./finance-queries";
+import type { BudgetChange, ProjectFinanceRow } from "./types";
 
 const stageMap = () => Object.fromEntries(PROJECT_STAGES.map((s) => [s.value, 0])) as Record<ProjectStage, number>;
 const NO_LINKS: ProjectLinks = { expenses: 0, income: 0, allocations: 0, tasks: 0, schedules: 0 };
@@ -83,6 +88,8 @@ function toRow(p: ProjectDoc, spend: ProjectSpend | undefined, links: Omit<Proje
     status: p.status as ProjectStatus,
     color: p.color ?? "#4a82cc",
     budget: p.budget,
+    originalBudget: originalBudgetOf(p.budget, p.budgetHistory),
+    contractValue: typeof p.contractValue === "number" ? p.contractValue : null,
     stageBudgets,
     startDate: iso(p.startDate),
     endDate: iso(p.endDate),
@@ -93,6 +100,31 @@ function toRow(p: ProjectDoc, spend: ProjectSpend | undefined, links: Omit<Proje
     expenseCount: spend?.expenseCount ?? 0,
     links: { ...NO_LINKS, ...links, expenses: spend?.expenseCount ?? 0 },
     createdAt: iso(p.createdAt as Date)!,
+  };
+}
+
+/** Adds revenue, spend by type and the forecast figures to a row. */
+export function withFinance(row: ProjectRow, finance: ProjectFinance | undefined): ProjectFinanceRow {
+  const f: ProjectFinance = finance ?? {
+    projectId: row.id,
+    spent: row.spent,
+    byType: { material: 0, labour: 0, equipment: 0, transport: 0, other: row.spent },
+    byStage: stageMap(),
+    expenseCount: row.expenseCount,
+    revenue: { invoiced: 0, invoiceCount: 0, receivedOnInvoices: 0, receivedDirect: 0, received: 0, revenue: 0, outstanding: 0, overdue: 0 },
+    salariesHidden: false,
+  };
+  return {
+    ...row,
+    finance: f,
+    outlook: projectOutlook({
+      status: row.status,
+      budget: row.budget,
+      originalBudget: row.originalBudget,
+      contractValue: row.contractValue,
+      spent: row.spent,
+      revenue: f.revenue.revenue,
+    }),
   };
 }
 
@@ -110,10 +142,10 @@ export type ProjectListParams = { q: string; status: string[]; sort: ProjectSort
  * Every project with live spend. Search, status filter and sort run in memory
  * (sorting by spend needs the aggregated numbers), and the KPI summary covers all projects.
  */
-export async function listProjects(params: ProjectListParams): Promise<{ rows: ProjectRow[]; summary: ProjectsSummary }> {
+export async function listProjects(params: ProjectListParams): Promise<{ rows: ProjectFinanceRow[]; summary: ProjectsSummary }> {
   await connectDB();
-  const [docs, spend, links] = await Promise.all([Project.find().lean(), projectSpend(), linkedCounts()]);
-  const all = docs.map((p) => toRow(p as ProjectDoc, spend.get(String(p._id)), links.get(String(p._id))));
+  const [docs, spend, links, finances] = await Promise.all([Project.find().lean(), projectSpend(), linkedCounts(), projectFinances()]);
+  const all = docs.map((p) => withFinance(toRow(p as ProjectDoc, spend.get(String(p._id)), links.get(String(p._id))), finances.get(String(p._id))));
 
   const q = params.q.trim().toLowerCase();
   const rows = all
@@ -131,8 +163,28 @@ export async function listProjects(params: ProjectListParams): Promise<{ rows: P
       totalBudget,
       totalSpent,
       remaining: round2(totalBudget - totalSpent),
+      totalContractValue: sumBy(all, (p) => p.contractValue ?? 0),
+      withContractValue: all.filter((p) => p.contractValue !== null).length,
+      totalRevenue: sumBy(all, (p) => p.finance.revenue.revenue),
+      totalReceived: sumBy(all, (p) => p.finance.revenue.received),
+      totalOutstanding: sumBy(all, (p) => p.finance.revenue.outstanding),
     },
   };
+}
+
+/** Every project with its finances, optionally only some statuses (profitability and budget pages). */
+export async function listProjectFinances(status: string[] = []): Promise<{ rows: ProjectFinanceRow[]; total: number }> {
+  await connectDB();
+  const [docs, finances] = await Promise.all([Project.find().lean(), projectFinances()]);
+  const all = docs.map((p) => {
+    const f = finances.get(String(p._id));
+    const spend = f ? { projectId: f.projectId, spent: f.spent, byStage: f.byStage, expenseCount: f.expenseCount, income: 0, salariesHidden: f.salariesHidden } : undefined;
+    return withFinance(toRow(p as ProjectDoc, spend, undefined), f);
+  });
+  const rows = all
+    .filter((p) => (status.length ? status.includes(p.status) : true))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return { rows, total: all.length };
 }
 
 /** Known client names for the form's suggestions. */
@@ -159,23 +211,43 @@ export async function getProjectDetail(id: string): Promise<ProjectDetail | null
   const p = await Project.findById(oid).populate("createdBy", "name").lean();
   if (!p) return null;
   const openFilter = { project: oid, status: { $nin: ["completed", "cancelled"] } } as Record<string, unknown>;
-  const [spend, links, held, openTasks, teamSize] = await Promise.all([
+  const [spend, links, held, openTasks, teamSize, finances, changers] = await Promise.all([
     projectSpend([id]),
     linkedCounts([oid]),
-    InventoryAllocation.find({ project: oid }, { quantity: 1, unitCost: 1 }).lean(),
+    InventoryAllocation.find({ project: oid }, { quantity: 1, quantityWasted: 1, unitCost: 1 }).lean(),
     Task.countDocuments(openFilter as QueryFilter<TaskDoc>),
     ProjectMember.countDocuments({ project: oid, ...currentMembership() } as QueryFilter<ProjectMemberDoc>),
+    projectFinances([id]),
+    budgetChangers(p.budgetHistory),
   ]);
   const creator = p.createdBy as unknown as { name?: string } | null;
   return {
-    ...toRow(p as unknown as ProjectDoc, spend.get(id), links.get(id)),
+    ...withFinance(toRow(p as unknown as ProjectDoc, spend.get(id), links.get(id)), finances.get(id)),
+    budgetHistory: (p.budgetHistory ?? []).map(
+      (h): BudgetChange => ({
+        budget: h.budget,
+        changedAt: iso(h.changedAt)!,
+        changedBy: h.changedBy ? (changers.get(String(h.changedBy)) ?? null) : null,
+        note: h.note ?? null,
+      }),
+    ),
     byStage: spend.get(id)?.byStage ?? stageMap(),
-    // Rounded per allocation, as the Inventory tab and the generated expenses are, so the figures match.
-    inventoryValue: round2(held.reduce((s, a) => s + round2(a.quantity * a.unitCost), 0)),
+    // Stock the project still holds: units wasted there are used up, so they are left out (their
+    // cost stays charged to the project, on the Inventory tab). Rounded per allocation, as the
+    // generated expenses are, so with no wastage it matches the Inventory tab's total to the paisa.
+    inventoryValue: round2(held.reduce((s, a) => s + round2(Math.max(0, a.quantity - (a.quantityWasted ?? 0)) * a.unitCost), 0)),
     openTasks,
     teamSize,
     createdBy: creator?.name ?? null,
   };
+}
+
+/** Names of the people who changed a budget, by user id. */
+async function budgetChangers(history: { changedBy?: Types.ObjectId | null }[] | null | undefined): Promise<Map<string, string>> {
+  const ids = [...new Set((history ?? []).map((h) => (h.changedBy ? String(h.changedBy) : null)).filter((v): v is string => Boolean(v)))];
+  if (!ids.length) return new Map();
+  const users = await User.find({ _id: { $in: ids.map((u) => new Types.ObjectId(u)) } }, { name: 1 }).lean();
+  return new Map(users.map((u) => [String(u._id), (u as { name?: string }).name ?? ""]));
 }
 
 /** Stage-wise planned vs actual spend for all seven stages. */
@@ -211,24 +283,40 @@ export async function listProjectExpenses(projectId: string): Promise<ExpenseRow
   return data.total > data.rows.length ? (await query(data.total)).rows : data.rows;
 }
 
+/**
+ * One assignment on the project's Inventory tab. Units wasted on the project stay in
+ * `quantityHeld` and in `totalCost` (the project keeps that cost), but they can no longer be
+ * returned: `returnable` is what a return can still take.
+ */
+export type ProjectInventoryRow = InventoryUsedRow & {
+  /** Units wasted on the project from this assignment. */
+  quantityWasted: number;
+  /** quantityHeld less quantityWasted, never below zero. */
+  returnable: number;
+};
+
 export async function getProjectInventory(projectId: string): Promise<{
-  rows: InventoryUsedRow[];
-  totals: { held: number; returned: number; value: number };
+  rows: ProjectInventoryRow[];
+  totals: { held: number; returned: number; wasted: number; returnable: number; value: number };
 }> {
   await connectDB();
   const docs = await InventoryAllocation.find({ project: new Types.ObjectId(projectId) })
     .populate("item", "name sku unit")
     .sort({ assignedAt: -1, _id: -1 })
     .lean();
-  const rows = docs.map((a): InventoryUsedRow => {
+  const rows = docs.map((a): ProjectInventoryRow => {
     const item = a.item as unknown as { _id: Types.ObjectId; name: string; sku: string; unit?: string } | null;
+    const quantityWasted = a.quantityWasted ?? 0;
     return {
       id: String(a._id),
       item: item?._id ? { id: String(item._id), name: item.name, sku: item.sku, unit: item.unit ?? "pcs" } : null,
       quantityHeld: a.quantity,
       quantityReturned: a.quantityReturned ?? 0,
       quantityAssigned: a.quantityAssigned,
+      quantityWasted,
+      returnable: roundQty(Math.max(0, a.quantity - quantityWasted)),
       unitCost: a.unitCost,
+      // Wasted units stay charged to the project, so the cost is on the full quantity held.
       totalCost: round2(a.quantity * a.unitCost),
       assignedAt: iso(a.assignedAt)!,
       stage: a.stage as ProjectStage,
@@ -239,6 +327,8 @@ export async function getProjectInventory(projectId: string): Promise<{
     totals: {
       held: rows.reduce((s, r) => s + r.quantityHeld, 0),
       returned: rows.reduce((s, r) => s + r.quantityReturned, 0),
+      wasted: roundQty(rows.reduce((s, r) => s + r.quantityWasted, 0)),
+      returnable: roundQty(rows.reduce((s, r) => s + r.returnable, 0)),
       value: round2(rows.reduce((s, r) => s + r.totalCost, 0)),
     },
   };

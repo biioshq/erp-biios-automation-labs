@@ -126,3 +126,47 @@ export function splitAssignment(item: CostState, quantity: number): AssignmentSp
     newUnexpensedValue: newUnexpensedQty <= QTY_EPS ? 0 : round2(Math.max(0, pools.unexpensedValue - companyAmount)),
   };
 }
+
+export type RemovalSplit = {
+  /** Units already expensed when bought: writing them off books nothing more. */
+  fromExpensed: number;
+  /** Units never expensed: their cost (`unexpensedOut`) has not been booked yet. */
+  fromUnexpensed: number;
+  unexpensedOut: number;
+  /** Stock value removed; null on an untracked item (then it is valued at the average). */
+  value: number | null;
+  newUnitPrice: number;
+  /** The not-yet-expensed lot after the removal (tracked items only). */
+  newUnexpensedQty: number | null;
+  newUnexpensedValue: number | null;
+};
+
+/**
+ * Taking `quantity` units out of storage for good (a write-off or a count correction):
+ * already-expensed units first, each lot at its own cost, as an assignment takes them. The ledger
+ * books exactly this, and the wastage form previews it.
+ */
+export function splitRemoval(item: CostState, quantity: number): RemovalSplit {
+  const qty = roundQty(quantity);
+  const pools = poolsOf(item);
+  // On an untracked item every unit is not expensed yet.
+  const fromExpensed = roundQty(Math.min(qty, pools.expensedQty));
+  const fromUnexpensed = roundQty(qty - fromExpensed);
+  const unexpensedOut =
+    fromUnexpensed >= pools.unexpensedQty - QTY_EPS ? pools.unexpensedValue : round2(fromUnexpensed * pools.unexpensedUnitCost);
+  if (!pools.tracked) {
+    return { fromExpensed, fromUnexpensed, unexpensedOut, value: null, newUnitPrice: item.unitPrice, newUnexpensedQty: null, newUnexpensedValue: null };
+  }
+  const value = round2(round2(fromExpensed * pools.expensedUnitCost) + unexpensedOut);
+  const left = roundQty(Math.max(0, item.available) - qty);
+  const newUnexpensedQty = roundQty(Math.max(0, pools.unexpensedQty - fromUnexpensed));
+  return {
+    fromExpensed,
+    fromUnexpensed,
+    unexpensedOut,
+    value,
+    newUnitPrice: left > QTY_EPS ? roundPrice(Math.max(0, (pools.totalValue - value) / left)) : item.unitPrice,
+    newUnexpensedQty,
+    newUnexpensedValue: newUnexpensedQty <= QTY_EPS ? 0 : round2(Math.max(0, pools.unexpensedValue - unexpensedOut)),
+  };
+}

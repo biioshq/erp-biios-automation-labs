@@ -24,10 +24,11 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { useIsAdmin } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { INCOME_CATEGORIES, PAYMENT_METHODS, labelOf } from "@/lib/constants";
+import { INCOME_INVOICE_FILTER } from "../schemas";
 import { formatDate } from "@/lib/format";
 import { emitDataChanged } from "@/lib/events";
 import type { Paginated } from "@/lib/list-params";
-import type { ProjectOption } from "@/server/lookups";
+import type { BankAccountOption, ProjectOption } from "@/server/lookups";
 import { deleteIncome, fetchIncome } from "../actions";
 import type { IncomeDetail, IncomeRow, IncomeSummary } from "../types";
 import { IncomeForm } from "./income-form";
@@ -43,10 +44,12 @@ export function IncomeView({
   data,
   projects,
   clients,
+  accounts,
 }: {
   data: Paginated<IncomeRow> & { summary: IncomeSummary };
   projects: ProjectOption[];
   clients: string[];
+  accounts: BankAccountOption[];
 }) {
   const isAdmin = useIsAdmin();
   const router = useRouter();
@@ -190,6 +193,18 @@ export function IncomeView({
           ),
       },
       {
+        id: "invoice",
+        meta: { label: "Invoice" },
+        header: "Invoice",
+        enableSorting: false,
+        cell: ({ row }) =>
+          row.original.invoice ? (
+            <span className="whitespace-nowrap font-mono text-xs">{row.original.invoice.number}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">None</span>
+          ),
+      },
+      {
         id: "category",
         accessorKey: "category",
         meta: { label: "Category" },
@@ -275,6 +290,7 @@ export function IncomeView({
         options: [{ value: "none", label: "No project" }, ...projects.map((p) => ({ value: p.value, label: p.label }))],
       },
       { key: "paymentMethod", title: "Payment", options: PAYMENT_METHODS.filter((o) => o.value !== "stock").map((o) => ({ ...o })) },
+      { key: "invoice", title: "Invoice", options: INCOME_INVOICE_FILTER.map((o) => ({ ...o })) },
     ],
     [projects],
   );
@@ -324,6 +340,7 @@ export function IncomeView({
               <StatusBadge tone="neutral" dot={false} className="h-5 px-2 text-[11px]">
                 {labelOf(INCOME_CATEGORIES, r.category)}
               </StatusBadge>
+              {r.invoice ? <span className="font-mono text-[11px] text-muted-foreground">{r.invoice.number}</span> : null}
             </div>
           </div>
         )}
@@ -379,7 +396,7 @@ export function IncomeView({
         }
       >
         {panel?.kind === "new" ? (
-          <IncomeForm projects={projects} clients={clients} onDone={() => setPanel(null)} onCancel={() => setPanel(null)} />
+          <IncomeForm projects={projects} clients={clients} accounts={accounts} onDone={() => setPanel(null)} onCancel={() => setPanel(null)} />
         ) : panel && (loadingDetail || detail?.id !== panel.id) ? (
           <IncomeDetailSkeleton />
         ) : panel?.kind === "edit" && detail ? (
@@ -389,6 +406,7 @@ export function IncomeView({
             income={detail}
             projects={projects}
             clients={clients}
+            accounts={accounts}
             onDone={(id) => {
               setDetail(null);
               setVersion((v) => v + 1);
@@ -405,7 +423,11 @@ export function IncomeView({
         open={deleting !== null}
         onOpenChange={(o) => !o && setDeleting(null)}
         title="Delete this income record?"
-        description={deleting ? `${deleting.number} from ${deleting.client} and its receipt will be removed.` : undefined}
+        description={
+          deleting
+            ? `${deleting.number} from ${deleting.client} and its receipt will be removed.${deleting.invoice ? ` ${deleting.invoice.number} will show this amount as pending again.` : ""}`
+            : undefined
+        }
         onConfirm={() => (deleting ? remove(deleting) : false)}
       />
     </>

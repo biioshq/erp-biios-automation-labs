@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarDays, CreditCard, FolderKanban, Hash, Pencil, Receipt, Trash2, User } from "lucide-react";
+import { CalendarDays, CreditCard, FileText, FolderKanban, Hash, Landmark, Pencil, Receipt, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
@@ -11,6 +11,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { FileTile } from "@/features/files/components/file-preview";
 import { INCOME_CATEGORIES, PAYMENT_METHODS, labelOf } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { BankLineLink } from "@/features/finance/bank-statements/components/bank-line-link";
 import type { IncomeDetail } from "../types";
 
 function Row({ icon: Icon, label, children }: { icon: typeof User; label: string; children: React.ReactNode }) {
@@ -71,6 +72,31 @@ export function IncomeDetailView({
           <Row icon={CreditCard} label="Payment">
             {labelOf(PAYMENT_METHODS, income.paymentMethod)}
           </Row>
+          <Row icon={Landmark} label="Received into">
+            {income.account ? (
+              <span className="font-medium">{income.account.name}</span>
+            ) : (
+              <span className="text-muted-foreground">Default account for {labelOf(PAYMENT_METHODS, income.paymentMethod).toLowerCase()}</span>
+            )}
+            {income.fromBankStatement ? (
+              <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                <span>Matched to a bank statement line</span>
+                <BankLineLink id={income.bankTransactionId} />
+              </div>
+            ) : null}
+          </Row>
+          <Row icon={FileText} label="Invoice">
+            {income.invoice ? (
+              <>
+                <Link href={`/finance/invoices?view=${income.invoice.id}`} className="font-mono text-[13px] font-medium hover:underline">
+                  {income.invoice.number}
+                </Link>
+                <p className="text-xs text-muted-foreground">This payment settles that invoice, so it is not counted as revenue again.</p>
+              </>
+            ) : (
+              <span className="text-muted-foreground">Not linked to an invoice</span>
+            )}
+          </Row>
           <Row icon={Hash} label="Reference">
             {income.reference ? <span className="font-mono text-[13px]">{income.reference}</span> : <span className="text-muted-foreground">None recorded</span>}
           </Row>
@@ -114,7 +140,7 @@ export function IncomeDetailView({
         {canDelete ? (
           <ConfirmDialog
             title="Delete this income record?"
-            description={`${income.number} from ${income.client} and its receipt will be removed. Project and dashboard totals update immediately.`}
+            description={`${income.number} from ${income.client} and its receipt will be removed. Project and dashboard totals update immediately.${income.invoice ? ` ${income.invoice.number} will show this amount as pending again.` : ""}`}
             onConfirm={onDelete}
             trigger={
               <Button variant="ghost" className="mr-auto text-danger hover:bg-danger/10 hover:text-danger">

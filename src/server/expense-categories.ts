@@ -5,10 +5,13 @@ import { cache } from "react";
 import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
 import { AppError, isDuplicateKeyError } from "@/server/errors";
-import { Expense, ExpenseCategorySetting, RecurringExpense } from "@/server/models";
+import { Expense, ExpenseCategorySetting, Liability, RecurringExpense } from "@/server/models";
+import type { ExpenseNature } from "@/lib/constants";
+import { defaultNature } from "@/lib/expense-nature";
 import {
   CUSTOM_CATEGORY_PREFIX,
   canDeleteExpenseCategory,
+  categoryNature,
   canHideExpenseCategory,
   expenseCategoryLabel,
   isBuiltInExpenseCategory,
@@ -25,7 +28,7 @@ import {
 /** The merged list, read fresh. Use inside writes, so a change is seen straight away. */
 export async function loadExpenseCategories(): Promise<ExpenseCategoryOption[]> {
   await connectDB();
-  const settings = await ExpenseCategorySetting.find({}, { value: 1, label: 1, hidden: 1, createdAt: 1, updatedAt: 1 }).lean();
+  const settings = await ExpenseCategorySetting.find({}, { value: 1, label: 1, hidden: 1, nature: 1, createdAt: 1, updatedAt: 1 }).lean();
   return mergeExpenseCategories(settings);
 }
 
@@ -36,6 +39,12 @@ export const getExpenseCategories = cache(loadExpenseCategories);
 export async function getExpenseCategoryLabeler(): Promise<(value: string | null | undefined) => string> {
   const categories = await getExpenseCategories();
   return (value) => expenseCategoryLabel(categories, value);
+}
+
+/** value → direct/indirect setting for the current request (an expense on a project is direct whatever this says). */
+export async function getExpenseCategoryNatures(): Promise<(value: string) => ExpenseNature> {
+  const categories = await getExpenseCategories();
+  return (value) => categoryNature(categories, value);
 }
 
 const categoryError = (message: string, field = "category") => new AppError(message, "invalid", { [field]: [message] });
@@ -122,7 +131,7 @@ export async function createExpenseCategory(label: string, userId?: string): Pro
         await ExpenseCategorySetting.deleteOne({ _id: created._id });
         throw changedAtOnce(label);
       }
-      return { value, label, hidden: false, builtIn: false };
+      return { value, label, hidden: false, builtIn: false, nature: defaultNature(value) };
     } catch (error) {
       if (!isDuplicateKeyError(error)) throw error;
     }
@@ -135,7 +144,7 @@ export async function createExpenseCategory(label: string, userId?: string): Pro
  * categories already have one. Fields are set on every copy of the value, so a duplicate left
  * without the unique index cannot bring an old label back.
  */
-async function writeSetting(category: ExpenseCategoryOption, set: { label?: string; hidden?: boolean }) {
+async function writeSetting(category: ExpenseCategoryOption, set: { label?: string; hidden?: boolean; nature?: ExpenseNature }) {
   if (category.builtIn) {
     await ExpenseCategorySetting.updateMany({ value: category.value }, { $set: set });
     if (!(await ExpenseCategorySetting.exists({ value: category.value }))) {
@@ -179,24 +188,41 @@ export async function setExpenseCategoryHidden(value: string, hidden: boolean): 
   return { ...category, hidden };
 }
 
-export type ExpenseCategoryUsage = Record<string, { expenses: number; schedules: number }>;
+/**
+ * Direct or indirect for expenses of this category that are not on a project. Stored on the
+ * category's setting, which is what the accounting engine reads for the P&L split.
+ */
+export async function setExpenseCategoryNature(value: string, nature: ExpenseNature): Promise<ExpenseCategoryOption> {
+  const categories = await loadExpenseCategories();
+  const category = findCategory(categories, value);
+  await writeSetting(category, { nature });
+  return { ...category, nature };
+}
 
-/** How many expenses and schedules use each category, every record counted (salaries too). */
+export type ExpenseCategoryUsage = Record<string, { expenses: number; schedules: number; liabilities: number }>;
+
+/** Liabilities that book their cost to an expense category: an expense not paid yet (source "accrued"). */
+const ACCRUED = { "source.mode": "accrued" } as const;
+
+/** How many expenses, schedules and accrued liabilities use each category, every record counted (salaries too). */
 export async function getExpenseCategoryUsage(): Promise<ExpenseCategoryUsage> {
   await connectDB();
-  const [expenses, schedules] = await Promise.all([
+  const [expenses, schedules, liabilities] = await Promise.all([
     Expense.aggregate<{ _id: string; n: number }>([{ $group: { _id: "$category", n: { $sum: 1 } } }]),
     RecurringExpense.aggregate<{ _id: string; n: number }>([{ $group: { _id: "$category", n: { $sum: 1 } } }]),
+    Liability.aggregate<{ _id: string; n: number }>([{ $match: ACCRUED }, { $group: { _id: "$source.category", n: { $sum: 1 } } }]),
   ]);
   const usage: ExpenseCategoryUsage = {};
-  for (const e of expenses) if (e._id) (usage[e._id] ??= { expenses: 0, schedules: 0 }).expenses = e.n;
-  for (const s of schedules) if (s._id) (usage[s._id] ??= { expenses: 0, schedules: 0 }).schedules = s.n;
+  const entry = (value: string) => (usage[value] ??= { expenses: 0, schedules: 0, liabilities: 0 });
+  for (const e of expenses) if (e._id) entry(e._id).expenses = e.n;
+  for (const s of schedules) if (s._id) entry(s._id).schedules = s.n;
+  for (const l of liabilities) if (l._id) entry(l._id).liabilities = l.n;
   return usage;
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** Only a custom category that no expense and no schedule uses. Otherwise hide it, and history stays as it is. */
+/** Only a custom category that no expense, schedule or accrued liability uses. Otherwise hide it, and history stays as it is. */
 export async function deleteExpenseCategory(value: string): Promise<{ value: string }> {
   const categories = await loadExpenseCategories();
   const category = findCategory(categories, value);
@@ -205,15 +231,19 @@ export async function deleteExpenseCategory(value: string): Promise<{ value: str
   }
   // Hidden first, so no new record can take it between the count and the delete.
   if (!category.hidden) await writeSetting(category, { hidden: true });
-  const [expenses, schedules] = await Promise.all([
+  const [expenses, schedules, liabilities] = await Promise.all([
     Expense.countDocuments({ category: value }),
     RecurringExpense.countDocuments({ category: value }),
+    Liability.countDocuments({ ...ACCRUED, "source.category": value }),
   ]);
-  if (expenses || schedules) {
+  if (expenses || schedules || liabilities) {
     if (!category.hidden) await writeSetting(category, { hidden: false });
-    const uses = [expenses ? plural(expenses, "expense", "expenses") : "", schedules ? plural(schedules, "recurring schedule", "recurring schedules") : ""]
-      .filter(Boolean)
-      .join(" and ");
+    const parts = [
+      expenses ? plural(expenses, "expense", "expenses") : "",
+      schedules ? plural(schedules, "recurring schedule", "recurring schedules") : "",
+      liabilities ? plural(liabilities, "accrued liability", "accrued liabilities") : "",
+    ].filter(Boolean);
+    const uses = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
     throw new AppError(`${category.label} is used by ${uses}. Hide it instead, so those records keep their category.`, "conflict");
   }
   await ExpenseCategorySetting.deleteMany({ value });

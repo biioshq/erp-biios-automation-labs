@@ -216,9 +216,11 @@ export async function budgetUsage(filter: { status?: string[] } = {}, options: S
 }
 
 /**
- * Value of stock that projects hold, per item id: what was charged to the
- * projects (each open assignment's remaining quantity × the cost it was
- * assigned at, rounded per expense like the expense itself), net of returns.
+ * Value charged to projects for stock still assigned to them, per item id:
+ * each open assignment's remaining quantity × the cost it was assigned at,
+ * rounded per expense like the expense itself, net of returns. Units wasted on
+ * a project stay in it (the project keeps that cost), so this is not the value
+ * of stock in use: for that, leave out quantityWasted (returnableOf).
  * Not allocated × today's average: later purchases change the average but not
  * what the projects were charged. Archived items are left out, as everywhere.
  */

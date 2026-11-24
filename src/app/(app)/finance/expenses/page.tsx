@@ -7,7 +7,7 @@ import { Money } from "@/components/shared/money";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { parseListParams } from "@/lib/list-params";
 import { formatNumber } from "@/lib/format";
-import { getProjectOptions, getVendorNames } from "@/server/lookups";
+import { getBankAccountOptions, getProjectOptions, getVendorNames } from "@/server/lookups";
 import { listExpenses } from "@/features/finance/expenses/queries";
 import { EXPENSE_FILTER_KEYS, EXPENSE_SORT_KEYS } from "@/features/finance/expenses/schemas";
 import { ExpensesView } from "@/features/finance/expenses/components/expenses-view";
@@ -25,7 +25,13 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/finance
     sortable: EXPENSE_SORT_KEYS,
     defaultSort: { id: "date", desc: true },
   });
-  const [data, projects, vendors, categories] = await Promise.all([listExpenses(params), getProjectOptions(), getVendorNames(), getExpenseCategories()]);
+  const [data, projects, vendors, categories, accounts] = await Promise.all([
+    listExpenses(params),
+    getProjectOptions(),
+    getVendorNames(),
+    getExpenseCategories(),
+    getBankAccountOptions(),
+  ]);
 
   return (
     <Page>
@@ -53,7 +59,7 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/finance
       />
       {/* Members' totals and rows leave out salaries; without this the gap to the dashboard has no reason. */}
       <SalariesHiddenNote className="-mt-2" />
-      <ExpensesView data={data} projects={projects} vendors={vendors} categories={categories} />
+      <ExpensesView data={data} projects={projects} vendors={vendors} categories={categories} accounts={accounts} />
     </Page>
   );
 }

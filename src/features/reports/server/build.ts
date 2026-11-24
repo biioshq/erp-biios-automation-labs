@@ -8,6 +8,10 @@ import { buildGstReport } from "./builders/gst";
 import { buildIncomeReport } from "./builders/income";
 import { buildInventoryReport } from "./builders/inventory";
 import { buildProjectReport } from "./builders/project";
+import { buildDepreciationReport, buildFixedAssetReport } from "./builders/assets";
+import { buildCashBudgetReport, buildProjectFinancialsReport } from "./builders/planning";
+import { buildEquityReport, buildLiabilitiesReport, buildPayablesReport, buildReceivablesReport } from "./builders/position";
+import { buildBalanceSheetReport, buildCashFlowReport, buildProfitLossReport, buildTrialBalanceReport } from "./builders/statements";
 import type { ReportData, ReportFilters, ReportSection } from "../types";
 
 export function buildReport(type: ReportType, filters: ReportFilters): Promise<ReportData> {
@@ -26,6 +30,34 @@ export function buildReport(type: ReportType, filters: ReportFilters): Promise<R
       return buildInventoryReport(filters);
     case "ca":
       return buildCaReport(filters);
+    case "balance_sheet":
+      return buildBalanceSheetReport(filters);
+    case "profit_loss":
+      return buildProfitLossReport(filters);
+    case "cash_flow":
+      return buildCashFlowReport(filters);
+    case "trial_balance":
+      return buildTrialBalanceReport(filters);
+    case "fixed_assets":
+      return buildFixedAssetReport(filters);
+    case "depreciation":
+      return buildDepreciationReport(filters);
+    case "receivables":
+      return buildReceivablesReport(filters);
+    case "payables":
+      return buildPayablesReport(filters);
+    case "liabilities":
+      return buildLiabilitiesReport(filters);
+    case "equity":
+      return buildEquityReport(filters);
+    case "project_financials":
+      return buildProjectFinancialsReport(filters);
+    case "cash_budget":
+      return buildCashBudgetReport(filters);
+    case "scenario":
+      // What-if scenarios are exported from their own page (src/features/analytics/scenarios/server/export.ts).
+      // parseReportRequest refuses the type, so this is reached only by a caller that skipped it.
+      throw new Error("What-if scenarios are not built here. Export them from the scenario page.");
   }
 }
 

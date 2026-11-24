@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { emitDataChanged } from "@/lib/events";
@@ -22,13 +23,16 @@ import {
   fetchExpenseCategoryUsage,
   renameExpenseCategoryAction,
   setExpenseCategoryHiddenAction,
+  setExpenseCategoryNatureAction,
 } from "../category-actions";
+import { EXPENSE_NATURES, type ExpenseNature } from "@/lib/constants";
 
-const usageText = (u: { expenses: number; schedules: number } | undefined) => {
-  if (!u || (!u.expenses && !u.schedules)) return "Not used yet";
+const usageText = (u: ExpenseCategoryUsage[string] | undefined) => {
+  if (!u || (!u.expenses && !u.schedules && !u.liabilities)) return "Not used yet";
   const parts = [];
   if (u.expenses) parts.push(`${formatNumber(u.expenses)} ${u.expenses === 1 ? "expense" : "expenses"}`);
   if (u.schedules) parts.push(`${formatNumber(u.schedules)} ${u.schedules === 1 ? "schedule" : "schedules"}`);
+  if (u.liabilities) parts.push(`${formatNumber(u.liabilities)} accrued ${u.liabilities === 1 ? "liability" : "liabilities"}`);
   return parts.join(" · ");
 };
 
@@ -52,7 +56,7 @@ export function ExpenseCategoriesButton({ categories }: { categories: ExpenseCat
             <DialogTitle>Expense categories</DialogTitle>
             <DialogDescription>
               A new name shows on every expense that uses the category. Hidden categories are not offered for new expenses; older ones keep
-              them.
+              them. Direct or indirect decides how overheads are classed: an expense on a project is always direct.
             </DialogDescription>
           </DialogHeader>
           {open ? <CategoriesManager categories={categories} /> : null}
@@ -155,7 +159,7 @@ function CategoriesManager({ categories }: { categories: ExpenseCategoryOption[]
       <ul className="-mx-1 min-h-0 flex-1 divide-y overflow-y-auto rounded-lg border px-1" aria-label="Expense categories">
         {categories.map((c) => {
           const used = usage?.[c.value];
-          const inUse = Boolean(used && (used.expenses || used.schedules));
+          const inUse = Boolean(used && (used.expenses || used.schedules || used.liabilities));
           const isEditing = editing?.value === c.value;
           const rowBusy = busy !== null && busy.endsWith(`:${c.value}`);
           return (
@@ -207,6 +211,35 @@ function CategoriesManager({ categories }: { categories: ExpenseCategoryOption[]
                         In use, so it cannot be deleted. Hide it instead.
                       </p>
                     ) : null}
+                    <ToggleGroup
+                      type="single"
+                      variant="outline"
+                      size="sm"
+                      spacing={0}
+                      value={c.nature}
+                      disabled={busy !== null}
+                      onValueChange={(v) => {
+                        if (!v || v === c.nature) return;
+                        const nature = v as ExpenseNature;
+                        run(
+                          `nature:${c.value}`,
+                          () => setExpenseCategoryNatureAction({ value: c.value, nature }),
+                          `${c.label} is now ${nature === "direct" ? "a direct cost" : "an indirect cost"}`,
+                        );
+                      }}
+                      aria-label={`${c.label}: direct or indirect`}
+                      className="mt-1.5"
+                    >
+                      {EXPENSE_NATURES.map((n) => (
+                        <ToggleGroupItem
+                          key={n.value}
+                          value={n.value}
+                          className="h-6 px-2.5 text-[11px] max-md:h-8 data-[state=on]:bg-brand/10 data-[state=on]:text-brand-ink"
+                        >
+                          {n.label}
+                        </ToggleGroupItem>
+                      ))}
+                    </ToggleGroup>
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5">
                     <Button

@@ -223,6 +223,14 @@ const ITEM_FIELDS: CsvField[] = [
     example: "5",
     accepts: isNumber,
   },
+  {
+    key: "leadTimeDays",
+    label: "Lead time (days)",
+    aliases: ["lead time", "lead time days", "lead days", "delivery days", "days to deliver", "supplier lead time"],
+    hint: "Whole days from ordering to arrival, 0 to 365",
+    example: "7",
+    accepts: isNumber,
+  },
   { key: "vendor", label: "Vendor", aliases: ["supplier", "supplier name", "party", "party name", "vendor name"], example: "Sharma Hardware" },
   { key: "location", label: "Location", aliases: ["bin", "rack", "store", "shelf", "storage", "warehouse"], example: "Rack A2" },
   {

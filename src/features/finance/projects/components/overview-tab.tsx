@@ -12,6 +12,7 @@ import type { ProjectDetail } from "../types";
 import { BudgetBar } from "./project-budget-bar";
 import { StageChart } from "./stage-chart";
 import { TimelineItem } from "./timeline-item";
+import { ProjectFinances } from "./project-finances";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 
 /** Tighter tiles on phones so two fit across at 360px. */
@@ -44,8 +45,15 @@ export async function OverviewTab({ project }: { project: ProjectDetail }) {
           tone={project.remaining < 0 ? "danger" : "success"}
           hint={project.remaining < 0 ? "Over budget" : "Left to spend"}
         />
-        <StatCard className={KPI} label="Income received" value={<Money value={project.income} compact />} icon={WalletCards} tone="success" hint={project.income > 0 ? "From the client" : "None recorded yet"} />
-        <StatCard className={KPI} label="Inventory value used" value={<Money value={project.inventoryValue} compact />} icon={Boxes} tone="info" hint="Stock the project holds" />
+        <StatCard
+          className={KPI}
+          label="Payments received"
+          value={<Money value={project.finance.revenue.received} compact />}
+          icon={WalletCards}
+          tone="success"
+          hint={project.finance.revenue.received > 0 ? "From the client" : "None recorded yet"}
+        />
+        <StatCard className={KPI} label="Stock held" value={<Money value={project.inventoryValue} compact />} icon={Boxes} tone="info" hint="At assignment cost, wasted units left out" />
         <StatCard
           className={KPI}
           label="Team"
@@ -61,6 +69,8 @@ export async function OverviewTab({ project }: { project: ProjectDetail }) {
         />
       </div>
       <SalariesHiddenNote className="-mt-3" />
+
+      <ProjectFinances project={project} />
 
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-4 sm:space-y-6 lg:col-span-2">

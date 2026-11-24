@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { ChartColumn, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { Money } from "@/components/shared/money";
 import { parseListParams } from "@/lib/list-params";
 import { formatNumber } from "@/lib/format";
-import { getProjectOptions } from "@/server/lookups";
+import { getBankAccountOptions, getProjectOptions } from "@/server/lookups";
 import { getClientNames, listIncome } from "@/features/finance/income/queries";
 import { INCOME_FILTER_KEYS, INCOME_SORT_KEYS } from "@/features/finance/income/schemas";
 import { IncomeView } from "@/features/finance/income/components/income-view";
@@ -22,7 +22,7 @@ export default async function IncomePage({ searchParams }: PageProps<"/finance/i
     sortable: INCOME_SORT_KEYS,
     defaultSort: { id: "date", desc: true },
   });
-  const [data, projects, clients] = await Promise.all([listIncome(params), getProjectOptions(), getClientNames()]);
+  const [data, projects, clients, accounts] = await Promise.all([listIncome(params), getProjectOptions(), getClientNames(), getBankAccountOptions()]);
   const filtered = Boolean(params.q || Object.keys(params.filters).length || params.from || params.to);
 
   return (
@@ -37,14 +37,21 @@ export default async function IncomePage({ searchParams }: PageProps<"/finance/i
           </>
         }
         actions={
-          <Button asChild>
-            <Link href="?new=1" scroll={false}>
-              <Plus /> Record income
-            </Link>
-          </Button>
+          <>
+            <Button asChild variant="outline">
+              <Link href="/finance/income/summary">
+                <ChartColumn /> Summary
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="?new=1" scroll={false}>
+                <Plus /> Record income
+              </Link>
+            </Button>
+          </>
         }
       />
-      <IncomeView data={data} projects={projects} clients={clients} />
+      <IncomeView data={data} projects={projects} clients={clients} accounts={accounts} />
     </Page>
   );
 }

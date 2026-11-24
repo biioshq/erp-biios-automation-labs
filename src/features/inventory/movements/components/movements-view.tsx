@@ -17,7 +17,7 @@ import { DataTable, DataTableColumnHeader, type FilterDef } from "@/components/d
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
 import { MovementTypeBadge } from "@/components/shared/status-badge";
-import { MOVEMENT_TYPES, PROJECT_STAGES, labelOf } from "@/lib/constants";
+import { MOVEMENT_TYPES, PROJECT_STAGES, WASTAGE_REASONS, labelOf } from "@/lib/constants";
 import { formatDate, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Paginated } from "@/lib/list-params";
@@ -25,9 +25,59 @@ import type { MovementRow } from "../types";
 
 type Option = { value: string; label: string };
 
+/**
+ * The change to available stock, signed. Moves of location and wastage on a project leave storage
+ * unchanged, so their units show unsigned and muted.
+ */
+function QuantityChange({ m, className }: { m: MovementRow; className?: string }) {
+  const delta = m.availableDelta;
+  return (
+    <span className={cn("tabular whitespace-nowrap font-semibold", delta > 0 ? "text-success" : delta === 0 ? "text-muted-foreground" : undefined, className)}>
+      {delta > 0 ? "+" : delta < 0 ? "-" : ""}
+      {formatNumber(m.quantity)} <span className="text-xs font-normal text-muted-foreground">{m.item.unit}</span>
+    </span>
+  );
+}
+
+/** Wastage reason and source, so a write-off reads without opening anything. */
+const wastageNote = (m: MovementRow) =>
+  m.wastage ? `${labelOf(WASTAGE_REASONS, m.wastage.reason)}, ${m.wastage.from === "project" ? "in use on the project" : "from storage"}` : null;
+
+/** Where a movement happened besides the stock room: a project, a vendor, a location move. */
+function MovementWhere({ m }: { m: MovementRow }) {
+  if (m.relocation) {
+    return (
+      <span className="block max-w-56 truncate text-xs text-muted-foreground" title={`${m.relocation.from ?? "No location"} to ${m.relocation.to ?? "No location"}`}>
+        {m.relocation.from ?? "No location"} → <span className="text-foreground">{m.relocation.to ?? "No location"}</span>
+      </span>
+    );
+  }
+  const note = wastageNote(m);
+  if (!m.project) {
+    return (
+      <div className="min-w-0">
+        <span className="block truncate text-xs text-muted-foreground">{m.vendor ?? "Stock room"}</span>
+        {note ? <p className="truncate text-xs text-danger">{note}</p> : null}
+      </div>
+    );
+  }
+  return (
+    <div className="min-w-36">
+      <Link href={`/finance/projects/${m.project.id}?tab=inventory`} className="flex items-center gap-1.5 truncate text-sm hover:underline">
+        <span className="size-2 shrink-0 rounded-full" style={{ background: m.project.color }} />
+        {m.project.name}
+      </Link>
+      {note ? (
+        <p className="pl-3.5 text-xs text-danger">{note}</p>
+      ) : m.stage ? (
+        <p className="pl-3.5 text-xs text-muted-foreground">{labelOf(PROJECT_STAGES, m.stage)}</p>
+      ) : null}
+    </div>
+  );
+}
+
 /** One movement as a card on phones: date, item, type, signed quantity and where it went. */
 function MovementMobileRow({ m }: { m: MovementRow }) {
-  const incoming = m.availableDelta > 0;
   return (
     <div className="space-y-1.5">
       <div className="flex items-start justify-between gap-3">
@@ -41,21 +91,23 @@ function MovementMobileRow({ m }: { m: MovementRow }) {
           )}
           <p className="truncate font-mono text-[11px] text-muted-foreground">{m.item.sku}</p>
         </div>
-        <span className={cn("tabular shrink-0 text-base font-semibold whitespace-nowrap", incoming ? "text-success" : "text-danger")}>
-          {incoming ? "+" : "-"}
-          {formatNumber(m.quantity)} <span className="text-xs font-normal text-muted-foreground">{m.item.unit}</span>
-        </span>
+        <QuantityChange m={m} className={cn("shrink-0 text-base", m.availableDelta < 0 && "text-danger")} />
       </div>
+      {wastageNote(m) ? <p className="text-xs text-danger">{wastageNote(m)}</p> : null}
       <div className="flex items-center justify-between gap-3">
         <MovementTypeBadge type={m.type} />
         <span className="tabular text-xs whitespace-nowrap text-muted-foreground">{formatDate(m.date)}</span>
       </div>
       <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        {m.project ? (
-          <Link href={`/finance/projects/${m.project.id}`} className="flex min-w-0 items-center gap-1.5 hover:underline">
+        {m.relocation ? (
+          <span className="min-w-0 truncate">
+            {m.relocation.from ?? "No location"} → {m.relocation.to ?? "No location"}
+          </span>
+        ) : m.project ? (
+          <Link href={`/finance/projects/${m.project.id}?tab=inventory`} className="flex min-w-0 items-center gap-1.5 hover:underline">
             <span className="size-2 shrink-0 rounded-full" style={{ background: m.project.color }} />
             <span className="truncate">{m.project.name}</span>
-            {m.stage ? <span className="shrink-0">· {labelOf(PROJECT_STAGES, m.stage)}</span> : null}
+            {m.wastage ? null : m.stage ? <span className="shrink-0">· {labelOf(PROJECT_STAGES, m.stage)}</span> : null}
           </Link>
         ) : (
           <span className="min-w-0 truncate">{m.vendor ?? "Stock room"}</span>
@@ -66,7 +118,7 @@ function MovementMobileRow({ m }: { m: MovementRow }) {
   );
 }
 
-/** The stock history table: every purchase, assignment, return and adjustment, newest first. */
+/** The stock history table: every purchase, assignment, return, adjustment, write-off and location move, newest first. */
 export function MovementsView({
   data,
   projects,
@@ -119,34 +171,14 @@ export function MovementsView({
         accessorKey: "quantity",
         meta: { label: "Quantity", align: "right" },
         header: ({ column }) => <DataTableColumnHeader column={column} title="Quantity" align="right" />,
-        cell: ({ row }) => {
-          const incoming = row.original.availableDelta > 0;
-          return (
-            <span className={cn("tabular whitespace-nowrap font-semibold", incoming && "text-success")}>
-              {incoming ? "+" : "-"}
-              {formatNumber(row.original.quantity)} <span className="font-normal text-muted-foreground">{row.original.item.unit}</span>
-            </span>
-          );
-        },
+        cell: ({ row }) => <QuantityChange m={row.original} />,
       },
       {
         id: "project",
-        meta: { label: "Project" },
-        header: "Project",
+        meta: { label: "Project or place" },
+        header: "Project or place",
         enableSorting: false,
-        cell: ({ row }) => {
-          const { project, stage, vendor } = row.original;
-          if (!project) return <span className="text-xs text-muted-foreground">{vendor ?? "Stock room"}</span>;
-          return (
-            <div className="min-w-36">
-              <Link href={`/finance/projects/${project.id}`} className="flex items-center gap-1.5 truncate text-sm hover:underline">
-                <span className="size-2 shrink-0 rounded-full" style={{ background: project.color }} />
-                {project.name}
-              </Link>
-              {stage ? <p className="pl-3.5 text-xs text-muted-foreground">{labelOf(PROJECT_STAGES, stage)}</p> : null}
-            </div>
-          );
-        },
+        cell: ({ row }) => <MovementWhere m={row.original} />,
       },
       {
         id: "unitCost",
@@ -253,7 +285,7 @@ export function MovementsView({
         <EmptyState
           icon={ArrowLeftRight}
           title="No stock movements yet"
-          description="Every purchase, assignment, return and adjustment is recorded here with the balance it left behind."
+          description="Every purchase, assignment, return, adjustment, write-off and location move is recorded here with the balance it left behind."
           action={
             <Button asChild>
               <Link href="/inventory/purchase">

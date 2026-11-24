@@ -44,7 +44,10 @@ export function creditFor(held: HeldItem, quantity: number) {
   let credit = 0;
   for (const lot of held.lots) {
     if (remaining <= 1e-9) break;
-    const take = roundQty(Math.min(remaining, lot.quantity));
+    // Wasted units cannot come back, but they stay in the expense, so the credit is still worked
+    // out on the lot's full quantity.
+    const take = roundQty(Math.min(remaining, lot.returnable));
+    if (take <= 0) continue;
     remaining = roundQty(remaining - take);
     credit += round2(lot.quantity * lot.unitCost) - round2(roundQty(lot.quantity - take) * lot.unitCost);
   }
@@ -284,7 +287,7 @@ export function ReturnView({
                     </p>
                     <div className="mt-2 divide-y">
                       <ImpactRow label="Available" before={item.available} after={item.available + quantity} format={(n) => `${formatNumber(n)} ${item.unit}`} tone="good" />
-                      <ImpactRow label="Allocated" before={item.allocated} after={item.allocated - quantity} format={(n) => `${formatNumber(n)} ${item.unit}`} />
+                      <ImpactRow label="In use on projects" before={item.allocated} after={item.allocated - quantity} format={(n) => `${formatNumber(n)} ${item.unit}`} />
                       {impact ? (
                         <ImpactRow label={`${project.name} spend`} before={impact.spent} after={round2(impact.spent - credit)} format={(n) => <Money value={n} />} tone="good" />
                       ) : null}

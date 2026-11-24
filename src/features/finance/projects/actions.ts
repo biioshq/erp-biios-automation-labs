@@ -4,6 +4,7 @@ import { Types } from "mongoose";
 import { defineAction } from "@/server/action";
 import { runAtomic } from "@/server/db";
 import { AppError, notFound } from "@/server/errors";
+import type { SessionUser } from "@/server/auth/session";
 import { Expense, FileModel, Income, InventoryAllocation, InventoryMovement, Project, ProjectMember, RecurringExpense, Task } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
 import { removeFile } from "@/features/files/server";
@@ -31,6 +32,7 @@ function toDocument(v: ProjectFormValues) {
     description: v.description,
     status: v.status,
     budget: round2(v.budget),
+    contractValue: v.contractValue === undefined ? undefined : round2(v.contractValue),
     stageBudgets,
     startDate: v.startDate ? fromDateInput(v.startDate) : undefined,
     endDate: v.endDate ? fromDateInput(v.endDate) : undefined,
@@ -48,20 +50,45 @@ export const createProject = defineAction(
   { revalidate: REVALIDATE, message: "Project created" },
 );
 
+/**
+ * The update for an edited project. When the budget changes, the budget it had is pushed onto
+ * budgetHistory first (older entries are never rewritten), so the original budget stays known.
+ */
+function projectUpdate(doc: ReturnType<typeof toDocument>, previousBudget: number, note: string | undefined, user: SessionUser) {
+  const unset = {
+    ...(doc.client ? {} : { client: 1 }),
+    ...(doc.description ? {} : { description: 1 }),
+    ...(doc.startDate ? {} : { startDate: 1 }),
+    ...(doc.endDate ? {} : { endDate: 1 }),
+    ...(doc.contractValue === undefined ? { contractValue: 1 } : {}),
+  };
+  // Cleared fields are unset, never written as undefined.
+  const set = Object.fromEntries(Object.entries(doc).filter(([, v]) => v !== undefined));
+  const changed = round2(previousBudget) !== doc.budget;
+  const entry = { budget: previousBudget, changedAt: new Date(), changedBy: new Types.ObjectId(user.id), ...(note ? { note } : {}) };
+  return {
+    $set: set,
+    ...(Object.keys(unset).length ? { $unset: unset } : {}),
+    ...(changed ? { $push: { budgetHistory: entry } } : {}),
+  };
+}
+
 export const updateProject = defineAction(
   projectFormSchema.and(projectIdSchema),
-  async (input) => {
+  async (input, user) => {
+    const current = await Project.findById(input.id, { budget: 1 }).lean();
+    if (!current) throw notFound("The project");
     const doc = toDocument(input);
-    const unset = {
-      ...(doc.client ? {} : { client: 1 }),
-      ...(doc.description ? {} : { description: 1 }),
-      ...(doc.startDate ? {} : { startDate: 1 }),
-      ...(doc.endDate ? {} : { endDate: 1 }),
-    };
-    // Cleared fields are unset, never written as undefined.
-    const set = Object.fromEntries(Object.entries(doc).filter(([, v]) => v !== undefined));
-    const result = await Project.updateOne({ _id: input.id }, { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
-    if (!result.matchedCount) throw notFound("The project");
+    // Matched on the budget the form was opened with (or, without one, the budget read above). If
+    // someone else changed it since, saving would quietly put the old figure back and push theirs
+    // into the history, so this save stops and asks to reload instead.
+    const expected = input.expectedBudget ?? current.budget;
+    const result = await Project.updateOne({ _id: input.id, budget: expected }, projectUpdate(doc, expected, input.budgetNote, user));
+    if (!result.matchedCount) {
+      const exists = await Project.exists({ _id: input.id });
+      if (!exists) throw notFound("The project");
+      throw new AppError("Someone changed this project's budget while you were editing. Close the form, open it again and save once more.", "conflict");
+    }
     return { id: input.id };
   },
   { revalidate: REVALIDATE, message: "Project updated" },

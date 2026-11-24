@@ -27,7 +27,7 @@ import { formatDate, formatPercent } from "@/lib/format";
 import { deleteProject, setProjectStatus } from "../actions";
 import { PROJECT_SORTS } from "../schemas";
 import { BUDGET_TEXT_CLASS, budgetTone, deadlineLabel } from "../utils";
-import type { ProjectRow } from "../types";
+import type { ProjectFinanceRow, ProjectRow } from "../types";
 import { BudgetBar } from "./project-budget-bar";
 import { ProjectCard } from "./project-card";
 import { ProjectSheet } from "./project-sheet";
@@ -57,7 +57,7 @@ export function ProjectsView({
   layout,
   hasAny,
 }: {
-  rows: ProjectRow[];
+  rows: ProjectFinanceRow[];
   /** The project named by ?edit=<id>, loaded even when filters hide it from the list. */
   editTarget: ProjectRow | null;
   clients: string[];
@@ -109,7 +109,7 @@ export function ProjectsView({
     return true;
   }
 
-  const columns = useMemo<ColumnDef<ProjectRow>[]>(
+  const columns = useMemo<ColumnDef<ProjectFinanceRow>[]>(
     () => [
       {
         id: "name",
@@ -143,11 +143,70 @@ export function ProjectsView({
         cell: ({ row }) => <ProjectStatusBadge status={row.original.status} />,
       },
       {
+        id: "startDate",
+        accessorFn: (r) => r.startDate ?? "",
+        meta: { label: "Start date" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Start" />,
+        cell: ({ row }) => (row.original.startDate ? <span className="whitespace-nowrap">{formatDate(row.original.startDate)}</span> : <span className="text-muted-foreground">-</span>),
+      },
+      {
+        id: "endDate",
+        accessorFn: (r) => r.endDate ?? "",
+        meta: { label: "Expected completion" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Expected completion" />,
+        cell: ({ row }) => {
+          const d = deadlineLabel(row.original.endDate, row.original.status);
+          return row.original.endDate ? (
+            <div className="whitespace-nowrap">
+              <p className="text-sm">{formatDate(row.original.endDate)}</p>
+              {d ? <p className={cn("text-xs", d.late ? "text-danger" : "text-muted-foreground")}>{d.text}</p> : null}
+            </div>
+          ) : (
+            <span className="text-muted-foreground">-</span>
+          );
+        },
+      },
+      {
+        id: "contractValue",
+        accessorFn: (r) => r.contractValue ?? -1,
+        meta: { label: "Project value", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Project value" align="right" />,
+        cell: ({ row }) => (row.original.contractValue === null ? <span className="text-muted-foreground">Not set</span> : <Money value={row.original.contractValue} />),
+      },
+      {
+        id: "originalBudget",
+        accessorKey: "originalBudget",
+        meta: { label: "Original budget", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Original budget" align="right" />,
+        cell: ({ row }) => <Money value={row.original.originalBudget} className="text-muted-foreground" />,
+      },
+      {
         id: "budget",
         accessorKey: "budget",
-        meta: { label: "Budget", align: "right" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Budget" align="right" />,
+        meta: { label: "Revised budget", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Revised budget" align="right" />,
         cell: ({ row }) => <Money value={row.original.budget} />,
+      },
+      {
+        id: "revenue",
+        accessorFn: (r) => r.finance.revenue.revenue,
+        meta: { label: "Revenue", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Revenue" align="right" />,
+        cell: ({ row }) => <Money value={row.original.finance.revenue.revenue} />,
+      },
+      {
+        id: "received",
+        accessorFn: (r) => r.finance.revenue.received,
+        meta: { label: "Received", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Received" align="right" />,
+        cell: ({ row }) => <Money value={row.original.finance.revenue.received} />,
+      },
+      {
+        id: "outstanding",
+        accessorFn: (r) => r.finance.revenue.outstanding,
+        meta: { label: "Outstanding", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Outstanding" align="right" />,
+        cell: ({ row }) => <Money value={row.original.finance.revenue.outstanding} className={row.original.finance.revenue.overdue > 0 ? "text-danger" : undefined} />,
       },
       {
         id: "spent",
@@ -177,23 +236,6 @@ export function ProjectsView({
                 {row.original.budget > 0 ? formatPercent(row.original.usage) : "-"}
               </span>
             </div>
-          );
-        },
-      },
-      {
-        id: "endDate",
-        accessorFn: (r) => r.endDate ?? "",
-        meta: { label: "End date" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="End date" />,
-        cell: ({ row }) => {
-          const d = deadlineLabel(row.original.endDate, row.original.status);
-          return row.original.endDate ? (
-            <div className="whitespace-nowrap">
-              <p className="text-sm">{formatDate(row.original.endDate)}</p>
-              {d ? <p className={cn("text-xs", d.late ? "text-danger" : "text-muted-foreground")}>{d.text}</p> : null}
-            </div>
-          ) : (
-            <span className="text-muted-foreground">-</span>
           );
         },
       },
@@ -365,7 +407,7 @@ export function ProjectsView({
               </div>
             </div>
           )}
-          initialHidden={["client"]}
+          initialHidden={["received", "remaining"]}
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">

@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useForm, useWatch, type FieldPath } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { FolderKanban, Percent, ReceiptText, StickyNote } from "lucide-react";
+import { CalendarRange, FolderKanban, HandCoins, Percent, ReceiptText, StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   ComboboxField,
   DateField,
@@ -22,29 +25,42 @@ import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
 import { cn } from "@/lib/utils";
 import { applyFieldErrors } from "@/lib/action-result";
-import { PAYMENT_METHODS, PROJECT_STAGES } from "@/lib/constants";
+import { DEPARTMENTS, PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
 import { DEFAULT_EXPENSE_CATEGORIES, expenseCategoryChoices, type ExpenseCategoryOption } from "@/lib/expense-categories";
 import { toDateInput } from "@/lib/dates";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { gstGrandTotal, isInterState, splitGst } from "@/lib/gst";
 import { LOW_CONFIDENCE, type OcrResponse } from "@/lib/ocr";
 import { GST_RATES } from "@/config/company";
 import { emitDataChanged } from "@/lib/events";
-import type { ProjectOption } from "@/server/lookups";
+import type { BankAccountOption, ProjectOption } from "@/server/lookups";
 import type { FileDTO } from "@/features/files/types";
 import { createExpense, discardUnsavedReceipt, updateExpense } from "../actions";
-import { expenseFormSchema, type ExpenseFormInput, type ExpenseFormValues } from "../schemas";
+import { EXPENSE_PAYMENT_MODES, PAYING_METHODS, expenseFormSchema, type ExpenseFormInput, type ExpenseFormValues, type ExpensePaymentMode } from "../schemas";
 import type { ExpenseDetail } from "../types";
 import { ReceiptPanel } from "./receipt-panel";
+import { accountChoices } from "./record-payment-dialog";
 import { formValidation } from "@/components/forms/form-options";
 import { useIsAdmin } from "@/components/current-user";
+import { BankLineLink } from "@/features/finance/bank-statements/components/bank-line-link";
 
 type Confidence = Partial<Record<FieldPath<ExpenseFormInput>, number>>;
 
-const PAYMENT_OPTIONS = PAYMENT_METHODS.filter((m) => m.value !== "stock");
+const PAYMENT_OPTIONS = PAYING_METHODS;
 const TAX_FIELDS = new Set(["gst.cgst", "gst.sgst", "gst.igst"]);
+
+/** The payment mode an existing expense is shown with; none for one whose payments are recorded one by one. */
+function modeOf(expense?: ExpenseDetail | null): ExpensePaymentMode | undefined {
+  if (!expense) return "full";
+  if (expense.payment.explicit || expense.bankMatched) return undefined;
+  return expense.paymentMethod === "credit" ? "none" : "full";
+}
 
 function defaultsFrom(expense?: ExpenseDetail | null, projectId?: string): ExpenseFormInput {
   const g = expense?.gst;
+  const mode = modeOf(expense);
+  // An old "On credit" expense without a due date is due on its own date: shown as such, so saving keeps that meaning.
+  const dueDate = expense?.dueDate ? toDateInput(expense.dueDate) : mode === "none" && expense ? toDateInput(expense.date) : undefined;
   return {
     vendor: expense?.vendor ?? "",
     vendorAddress: expense?.vendorAddress ?? "",
@@ -70,6 +86,13 @@ function defaultsFrom(expense?: ExpenseDetail | null, projectId?: string): Expen
     },
     receiptId: expense?.receipt?.id ?? undefined,
     ocr: expense?.ocr ?? undefined,
+    payment: mode,
+    paidAmount: undefined,
+    accountId: expense?.account?.id ?? undefined,
+    dueDate,
+    department: expense?.department ?? undefined,
+    prepaidFrom: expense?.prepaid ? toDateInput(expense.prepaid.from) : undefined,
+    prepaidTo: expense?.prepaid ? toDateInput(expense.prepaid.to) : undefined,
   };
 }
 
@@ -82,6 +105,7 @@ export function ExpenseForm({
   projects,
   vendors,
   categories = DEFAULT_EXPENSE_CATEGORIES,
+  accounts = [],
   defaultProjectId,
   onDone,
   onCancel,
@@ -89,6 +113,8 @@ export function ExpenseForm({
   expense?: ExpenseDetail | null;
   projects: ProjectOption[];
   vendors: string[];
+  /** Open bank and cash accounts for "Paid from" (getBankAccountOptions). Without them the method's default account is used. */
+  accounts?: BankAccountOption[];
   /** Built-in and custom categories (getExpenseCategories); hidden ones are offered only as the record's current one. */
   categories?: ExpenseCategoryOption[];
   defaultProjectId?: string;
@@ -146,6 +172,32 @@ export function ExpenseForm({
   // GST: the amount follows taxable value + taxes whenever a taxable value is entered.
   const gst = useWatch({ control, name: "gst" });
   const projectId = useWatch({ control, name: "projectId" });
+  const payment = useWatch({ control, name: "payment" });
+  const amountNow = useWatch({ control, name: "amount" });
+  const paidNow = useWatch({ control, name: "paidAmount" });
+  const [prepaidOn, setPrepaidOn] = useState(Boolean(expense?.prepaid));
+  const accountOptions = useMemo(() => accountChoices(accounts), [accounts]);
+  const explicit = Boolean(expense?.payment.explicit);
+  // Paid as a bank statement line shows: the payment and the amount stay as the line says.
+  const bankMatched = Boolean(expense?.bankMatched);
+
+  function setMode(next: string) {
+    if (!next) return;
+    const mode = next as ExpensePaymentMode;
+    setValue("payment", mode, { shouldDirty: true });
+    // "On credit" is how Not paid yet is stored; the other modes need a real method.
+    if (mode === "none") setValue("paymentMethod", "credit");
+    else if (getValues("paymentMethod") === "credit") setValue("paymentMethod", "bank_transfer");
+    if (mode !== "partial") setValue("paidAmount", undefined);
+  }
+
+  function togglePrepaid(on: boolean) {
+    setPrepaidOn(on);
+    if (!on) {
+      setValue("prepaidFrom", undefined, { shouldDirty: true });
+      setValue("prepaidTo", undefined, { shouldDirty: true });
+    }
+  }
   const taxable = gst?.taxableAmount ?? 0;
   const grandTotal = gstGrandTotal(gst ?? {});
   const amountLocked = taxable > 0;
@@ -214,7 +266,13 @@ export function ExpenseForm({
       put("amount", f.totalAmount);
       if (!f.taxableAmount.value) setValue("gst.grandTotal", f.totalAmount.value);
     }
-    if (f.paymentMethod.value && PAYMENT_OPTIONS.some((o) => o.value === f.paymentMethod.value)) put("paymentMethod", f.paymentMethod);
+    if (f.paymentMethod.value === "credit" && !explicit) {
+      setMode("none");
+      next.paymentMethod = f.paymentMethod.confidence;
+    } else if (f.paymentMethod.value && PAYMENT_OPTIONS.some((o) => o.value === f.paymentMethod.value)) {
+      put("paymentMethod", f.paymentMethod);
+      if (getValues("payment") === "none") setValue("payment", "full");
+    }
     setValue("ocr", {
       overall: result.ocr.overallConfidence,
       source: result.ocr.source,
@@ -248,6 +306,12 @@ export function ExpenseForm({
   }
 
   const onSubmit = form.handleSubmit((values) => {
+    // With the switch on, both days are needed; the schema alone would save the expense without them.
+    if (prepaidOn && (!values.prepaidFrom || !values.prepaidTo)) {
+      if (!values.prepaidFrom) form.setError("prepaidFrom", { message: "Pick the first day covered" });
+      if (!values.prepaidTo) form.setError("prepaidTo", { message: "Pick the last day covered" });
+      return;
+    }
     startTransition(async () => {
       const result = expense ? await updateExpense({ ...values, id: expense.id }) : await createExpense(values);
       if (!result.ok) {
@@ -328,10 +392,23 @@ export function ExpenseForm({
               currency
               required
               confidence={c("amount")}
-              disabled={amountLocked}
-              description={amountLocked ? "Taxable value + GST" : "Total paid, tax included"}
+              disabled={amountLocked || bankMatched}
+              description={bankMatched ? "As on the bank statement line" : amountLocked ? "Taxable value + GST" : "Bill total, tax included"}
             />
             <DateField control={control} name="date" label="Expense date" required confidence={c("date")} />
+            {expense?.capitalAsset ? (
+              <p className="rounded-lg border bg-card px-4 py-3 text-sm sm:col-span-2">
+                This expense paid for the fixed asset{" "}
+                <Link href={`/finance/assets/fixed?view=${expense.capitalAsset.id}`} className="font-medium text-brand-ink hover:underline">
+                  {expense.capitalAsset.name} ({expense.capitalAsset.code})
+                </Link>
+                .{" "}
+                <span className="text-muted-foreground">
+                  Its date stays {formatDate(expense.date)} and its amount can&apos;t go below the asset&apos;s cost of{" "}
+                  {formatCurrency(expense.capitalAsset.purchaseCost, { exact: true })}. To change either, change or unlink the asset first.
+                </span>
+              </p>
+            ) : null}
             <SelectField
               control={control}
               name="category"
@@ -342,11 +419,11 @@ export function ExpenseForm({
             />
             <SelectField
               control={control}
-              name="paymentMethod"
-              label="Payment method"
-              required
-              options={PAYMENT_OPTIONS}
-              confidence={c("paymentMethod")}
+              name="department"
+              label="Department"
+              options={DEPARTMENTS}
+              clearable
+              placeholder="Not set"
             />
             <TextField
               control={control}
@@ -356,6 +433,107 @@ export function ExpenseForm({
               className="sm:col-span-2"
             />
           </div>
+
+          <FormSection
+            title="Payment"
+            description={
+              explicit
+                ? "Payments on this expense are recorded one by one."
+                : bankMatched
+                  ? "Paid as the bank statement shows."
+                : payment === "partial"
+                  ? "What was paid on the expense date. Record later payments from the expense or Payment tracking."
+                  : payment === "none"
+                    ? "Saved as on credit. Record payments from the expense or Payment tracking when you pay."
+                    : "Paid on the expense date."
+            }
+            icon={<HandCoins />}
+          >
+            {explicit && expense ? (
+              <div className="space-y-4">
+                <p className="rounded-lg border bg-card px-4 py-3 text-sm">
+                  {formatCurrency(expense.payment.paid, { exact: true })} paid in {expense.payments.length}{" "}
+                  {expense.payments.length === 1 ? "payment" : "payments"}
+                  {expense.payment.outstanding > 0 ? `, ${formatCurrency(expense.payment.outstanding, { exact: true })} still owed.` : ", nothing owed."}{" "}
+                  <span className="text-muted-foreground">
+                    Record or delete payments from the expense drawer or Payment tracking. The amount can&apos;t go below what is paid.
+                  </span>
+                </p>
+                {expense.payment.outstanding > 0 ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <DateField control={control} name="dueDate" label="Rest due on" clearable />
+                  </div>
+                ) : null}
+              </div>
+            ) : bankMatched && expense ? (
+              <p className="rounded-lg border bg-card px-4 py-3 text-sm">
+                Paid in full on {formatDate(expense.date)} by {labelOf(PAYMENT_METHODS, expense.paymentMethod).toLowerCase()}
+                {expense.account ? ` from ${expense.account.name}` : ""}.{" "}
+                <span className="text-muted-foreground">
+                  It is matched to a bank statement line, so its payment and amount stay as the statement shows.
+                </span>{" "}
+                <BankLineLink id={expense.bankTransactionId} label="Unmatch it in Bank statements" />
+              </p>
+            ) : (
+              <div className="space-y-4">
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  value={payment ?? "full"}
+                  onValueChange={setMode}
+                  className="w-full flex-wrap sm:flex-nowrap"
+                  aria-label="Payment status"
+                >
+                  {EXPENSE_PAYMENT_MODES.map((m) => (
+                    <ToggleGroupItem key={m.value} value={m.value} className="min-w-28 flex-1 max-md:h-10">
+                      {m.label}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {payment === "partial" ? (
+                    <NumberField
+                      control={control}
+                      name="paidAmount"
+                      label="Amount paid now"
+                      currency
+                      required
+                      description={
+                        amountNow && paidNow && paidNow < amountNow
+                          ? `${formatCurrency(amountNow - paidNow, { exact: true })} left to pay`
+                          : "Paid on the expense date"
+                      }
+                    />
+                  ) : null}
+                  {payment !== "none" ? (
+                    <>
+                      <SelectField
+                        control={control}
+                        name="paymentMethod"
+                        label="Payment method"
+                        required
+                        options={PAYMENT_OPTIONS}
+                        confidence={c("paymentMethod")}
+                      />
+                      <SelectField
+                        control={control}
+                        name="accountId"
+                        label="Paid from"
+                        options={accountOptions}
+                        clearable
+                        disabled={!accountOptions.length}
+                        placeholder={accountOptions.length ? "Default for the method" : "No accounts set up"}
+                        description={accountOptions.length ? undefined : "Bank accounts are set up under Assets, Cash & bank."}
+                      />
+                    </>
+                  ) : null}
+                  {payment === "partial" || payment === "none" ? (
+                    <DateField control={control} name="dueDate" label={payment === "none" ? "Due on" : "Rest due on"} required />
+                  ) : null}
+                </div>
+              </div>
+            )}
+          </FormSection>
 
           <FormSection
             title="Project & stage"
@@ -439,7 +617,21 @@ export function ExpenseForm({
             />
           </FormSection>
 
-          <FormSection title="Notes" icon={<StickyNote />}>
+          <FormSection
+            title="Prepaid for a period"
+            description="For a payment that covers time ahead, such as a yearly insurance premium or software licence. The profit and loss spreads the cost over these days; the payment itself still counts on its date."
+            icon={<CalendarRange />}
+            actions={<Switch checked={prepaidOn} onCheckedChange={togglePrepaid} aria-label="Prepaid for a period" />}
+          >
+            {prepaidOn ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <DateField control={control} name="prepaidFrom" label="First day covered" required />
+                <DateField control={control} name="prepaidTo" label="Last day covered" required />
+              </div>
+            ) : null}
+          </FormSection>
+
+          <FormSection title="Remarks" icon={<StickyNote />}>
             <TextareaField control={control} name="notes" placeholder="Anything the accountant should know" rows={3} />
           </FormSection>
         </div>

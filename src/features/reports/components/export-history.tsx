@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { REPORT_FORMATS, labelOf } from "@/lib/constants";
 import { formatDateTime, formatNumber, formatRelative } from "@/lib/format";
-import { metaOf } from "../meta";
+import { reportIcon } from "../meta";
 import { DownloadAgainLink } from "./download-again";
 import type { ReportHistoryRow } from "../types";
 
@@ -60,14 +60,15 @@ export function ExportHistory({ rows, ownOnly = false }: { rows: ReportHistoryRo
             </thead>
             <tbody>
               {rows.map((r) => {
-                const meta = metaOf(r.type);
+                // Scenario exports are not report cards, so the icon comes from the icon map, not the card list.
+                const Icon = reportIcon(r.type);
                 return (
                   <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
-                        {meta ? (
+                        {Icon ? (
                           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-surface text-muted-foreground">
-                            <meta.icon className="size-4" />
+                            <Icon className="size-4" />
                           </span>
                         ) : null}
                         <span className="font-medium">{r.title}</span>

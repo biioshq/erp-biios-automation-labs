@@ -8,10 +8,12 @@ import {
   getExpenseCategoryUsage,
   renameExpenseCategory,
   setExpenseCategoryHidden,
+  setExpenseCategoryNature,
 } from "@/server/expense-categories";
 import {
   expenseCategoryCreateSchema,
   expenseCategoryHiddenSchema,
+  expenseCategoryNatureSchema,
   expenseCategoryRenameSchema,
   expenseCategoryValueOnlySchema,
 } from "./schemas";
@@ -34,6 +36,13 @@ export const renameExpenseCategoryAction = defineAction(expenseCategoryRenameSch
 export const setExpenseCategoryHiddenAction = defineAction(
   expenseCategoryHiddenSchema,
   async ({ value, hidden }) => setExpenseCategoryHidden(value, hidden),
+  { revalidate: REVALIDATE, role: "admin" },
+);
+
+/** Direct or indirect: changes how every expense of the category without a project is classed, past ones included. */
+export const setExpenseCategoryNatureAction = defineAction(
+  expenseCategoryNatureSchema,
+  async ({ value, nature }) => setExpenseCategoryNature(value, nature),
   { revalidate: REVALIDATE, role: "admin" },
 );
 

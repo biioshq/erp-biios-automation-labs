@@ -31,6 +31,9 @@ function defaultsFrom(project?: ProjectRow | null): ProjectFormInput {
     description: project?.description ?? "",
     status: project?.status ?? "planning",
     budget: project?.budget ?? (undefined as unknown as number),
+    contractValue: project?.contractValue ?? undefined,
+    budgetNote: "",
+    expectedBudget: project ? project.budget : undefined,
     startDate: project?.startDate ? toDateInput(project.startDate) : undefined,
     endDate: project?.endDate ? toDateInput(project.endDate) : undefined,
     color: project?.color ?? PROJECT_COLORS[0].value,
@@ -60,6 +63,7 @@ export function ProjectForm({
   const { control, register, setValue, formState } = form;
 
   const budget = useWatch({ control, name: "budget" }) ?? 0;
+  const budgetChanged = Boolean(project) && typeof budget === "number" && round2(budget) !== round2(project?.budget ?? 0);
   const stageBudgets = useWatch({ control, name: "stageBudgets" });
   const color = useWatch({ control, name: "color" });
   const allocated = round2(PROJECT_STAGES.reduce((sum, s) => sum + (stageBudgets?.[s.value] ?? 0), 0));
@@ -100,11 +104,32 @@ export function ProjectForm({
           <TextareaField control={control} name="description" label="Description" rows={3} placeholder="Scope, deliverables, anything the team should know" className="sm:col-span-2" />
         </div>
 
-        <FormSection title="Budget and schedule" description="The budget is the cap every expense is measured against.">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <NumberField control={control} name="budget" label="Total budget" currency required className="sm:col-span-1" />
+        <FormSection title="Budget and schedule" description="The budget is the cap every expense is measured against. When you change it, the earlier budget is kept in the budget history.">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <NumberField control={control} name="budget" label="Total budget" currency required />
+            <NumberField
+              control={control}
+              name="contractValue"
+              label="Total project value"
+              currency
+              description="What the client pays for the whole project. Leave empty if not agreed yet."
+            />
+            {budgetChanged ? (
+              <TextField
+                control={control}
+                name="budgetNote"
+                label="Reason for the budget change"
+                placeholder="e.g. Client added two more rooms"
+                description={
+                  <>
+                    The budget was <Money value={project?.budget ?? 0} />. That figure is kept in the history.
+                  </>
+                }
+                className="sm:col-span-2"
+              />
+            ) : null}
             <DateField control={control} name="startDate" label="Start date" clearable />
-            <DateField control={control} name="endDate" label="End date" clearable />
+            <DateField control={control} name="endDate" label="Expected completion" clearable />
           </div>
         </FormSection>
 

@@ -43,6 +43,15 @@ export const projectFormSchema = z
     description: optionalText(4000),
     status: z.enum(valuesOf(PROJECT_STATUSES), { error: "Pick a status" }),
     budget: money,
+    /** What the client pays for the whole project, when agreed. Empty = not recorded. */
+    contractValue: optionalMoney,
+    /** Why the budget changed; kept with the old budget in the budget history. Edit only. */
+    budgetNote: optionalText(500),
+    /**
+     * The budget the edit form was opened with. The update only applies while the stored budget
+     * is still this figure, so a form opened before someone else changed the budget cannot revert it.
+     */
+    expectedBudget: z.number().finite().optional(),
     startDate: optionalDateInput,
     endDate: optionalDateInput,
     color: z.string().regex(/^#[0-9a-f]{6}$/i, "Pick a colour"),

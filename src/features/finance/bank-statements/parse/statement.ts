@@ -1,0 +1,264 @@
+/**
+ * Turns the rows of a statement into transactions and checks every one against the running
+ * balance. Client-safe and pure: the page runs it again when the admin corrects a column.
+ *
+ * The balance is the statement's own proof of each line: balance = previous balance - withdrawal
+ * + deposit, to the paisa. A line that only adds up with its amount on the other side was put in
+ * the wrong column (or carries the wrong Dr / Cr mark) and is turned round; a line that adds up
+ * neither way is flagged, and the check carries on from the balance the statement shows.
+ */
+
+import type { ColumnRole, GridRow, ParsedStatement, StatementLine } from "../types";
+import { isHeaderLike } from "./columns";
+import { readAmount, readBalance, readDate, readSide, type AmountCell } from "./values";
+
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+/** Half a paisa: balances and amounts are both printed to the paisa. */
+const TOLERANCE = 0.005;
+
+/** At most this many lines are read from one statement. */
+export const MAX_STATEMENT_LINES = 3000;
+
+type Columns = Partial<Record<ColumnRole, number>>;
+
+function columnsOf(mapping: (ColumnRole | null)[]): Columns {
+  const out: Columns = {};
+  mapping.forEach((role, i) => {
+    if (role && out[role] === undefined) out[role] = i;
+  });
+  return out;
+}
+
+const cell = (cells: string[], i: number | undefined) => (i === undefined ? "" : (cells[i] ?? "").replace(/\s+/g, " ").trim());
+
+const OPENING_RE = /opening balance|balance b\/?f|brought forward|balance forward|^b\/f$/i;
+const CLOSING_RE = /closing balance|balance c\/?f|carried forward/i;
+
+/** A line read from a row, before the balance check. `side` is null when only the balance can tell. */
+type Draft = Omit<StatementLine, "withdrawal" | "deposit" | "check"> & { amount: number; side: "dr" | "cr" | null; fromSign: boolean };
+
+type RowResult = { draft: Draft } | { continuation: string } | { opening: number } | { skip: string } | null;
+
+function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
+  const cells = row.cells;
+  if (isHeaderLike(cells)) return null;
+  const dateRaw = cell(cells, cols.date) || cell(cells, cols.valueDate);
+  const date = readDate(dateRaw) ?? (cols.date !== undefined ? readDate(cell(cells, cols.valueDate)) : null);
+  const narration = cell(cells, cols.narration);
+  const reference = cell(cells, cols.reference);
+  const amountCells = [cols.withdrawal, cols.deposit, cols.amount, cols.balance].map((i) => cell(cells, i));
+  const anyAmount = amountCells.some((c) => {
+    const a = readAmount(c);
+    return a !== null && a !== "invalid";
+  });
+
+  if (!date) {
+    const text = [narration, reference].filter(Boolean).join(" ");
+    if (OPENING_RE.test(cells.join(" ")) && cols.balance !== undefined) {
+      const b = readBalance(cell(cells, cols.balance), cell(cells, cols.balanceSide));
+      if (typeof b === "number") return { opening: b };
+    }
+    // A narration that wrapped onto the next row of the file: no date and no amounts.
+    if (text && !anyAmount && !dateRaw && prevExists && row.near !== false) return { continuation: text };
+    // Summary rows under the table ("Opening Balance, Dr Count..." then the figures) are not lines.
+    const summary = CLOSING_RE.test(cells.join(" ")) || (dateRaw !== "" && readAmount(dateRaw) !== "invalid");
+    if (anyAmount && !summary && (dateRaw || narration)) {
+      return { skip: dateRaw ? `The date "${dateRaw}" could not be read` : "No date on this row" };
+    }
+    return null;
+  }
+
+  if (OPENING_RE.test(narration) && cols.balance !== undefined) {
+    const w = readAmount(cell(cells, cols.withdrawal));
+    const d = readAmount(cell(cells, cols.deposit));
+    const a = readAmount(cell(cells, cols.amount));
+    const noMoney = [w, d, a].every((x) => x === null || (x !== "invalid" && x.value === 0));
+    const b = readBalance(cell(cells, cols.balance), cell(cells, cols.balanceSide));
+    if (noMoney && typeof b === "number") return { opening: b };
+  }
+
+  let amount = 0;
+  let side: "dr" | "cr" | null = null;
+  let fromSign = false;
+  const issues: string[] = [];
+  if (cols.withdrawal !== undefined || cols.deposit !== undefined) {
+    const w = readAmount(cell(cells, cols.withdrawal));
+    const d = readAmount(cell(cells, cols.deposit));
+    if (w === "invalid" || d === "invalid") return { skip: "The amount could not be read" };
+    const wv = w?.value ?? 0;
+    const dv = d?.value ?? 0;
+    if (wv > 0 && dv > 0) return { skip: "This row has both a withdrawal and a deposit" };
+    if (wv > 0) {
+      // A minus in the withdrawal column ("-500.00") is still a withdrawal.
+      amount = wv;
+      side = "dr";
+    } else if (dv > 0) {
+      amount = dv;
+      side = "cr";
+    }
+    // Only one of the two columns mapped: the sign tells the side.
+    if (cols.withdrawal === undefined || cols.deposit === undefined) {
+      const only = (w ?? d) as AmountCell | null;
+      if (only) {
+        side = only.side ?? (only.negative ? "dr" : cols.withdrawal !== undefined ? "dr" : "cr");
+        fromSign = true;
+      }
+    }
+  } else {
+    const a = readAmount(cell(cells, cols.amount));
+    if (a === "invalid") return { skip: "The amount could not be read" };
+    amount = a?.value ?? 0;
+    side = a?.side ?? readSide(cell(cells, cols.drcr));
+    if (!side && a) {
+      side = a.negative ? "dr" : null;
+      fromSign = true;
+    }
+  }
+  if (amount <= 0) return anyAmount || narration ? { skip: "No amount on this row" } : null;
+
+  const balanceCell = cell(cells, cols.balance);
+  const balance = readBalance(balanceCell, cell(cells, cols.balanceSide));
+  if (balance === "invalid") issues.push(`The balance "${balanceCell}" could not be read`);
+  const valueDate = readDate(cell(cells, cols.valueDate)) ?? undefined;
+  return {
+    draft: {
+      line: row.line,
+      page: row.page,
+      date,
+      valueDate: valueDate && valueDate !== date ? valueDate : undefined,
+      narration,
+      reference: reference || undefined,
+      balance: typeof balance === "number" ? balance : null,
+      issues,
+      amount,
+      side,
+      fromSign,
+    },
+  };
+}
+
+/** Runs the balance check over drafts in date order. Returns the lines and how many reconcile. */
+function reconcile(drafts: Draft[], opening: number | null): { lines: StatementLine[]; ok: number } {
+  let prev = opening;
+  let ok = 0;
+  const lines = drafts.map((d): StatementLine => {
+    let side = d.side;
+    let check: StatementLine["check"] = "unchecked";
+    const issues = [...d.issues];
+    if (d.balance !== null && prev !== null) {
+      const asDr = round2(prev - d.amount);
+      const asCr = round2(prev + d.amount);
+      const fitsDr = Math.abs(d.balance - asDr) < TOLERANCE;
+      const fitsCr = Math.abs(d.balance - asCr) < TOLERANCE;
+      if ((side === "dr" && fitsDr) || (side === "cr" && fitsCr)) check = "ok";
+      else if (side === null && (fitsDr || fitsCr)) {
+        side = fitsDr ? "dr" : "cr";
+        check = "ok";
+      } else if (fitsDr || fitsCr) {
+        side = fitsDr ? "dr" : "cr";
+        check = "fixed";
+        issues.push(
+          side === "dr"
+            ? "Shown as a deposit, but the balance went down by this amount, so it is read as a withdrawal"
+            : "Shown as a withdrawal, but the balance went up by this amount, so it is read as a deposit",
+        );
+      } else {
+        check = "mismatch";
+        const expected = side === "cr" ? asCr : asDr;
+        issues.push(`The balance does not follow from the line before: expected ${expected.toFixed(2)}, the statement shows ${d.balance.toFixed(2)}`);
+      }
+      if (check !== "mismatch") ok++;
+    }
+    if (side === null) {
+      side = "dr";
+      issues.push("The statement does not say whether this is a withdrawal or a deposit; it is read as a withdrawal. Check it");
+    } else if (check === "unchecked" && d.fromSign) {
+      issues.push("No balance to confirm the side; it is taken from the sign of the amount");
+    }
+    if (d.balance !== null) prev = d.balance;
+    else if (prev !== null) prev = round2(prev + (side === "cr" ? d.amount : -d.amount));
+    return {
+      line: d.line,
+      page: d.page,
+      date: d.date,
+      valueDate: d.valueDate,
+      narration: d.narration,
+      reference: d.reference,
+      withdrawal: side === "dr" ? d.amount : 0,
+      deposit: side === "cr" ? d.amount : 0,
+      balance: d.balance,
+      check,
+      issues,
+    };
+  });
+  return { lines, ok };
+}
+
+/** Reads the transactions under the header row with the given column roles. */
+export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (ColumnRole | null)[]): ParsedStatement {
+  const cols = columnsOf(mapping);
+  const drafts: Draft[] = [];
+  const skipped: ParsedStatement["skipped"] = [];
+  let stated: number | null = null;
+  for (const row of grid.slice(headerIndex + 1)) {
+    if (drafts.length >= MAX_STATEMENT_LINES) {
+      skipped.push({ line: row.line, reason: `Only the first ${MAX_STATEMENT_LINES} lines of a statement are read. Upload the rest as another file` });
+      break;
+    }
+    const r = readRow(row, cols, drafts.length > 0);
+    if (!r) continue;
+    if ("draft" in r) drafts.push(r.draft);
+    else if ("continuation" in r) {
+      const last = drafts[drafts.length - 1]!;
+      last.narration = `${last.narration} ${r.continuation}`.trim().slice(0, 1000);
+    } else if ("opening" in r) {
+      if (drafts.length === 0) stated = r.opening;
+    } else skipped.push({ line: row.line, reason: r.skip });
+  }
+
+  // Oldest first. A statement listed newest first is turned round; one day only is tried both ways.
+  const first = drafts[0]?.date ?? "";
+  const last = drafts[drafts.length - 1]?.date ?? "";
+  let newestFirst = first > last;
+  let ordered = newestFirst ? [...drafts].reverse() : drafts;
+  let result = reconcile(ordered, newestFirst ? null : stated);
+  if (first === last && drafts.length > 1) {
+    const reversed = reconcile([...drafts].reverse(), null);
+    if (reversed.ok > result.ok) {
+      newestFirst = true;
+      ordered = [...drafts].reverse();
+      result = reversed;
+    }
+  }
+  const lines = result.lines;
+
+  const firstLine = lines[0];
+  const opening =
+    !newestFirst && stated !== null
+      ? stated
+      : firstLine && firstLine.balance !== null
+        ? round2(firstLine.balance + firstLine.withdrawal - firstLine.deposit)
+        : null;
+  const withBalance = [...lines].reverse().find((l) => l.balance !== null);
+  let closing: number | null = null;
+  if (withBalance) {
+    // Lines after the last printed balance move it on.
+    const after = lines.slice(lines.indexOf(withBalance) + 1);
+    closing = round2(after.reduce((s, l) => s + l.deposit - l.withdrawal, withBalance.balance!));
+  }
+  return {
+    lines,
+    skipped,
+    from: lines.length ? lines.reduce((m, l) => (l.date < m ? l.date : m), lines[0]!.date) : null,
+    to: lines.length ? lines.reduce((m, l) => (l.date > m ? l.date : m), lines[0]!.date) : null,
+    opening,
+    closing,
+    openingStated: !newestFirst && stated !== null,
+    totalDeposits: round2(lines.reduce((s, l) => s + l.deposit, 0)),
+    totalWithdrawals: round2(lines.reduce((s, l) => s + l.withdrawal, 0)),
+    newestFirst,
+    fixed: lines.filter((l) => l.check === "fixed").length,
+    mismatches: lines.filter((l) => l.check === "mismatch").length,
+    unchecked: lines.filter((l) => l.check === "unchecked").length,
+  };
+}

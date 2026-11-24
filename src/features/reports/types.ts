@@ -41,7 +41,15 @@ export type ReportData = ReportSection & {
   csvPrimaryOnly?: boolean;
   /** The summary is already the first table, so files do not repeat it as a block. */
   hideSummaryBlock?: boolean;
+  /**
+   * A financial statement: its headings and totals are part of the statement, so the CSV keeps
+   * subtotal rows too (a register's CSV drops them so a column adds up once).
+   */
+  statement?: boolean;
 };
+
+/** How the Profit & Loss lays out its columns: one total, or a column per month, quarter or year. */
+export type PlColumns = "total" | "month" | "quarter" | "year";
 
 /** The normalised filters every report accepts. */
 export type ReportFilters = {
@@ -60,6 +68,12 @@ export type ReportFilters = {
   /** Movement ledger passthrough filters. */
   movementType: string[];
   item: string[];
+  /** Profit & Loss only: one total column or a column per sub-period. Older log rows lack it. */
+  columns?: PlColumns;
+  /** Expense report only: the Expenses list's payment status, direct / indirect and department filters. Older log rows lack them. */
+  status?: string[];
+  nature?: string[];
+  department?: string[];
 };
 
 export type ReportPreviewSection = ReportSection & { totalRows: number };

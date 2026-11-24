@@ -5,7 +5,7 @@ import { connectDB } from "@/server/db";
 import { InventoryCategory, InventoryItem, Project } from "@/server/models";
 import { dateRangeFilter, fromDateInput, toDateInput } from "@/lib/dates";
 import { formatDate, round2 } from "@/lib/format";
-import { EXPENSE_SOURCES, INCOME_CATEGORIES, MOVEMENT_TYPES, PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
+import { DEPARTMENTS, EXPENSE_NATURES, EXPENSE_SOURCES, INCOME_CATEGORIES, MOVEMENT_TYPES, PAYMENT_METHODS, PAYMENT_STATUSES, PROJECT_STAGES, labelOf } from "@/lib/constants";
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import type { ReportColumn, ReportFilters, ReportRow, ReportTotals, ColumnType } from "../types";
 
@@ -87,7 +87,7 @@ export async function describeFilters(
     vendor?: boolean;
     project?: boolean;
     /** The list filters this report applies, named in the subtitle so a filtered file says so. */
-    passthrough?: ("stage" | "paymentMethod" | "source" | "movementType" | "item")[];
+    passthrough?: ("stage" | "paymentMethod" | "source" | "movementType" | "item" | "status" | "nature" | "department")[];
   } = {},
 ): Promise<string> {
   await connectDB();
@@ -110,6 +110,11 @@ export async function describeFilters(
   if (pass.has("paymentMethod") && f.paymentMethod.length) parts.push(`Payment: ${named(PAYMENT_METHODS, f.paymentMethod)}`);
   if (pass.has("source") && f.source.length) parts.push(`Source: ${named(EXPENSE_SOURCES, f.source)}`);
   if (pass.has("movementType") && f.movementType.length) parts.push(`Type: ${named(MOVEMENT_TYPES, f.movementType)}`);
+  if (pass.has("status") && f.status?.length) parts.push(`Payment status today: ${named(PAYMENT_STATUSES, f.status)}`);
+  if (pass.has("nature") && f.nature?.length) parts.push(`Nature: ${named(EXPENSE_NATURES, f.nature)}`);
+  if (pass.has("department") && f.department?.length) {
+    parts.push(`Department: ${list(f.department.map((d) => (d === "none" ? "No department" : labelOf(DEPARTMENTS, d as (typeof DEPARTMENTS)[number]["value"]))))}`);
+  }
   if (pass.has("item") && f.item.length) {
     const items = await InventoryItem.find({ _id: { $in: objectIds(f.item) } }, { name: 1 }).lean();
     parts.push(`Items: ${list(items.map((i) => i.name))}`);

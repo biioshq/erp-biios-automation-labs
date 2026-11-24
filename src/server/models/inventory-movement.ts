@@ -48,6 +48,11 @@ const inventoryMovementSchema = new Schema(
       quantity: { type: Number, required: true },
     },
     note: { type: String, trim: true, maxlength: 1000 },
+    /**
+     * Purchase: opening stock entered as already on hand (not bought then, no expense). Missing on
+     * older records, which carry the note OPENING_ON_HAND_NOTE instead (src/lib/inventory-opening.ts).
+     */
+    openingOnHand: { type: Boolean },
     /** Wastage: why, where and who is answerable. */
     wastage: {
       type: new Schema(

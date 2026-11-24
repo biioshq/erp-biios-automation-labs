@@ -1,5 +1,19 @@
 import type { FileDTO } from "@/features/files/types";
-import type { ExpenseSource, PaymentMethod, ProjectStage } from "@/lib/constants";
+import type { Department, ExpenseNature, ExpenseSource, PaymentMethod, PaymentStatus, ProjectStage } from "@/lib/constants";
+
+/** A payment status, or "stock" for generated stock assignments, which move no money. */
+export type ExpensePaymentStatus = PaymentStatus | "stock";
+
+/** Paid and outstanding as of today (paymentState in src/lib/payments.ts). */
+export type ExpensePaymentSummary = {
+  status: ExpensePaymentStatus;
+  paid: number;
+  outstanding: number;
+  /** When the unpaid part is due (the due date, or the expense date); null when nothing is owed. */
+  dueOn: string | null;
+  /** True when payments are recorded one by one; false for the old meaning (paid on its date, or On credit). */
+  explicit: boolean;
+};
 
 /** A row in the expenses table. */
 export type ExpenseRow = {
@@ -30,6 +44,27 @@ export type ExpenseRow = {
   recurring: { id: string; name: string } | null;
   /** The employee a salary expense is paid to. */
   employee: { id: string; name: string } | null;
+  department: Department | null;
+  /** Direct (on a project, or a direct category) or indirect (overhead). */
+  nature: ExpenseNature;
+  payment: ExpensePaymentSummary;
+};
+
+/** One payment recorded against an expense. */
+export type ExpensePaymentRecord = {
+  id: string;
+  date: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  account: { id: string; name: string } | null;
+  reference: string | null;
+  note: string | null;
+  /** Matched to a bank statement line: removed through Bank statements, not here. */
+  fromBankStatement: boolean;
+  /** The statement line it is matched to (/finance/bank-statements?line=<id>), for admins. */
+  bankTransactionId: string | null;
+  createdBy: { id: string; name: string } | null;
+  createdAt: string | null;
 };
 
 export type ExpenseGst = {
@@ -58,6 +93,23 @@ export type ExpenseDetail = ExpenseRow & {
   createdBy: { id: string; name: string } | null;
   createdAt: string;
   updatedAt: string;
+  dueDate: string | null;
+  /** "Paid from", for an expense paid in full on its date. */
+  account: { id: string; name: string } | null;
+  /** Payments recorded one by one, oldest first. Empty when `payment.explicit` is false. */
+  payments: ExpensePaymentRecord[];
+  prepaid: { from: string; to: string } | null;
+  /** The loan whose interest this is (source "liability_interest"). */
+  liability: { id: string; name: string } | null;
+  /** The fixed asset this expense paid for. */
+  capitalAsset: { id: string; name: string; code: string; purchaseCost: number } | null;
+  /** Created from, or matched to, a bank statement line as paid on its date: its payment and amount stay as the line says. */
+  bankMatched: boolean;
+  /**
+   * The statement line the expense itself came from or was matched to, loan interest included
+   * (the repayment's line). Payments carry their own.
+   */
+  bankTransactionId: string | null;
 };
 
 /**

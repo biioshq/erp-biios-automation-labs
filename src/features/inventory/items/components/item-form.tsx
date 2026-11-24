@@ -46,6 +46,7 @@ function defaultsFromTemplate(template: ItemFormRecord, categories: CategoryOpti
     attributes: template.attributes.map((a) => ({ ...a })),
     unit: template.unit ?? "pcs",
     minStock: template.minStock || undefined,
+    leadTimeDays: template.leadTimeDays ?? undefined,
     vendor: template.vendor ?? "",
     purchaseDate: undefined,
     description: template.description ?? "",
@@ -67,6 +68,7 @@ function defaultsFrom(item?: ItemFormRecord | null, categoryId?: string): ItemFo
     attributes: (item?.attributes ?? []).map((a) => ({ ...a })),
     unit: item?.unit ?? "pcs",
     minStock: item?.minStock ?? undefined,
+    leadTimeDays: item?.leadTimeDays ?? undefined,
     vendor: item?.vendor ?? "",
     purchaseDate: item?.purchaseDate ?? undefined,
     description: item?.description ?? "",
@@ -301,9 +303,11 @@ export function ItemForm({
 
   const onSubmit = form.handleSubmit((values) => {
     startTransition(async () => {
+      // An empty lead time is sent as null so clearing it in the form clears it on the item.
+      const leadTimeDays = values.leadTimeDays ?? null;
       const payload = isEdit
-        ? { ...values, openingQuantity: undefined, openingUnitPrice: undefined, openingAsPurchase: undefined, openingPaymentMethod: undefined }
-        : { ...values, openingAsPurchase: openingIsPurchase(values.openingAsPurchase) };
+        ? { ...values, leadTimeDays, openingQuantity: undefined, openingUnitPrice: undefined, openingAsPurchase: undefined, openingPaymentMethod: undefined }
+        : { ...values, leadTimeDays, openingAsPurchase: openingIsPurchase(values.openingAsPurchase) };
       const result = isEdit && item ? await updateItem({ ...payload, id: item.id, loaded }) : await createItem(payload);
       if (!result.ok) {
         applyFieldErrors(result, form.setError);
@@ -385,7 +389,7 @@ export function ItemForm({
           </div>
         </FormSection>
 
-        <FormSection title="Stock rules" icon={<NotebookText />} description="The minimum decides when this item shows as Low Stock.">
+        <FormSection title="Stock rules" icon={<NotebookText />} description="The minimum and lead time decide when this item is flagged for reordering.">
           <div className="grid gap-4 sm:grid-cols-2">
             <NumberField
               control={control}
@@ -395,8 +399,17 @@ export function ItemForm({
               placeholder="0"
               description="Low Stock when available is at or below this."
             />
-            <TextField control={control} name="location" label="Storage location" placeholder="Rack B, shelf 3" />
+            <NumberField
+              control={control}
+              name="leadTimeDays"
+              label="Lead time"
+              suffix="days"
+              step={1}
+              placeholder="Not set"
+              description="Days from ordering to having it in stock. Alerts start this long, plus a week, before it runs out."
+            />
           </div>
+          <TextField control={control} name="location" label="Storage location" placeholder="Rack B, shelf 3" />
           <div className="grid gap-4 sm:grid-cols-2">
             <SuggestField control={control} name="vendor" label="Vendor" placeholder="Who you buy it from" suggestions={vendors} />
             <DateField control={control} name="purchaseDate" label="Purchase date" clearable />

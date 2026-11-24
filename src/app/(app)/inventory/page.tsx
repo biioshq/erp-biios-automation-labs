@@ -12,6 +12,9 @@ import { INVENTORY_UNITS, labelOf } from "@/lib/constants";
 import { formatNumber, formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { getInventoryDashboard } from "@/features/inventory/dashboard/queries";
+import { STOCK_PERIODS, getStockPosition } from "@/features/inventory/dashboard/stock-position";
+import { StockOperations, StockRollForwardSection, StockSplit } from "@/features/inventory/dashboard/components/stock-position";
+import type { StockPeriodKey } from "@/features/inventory/dashboard/types";
 import { CategoryValueChart, MovementTrendChart, StockHealthChart } from "@/features/inventory/dashboard/components/dashboard-charts";
 import { requireUser } from "@/server/auth/session";
 
@@ -25,11 +28,23 @@ function StatLink({ href, children }: { href: string; children: React.ReactNode 
   );
 }
 
-export default async function InventoryDashboardPage() {
+export default async function InventoryDashboardPage({ searchParams }: PageProps<"/inventory">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   await requireUser();
-  const { snapshot, valueByCategory, weekly, attention, recent } = await getInventoryDashboard();
-  const restock = snapshot.lowStock + snapshot.outOfStock;
+  const sp = await searchParams;
+  const raw = Array.isArray(sp.period) ? sp.period[0] : sp.period;
+  const period: StockPeriodKey = STOCK_PERIODS.find((p) => p.value === raw)?.value ?? "fy";
+  const [{ snapshot, valueByCategory, weekly, attention, attentionTotal, attentionLevels, recent }, position] = await Promise.all([
+    getInventoryDashboard(),
+    getStockPosition(period),
+  ]);
+  const restock = attentionTotal;
+  // From the reorder list itself, so the parts add up to the total above them.
+  const breakdown = [
+    attentionLevels.out ? `${formatNumber(attentionLevels.out)} out of stock` : null,
+    attentionLevels.belowMin ? `${formatNumber(attentionLevels.belowMin)} at or below minimum` : null,
+    attentionLevels.runsOut ? `${formatNumber(attentionLevels.runsOut)} running out within lead time plus a week` : null,
+  ].filter(Boolean);
   const share = (n: number) => (snapshot.items ? `${Math.round((n / snapshot.items) * 100)}% of items` : "No items yet");
 
   return (
@@ -68,7 +83,7 @@ export default async function InventoryDashboardPage() {
               {formatNumber(restock)} {restock === 1 ? "item needs" : "items need"} restocking
             </span>
             <span className="block text-xs text-muted-foreground">
-              {snapshot.lowStock} low on stock, {snapshot.outOfStock} out of stock. Open the restock list.
+              {breakdown.join(", ")}. Open the restock list.
             </span>
           </span>
           <ArrowRight className="size-4 shrink-0 text-warning transition-transform group-hover:translate-x-0.5" />
@@ -93,13 +108,20 @@ export default async function InventoryDashboardPage() {
           value={<Money value={snapshot.value} compact />}
           icon={IndianRupee}
           tone="brand"
-          hint={
-            <>
-              On hand, <Money value={snapshot.allocatedValue} compact /> on projects
-            </>
-          }
+          hint="In storage, at weighted average cost"
         />
       </StatGrid>
+
+      <StockSplit position={position} />
+
+      <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-5">
+        <div className="min-w-0 lg:col-span-3">
+          <StockRollForwardSection position={position} periods={STOCK_PERIODS} />
+        </div>
+        <div className="min-w-0 lg:col-span-2">
+          <StockOperations />
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
         <Section title="Stock health" description="Items by status" className="animate-in fade-in-0 duration-500">
@@ -117,7 +139,7 @@ export default async function InventoryDashboardPage() {
       <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
         <Section
           title="Stock movement"
-          description="Units per week, last 30 days"
+          description="Units per week, last 30 days. A move between projects counts as one return and one assignment."
           className="animate-in fade-in-0 duration-500 lg:col-span-2"
           actions={
             <Link href="/inventory/movements" className="inline-flex min-h-8 items-center text-xs font-medium text-muted-foreground hover:text-foreground">
@@ -128,10 +150,22 @@ export default async function InventoryDashboardPage() {
           <MovementTrendChart weeks={weekly} />
         </Section>
 
-        <Section title="Needs attention" description="Low and out of stock" contentClassName="p-2" className="animate-in fade-in-0 duration-500">
+        <Section
+          title="Needs attention"
+          description="Low, out of stock, or running out soon"
+          contentClassName="p-2"
+          className="animate-in fade-in-0 duration-500"
+          actions={
+            attentionTotal > attention.length ? (
+              <Link href="/inventory/low-stock" className="inline-flex min-h-8 items-center text-xs font-medium text-muted-foreground hover:text-foreground">
+                All {formatNumber(attentionTotal)}
+              </Link>
+            ) : undefined
+          }
+        >
           {attention.length === 0 ? (
             <div className="p-3">
-              <EmptyState compact icon={CircleCheck} title="Everything is stocked" description="No item is at or below its minimum." />
+              <EmptyState compact icon={CircleCheck} title="Everything is stocked" description="No item is at or below its minimum or running out within its lead time plus a week." />
             </div>
           ) : (
             <ul className="divide-y">
@@ -151,6 +185,7 @@ export default async function InventoryDashboardPage() {
                       </span>{" "}
                       available, minimum {formatNumber(item.minStock)} {labelOf(INVENTORY_UNITS, item.unit).toLowerCase()}
                     </p>
+                    {item.reason ? <p className="text-xs text-muted-foreground">{item.reason}</p> : null}
                   </div>
                   <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
                     <Link href={`/inventory/purchase?item=${item.id}`}>
@@ -185,6 +220,8 @@ export default async function InventoryDashboardPage() {
           <ul className="divide-y">
             {recent.map((m) => {
               const gain = m.availableDelta > 0;
+              // A location move or wastage on a project leaves storage unchanged: show its units unsigned.
+              const still = m.availableDelta === 0;
               return (
                 <li key={m.id}>
                   <Link
@@ -209,9 +246,8 @@ export default async function InventoryDashboardPage() {
                       )}
                     </span>
                     <span className="text-right">
-                      <span className={cn("tabular block text-sm font-semibold", gain ? "text-success" : "text-danger")}>
-                        {gain ? "+" : "-"}
-                        {formatNumber(Math.abs(m.availableDelta))}
+                      <span className={cn("tabular block text-sm font-semibold", still ? "text-muted-foreground" : gain ? "text-success" : "text-danger")}>
+                        {still ? formatNumber(m.quantity) : `${gain ? "+" : "-"}${formatNumber(Math.abs(m.availableDelta))}`}
                       </span>
                       <span className="block text-xs text-muted-foreground">{formatRelative(m.date)}</span>
                     </span>

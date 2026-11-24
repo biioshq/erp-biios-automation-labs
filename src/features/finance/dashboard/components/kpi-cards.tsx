@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { ArrowRight, BadgeIndianRupee, Boxes, CalendarClock, FolderKanban, Receipt, TrendingDown, TrendingUp } from "lucide-react";
 import { ResponsiveMoney } from "./responsive-money";
+import { Money } from "@/components/shared/money";
 import { StatCard } from "@/components/shared/stat-card";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import type { FinanceDashboardData } from "../types";
 
-function CardLink({ href, children }: { href: string; children: React.ReactNode }) {
+export function CardLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link href={href} className="inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline">
       {children} <ArrowRight className="size-3" aria-hidden />
@@ -26,7 +27,7 @@ function monthSpan(from: string, to: string) {
 }
 
 /** Tighter tiles on phones so two fit across at 360px. */
-const KPI = "max-sm:p-4 max-sm:[&>.tabular]:text-xl";
+export const KPI = "max-sm:p-4 max-sm:[&>.tabular]:text-xl";
 
 /** The six headline numbers. Deltas compare with the previous period up to the same day as today; the monthly average uses whole months. */
 export function KpiCards({ data }: { data: FinanceDashboardData }) {
@@ -54,7 +55,7 @@ export function KpiCards({ data }: { data: FinanceDashboardData }) {
       />
       <StatCard
         className={KPI}
-        label="Total expenses"
+        label="Expenses recorded"
         icon={Receipt}
         tone="warning"
         value={<ResponsiveMoney value={k.expenses} />}
@@ -66,13 +67,22 @@ export function KpiCards({ data }: { data: FinanceDashboardData }) {
       />
       <StatCard
         className={KPI}
-        label="Profit"
+        label="Net profit or loss"
         icon={profitable ? TrendingUp : TrendingDown}
         tone={profitable ? "success" : "danger"}
         value={<ResponsiveMoney value={k.profit} tone={profitable ? undefined : "negative"} />}
         delta={k.profitDelta}
         deltaLabel={vs}
-        hint={k.margin === null ? "No income in this period" : `${formatPercent(k.margin)} margin`}
+        hint={k.margin === null ? "Income minus expenses recorded. No income in this period" : `Income minus expenses recorded, ${formatPercent(k.margin)} margin`}
+        footer={
+          data.position ? (
+            // The statement books invoices, stock use and depreciation when they happen, so it can differ from the card.
+            <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+              Profit in P&amp;L <Money value={data.position.plProfit} tone="auto" className="font-medium text-foreground" />
+              <CardLink href={`/finance/reports/profit-loss?${data.position.statementQuery}`}>P&amp;L</CardLink>
+            </p>
+          ) : undefined
+        }
       />
       <StatCard
         className={KPI}
@@ -102,7 +112,7 @@ export function KpiCards({ data }: { data: FinanceDashboardData }) {
           avg ? (
             <span title="Expenses of whole calendar months (1st to last day) divided by the number of months. Months with no expenses count as zero.">
               {monthSpan(avg.fromMonth, avg.toMonth)}, {formatNumber(avg.months)} whole {avg.months === 1 ? "month" : "months"}
-              {avg.fallback ? " before this one" : ""}
+              {avg.fallback ? (avg.beforeRangeEnd ? " before the range ends" : " before this one") : ""}
             </span>
           ) : (
             "Shows once a whole month of expenses is recorded"

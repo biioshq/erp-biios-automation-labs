@@ -1,13 +1,33 @@
-import { Boxes, PackagePlus, Repeat } from "lucide-react";
+import { Boxes, Landmark, PackageX, PackagePlus, Repeat } from "lucide-react";
 import { Money } from "@/components/shared/money";
-import { StatusBadge } from "@/components/shared/status-badge";
+import { StatusBadge, type Tone } from "@/components/shared/status-badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { ExpenseSource } from "@/lib/constants";
+import { EXPENSE_NATURES, PAYMENT_STATUSES, labelOf, type ExpenseNature, type ExpenseSource } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
-import type { ExpenseRow } from "../types";
+import type { ExpensePaymentStatus, ExpensePaymentSummary, ExpenseRow } from "../types";
 
-/** Expenses created by inventory: edited through their purchase or assignment, never by hand. */
-export const isInventoryExpense = (source: ExpenseSource) => source === "inventory_assignment" || source === "inventory_purchase";
+export { isGeneratedExpense, isInventoryExpense } from "../sources";
+
+const PAYMENT_TONES: Record<ExpensePaymentStatus, Tone> = { paid: "success", partial: "info", unpaid: "warning", overdue: "danger", stock: "neutral" };
+
+/** Paid / Partly paid / Unpaid / Overdue, or "From stock" for stock assignments (no payment of their own). */
+export function PaymentStatusBadge({ payment, className }: { payment: Pick<ExpensePaymentSummary, "status">; className?: string }) {
+  const label = payment.status === "stock" ? "From stock" : labelOf(PAYMENT_STATUSES, payment.status);
+  return (
+    <StatusBadge tone={PAYMENT_TONES[payment.status]} className={className}>
+      {label}
+    </StatusBadge>
+  );
+}
+
+/** Direct or Indirect, quietly: it classifies, it does not warn. */
+export function NatureBadge({ nature, className }: { nature: ExpenseNature; className?: string }) {
+  return (
+    <StatusBadge tone={nature === "direct" ? "brand" : "neutral"} dot={false} className={className}>
+      {labelOf(EXPENSE_NATURES, nature)}
+    </StatusBadge>
+  );
+}
 
 /**
  * "Recurring", "Stock purchase", "From inventory" or "Stock used, counted at purchase" for generated
@@ -59,6 +79,20 @@ export function ExpenseSourceBadge({
       </StatusBadge>
     );
   }
+  if (source === "inventory_wastage") {
+    return (
+      <StatusBadge tone="neutral" dot={false} icon={<PackageX className="size-3" aria-hidden />} className={className}>
+        Stock wastage
+      </StatusBadge>
+    );
+  }
+  if (source === "liability_interest") {
+    return (
+      <StatusBadge tone="info" dot={false} icon={<Landmark className="size-3" aria-hidden />} className={className}>
+        Loan interest
+      </StatusBadge>
+    );
+  }
   return null;
 }
 
@@ -104,6 +138,9 @@ export function ExpenseMobileCard({
         <StatusBadge tone="neutral" dot={false} className="h-5 px-2 text-[11px]">
           {row.categoryLabel}
         </StatusBadge>
+        {row.payment && row.payment.status !== "paid" && row.payment.status !== "stock" ? (
+          <PaymentStatusBadge payment={row.payment} className="h-5 px-2 text-[11px]" />
+        ) : null}
       </div>
     </div>
   );

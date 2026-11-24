@@ -2,7 +2,7 @@ import "server-only";
 
 import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
-import { InventoryItem, InventoryMovement } from "@/server/models";
+import { InventoryAllocation, InventoryItem, InventoryMovement } from "@/server/models";
 import { addDays, startOfDayIST, toDateInput } from "@/lib/dates";
 import { getStockStatus } from "@/lib/stock-status";
 import type { StockStatus } from "@/lib/constants";
@@ -39,31 +39,67 @@ export type ItemUsage = {
   movements: number;
 };
 
-/** Issued, returned, wasted and the daily rate per item over the `days` before `asOf`. */
-export async function usageByItem(days = DEFAULT_WINDOW_DAYS, asOf: Date = new Date(), itemIds?: string[]): Promise<Map<string, ItemUsage>> {
+/**
+ * Both halves of each move between projects in the window, by movement id. A move is stored as a
+ * return from the first project with `allocation` set (the allocation the units went into) and an
+ * assignment to the second, whose id is that allocation's `movement` (see moveBetweenProjects in
+ * src/server/services/inventory-ledger.ts). Ordinary returns never set `allocation`.
+ */
+async function moveMovementIds(window: Record<string, unknown>): Promise<Types.ObjectId[]> {
+  const returns = await InventoryMovement.find({ ...window, type: "return", allocation: { $ne: null } }, { allocation: 1 }).lean();
+  if (!returns.length) return [];
+  const allocationIds = returns.map((r) => r.allocation).filter((id): id is Types.ObjectId => Boolean(id));
+  const allocations = await InventoryAllocation.find({ _id: { $in: allocationIds } }, { movement: 1 }).lean();
+  return [...returns.map((r) => r._id), ...allocations.map((a) => a.movement).filter((id): id is Types.ObjectId => Boolean(id))];
+}
+
+/**
+ * Issued, returned, wasted and the daily rate per item over the `days` before `asOf`.
+ *
+ * Stock moved from one project to another is not issued or returned (it never passed through the
+ * stock room), so it does not count in issued, returned, firstUse or lastUse; consumption, which is
+ * issued less returned, is the same either way. With `projectId`, only that project's movements
+ * count, and a move does count: for the project it came from it is a return, for the project it
+ * went to it is an issue.
+ */
+export async function usageByItem(
+  days = DEFAULT_WINDOW_DAYS,
+  asOf: Date = new Date(),
+  itemIds?: string[],
+  projectId?: string,
+): Promise<Map<string, ItemUsage>> {
   await connectDB();
   const from = startOfDayIST(addDays(asOf, -days + 1));
-  const rows = await InventoryMovement.aggregate<{ _id: { item: Types.ObjectId; type: string }; qty: number; first: Date; last: Date; n: number }>([
+  const window: Record<string, unknown> = {
+    date: { $gte: from, $lte: asOf },
+    ...(itemIds ? { item: { $in: itemIds.map((id) => new Types.ObjectId(id)) } } : {}),
+  };
+  const moves = projectId ? [] : await moveMovementIds(window);
+  const rows = await InventoryMovement.aggregate<{ _id: { item: Types.ObjectId; type: string; move: boolean }; qty: number; first: Date; last: Date; n: number }>([
+    { $match: { ...window, ...(projectId ? { project: new Types.ObjectId(projectId) } : {}) } },
     {
-      $match: {
-        date: { $gte: from, $lte: asOf },
-        ...(itemIds ? { item: { $in: itemIds.map((id) => new Types.ObjectId(id)) } } : {}),
+      $group: {
+        _id: { item: "$item", type: "$type", move: moves.length ? { $in: ["$_id", moves] } : { $literal: false } },
+        qty: { $sum: "$quantity" },
+        first: { $min: "$date" },
+        last: { $max: "$date" },
+        n: { $sum: 1 },
       },
     },
-    { $group: { _id: { item: "$item", type: "$type" }, qty: { $sum: "$quantity" }, first: { $min: "$date" }, last: { $max: "$date" }, n: { $sum: 1 } } },
   ]);
   const out = new Map<string, ItemUsage>();
   for (const r of rows) {
     const id = String(r._id.item);
     const u = out.get(id) ?? { itemId: id, issued: 0, returned: 0, consumed: 0, wasted: 0, perDay: null, firstUse: null, lastUse: null, movements: 0 };
     u.movements += r.n;
+    out.set(id, u);
+    if (r._id.move) continue;
     if (r._id.type === "assign") {
       u.issued += r.qty;
       u.firstUse = !u.firstUse || toDateInput(r.first) < u.firstUse ? toDateInput(r.first) : u.firstUse;
       u.lastUse = !u.lastUse || toDateInput(r.last) > u.lastUse ? toDateInput(r.last) : u.lastUse;
     } else if (r._id.type === "return") u.returned += r.qty;
     else if (r._id.type === "wastage") u.wasted += r.qty;
-    out.set(id, u);
   }
   for (const u of out.values()) {
     u.issued = round3(u.issued);

@@ -1,14 +1,33 @@
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { REPORT_META, type ReportMeta } from "../meta";
+import { ShieldCheck } from "lucide-react";
+import { reportGroupsFor, type ReportMeta } from "../meta";
 import type { ReportType } from "@/lib/constants";
 
-/** The report picker. Each card is a link, so it works without client JavaScript. */
-export function ReportCards({ selected, hrefFor }: { selected?: ReportType; hrefFor: (meta: ReportMeta) => string }) {
+/**
+ * The report picker, grouped by what each report covers. Each card is a link, so it works without
+ * client JavaScript. Members do not see the admin-only cards.
+ */
+export function ReportCards({ selected, hrefFor, isAdmin }: { selected?: ReportType; hrefFor: (meta: ReportMeta) => string; isAdmin: boolean }) {
+  return (
+    <div className="space-y-5">
+      {reportGroupsFor(isAdmin).map((g) => (
+        <section key={g.key} aria-labelledby={`report-group-${g.key}`} className="space-y-2.5">
+          <h2 id={`report-group-${g.key}`} className="eyebrow">
+            {g.label}
+          </h2>
+          <CardGrid reports={g.reports} selected={selected} hrefFor={hrefFor} />
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function CardGrid({ reports, selected, hrefFor }: { reports: ReportMeta[]; selected?: ReportType; hrefFor: (meta: ReportMeta) => string }) {
   return (
     <div className="grid gap-2.5 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">
-      {REPORT_META.map((m) => {
+      {reports.map((m) => {
         const active = m.type === selected;
         return (
           <Link
@@ -28,6 +47,10 @@ export function ReportCards({ selected, hrefFor }: { selected?: ReportType; href
               {active ? (
                 <span className="flex size-5 items-center justify-center rounded-full bg-brand text-primary-foreground">
                   <Check className="size-3" />
+                </span>
+              ) : m.adminOnly ? (
+                <span className="flex items-center gap-1 text-[11px] text-muted-foreground" title="Only admins see this report">
+                  <ShieldCheck className="size-3.5" /> Admin
                 </span>
               ) : null}
             </div>

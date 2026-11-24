@@ -1,7 +1,7 @@
-import { canSeeSalaries, salaryScope } from "@/server/auth/session";
 import "server-only";
 
 import type { Types } from "mongoose";
+import { canSeeSalaries, salaryScope } from "@/server/auth/session";
 import { connectDB } from "@/server/db";
 import { Expense, Income, Project, RecurringExpense } from "@/server/models";
 import { iso } from "@/server/serialize";
@@ -17,11 +17,31 @@ import { INCOME_CATEGORIES, labelOf, type IncomeCategory, type ProjectStatus } f
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { isBuiltInExpenseCategory } from "@/lib/expense-categories";
 import { round2 } from "@/lib/format";
-import { endOfDayIST, monthKeyIST, startOfMonthIST, toDateInput } from "@/lib/dates";
+import { addDays, endOfDayIST, financialYearIST, fromDateInput, monthKeyIST, startOfDayIST, startOfMonthIST, toDateInput } from "@/lib/dates";
+import { ledgerAsOf } from "@/server/accounting/ledger";
+import { cashFlow, positionSummary, profitAndLoss } from "@/server/accounting/statements";
+import { liabilityRows, payablesSummary, receivablesSummary } from "@/server/finance/summaries";
+import { listProjectFinances } from "@/features/finance/projects/queries";
 import { monthlyEquivalent } from "@/lib/recurrence";
 import type { RecurringFrequency } from "@/lib/constants";
-import { OTHER_KEY, resolvePeriod, type DashboardPeriod } from "./periods";
-import type { BudgetRow, CategoryStack, FinanceDashboardData, MonthlyAverage, RecurringCommitments, Transaction } from "./types";
+import { OTHER_KEY, resolvePeriod, type DashboardPeriod, type PeriodSelection } from "./periods";
+import type {
+  BudgetRow,
+  CategoryStack,
+  DueItem,
+  DuePayments,
+  FinanceDashboardData,
+  MonthlyAverage,
+  MonthlyPoint,
+  OpenItemsTotals,
+  PositionFigures,
+  ProjectSummaryRow,
+  ProjectTotals,
+  RecurringCommitments,
+  Transaction,
+  Trends,
+  TrendPoint,
+} from "./types";
 
 const TOP_CATEGORIES = 5;
 
@@ -182,6 +202,11 @@ function monthsBetween(a: Date, b: Date): number {
 /** Months averaged when the selected period has no whole month yet ("This month", or the first month of a quarter or year). */
 const FALLBACK_MONTHS = 3;
 
+/** The first month that starts on or after `d` (d's own month when d is the 1st). */
+const monthOnOrAfter = (d: Date) => (toDateInput(d).endsWith("-01") ? startOfMonthIST(d) : startOfMonthIST(d, 1));
+/** The month after d's month when d is its month's last day, else d's month: the end (exclusive) of the whole months up to d. */
+const monthEndingBy = (d: Date) => (toDateInput(addDays(startOfDayIST(d), 1)).endsWith("-01") ? startOfMonthIST(d, 1) : startOfMonthIST(d));
+
 /**
  * Average spend per month over whole calendar months, 1st to the last day:
  *
@@ -192,30 +217,250 @@ const FALLBACK_MONTHS = 3;
  * Months before the first recorded expense are left out, so a young company is not averaged over
  * months before it started. When the period has no whole month yet, the three months before this
  * one are used. Null when no whole month of records exists.
+ *
+ * A custom range uses only the whole months inside it (a range from 15 Jan to 10 Apr averages
+ * February and March); with none, the three months before the range ends.
  */
-async function monthlyAverage(periodFrom: Date | undefined, now: Date): Promise<MonthlyAverage | null> {
+async function monthlyAverage(range: { from?: Date; to?: Date; custom: boolean }, now: Date): Promise<MonthlyAverage | null> {
   const first = await Expense.findOne(COMPANY_EXPENSES, { date: 1 }).sort({ date: 1 }).lean();
   if (!first) return null;
   const thisMonth = startOfMonthIST(now);
   const firstMonth = startOfMonthIST(first.date);
   const later = (a: Date, b: Date) => (a.getTime() >= b.getTime() ? a : b);
-  let from = later(periodFrom ? startOfMonthIST(periodFrom) : firstMonth, firstMonth);
+  const earlier = (a: Date, b: Date) => (a.getTime() <= b.getTime() ? a : b);
+  // Months up to `end` (exclusive) count. Presets end with the current month; a custom range may end earlier.
+  const end = range.custom && range.to ? earlier(thisMonth, monthEndingBy(range.to)) : thisMonth;
+  let from = later(range.from ? monthOnOrAfter(range.from) : firstMonth, firstMonth);
   let fallback = false;
-  if (monthsBetween(from, thisMonth) <= 0) {
-    from = later(startOfMonthIST(now, -FALLBACK_MONTHS), firstMonth);
+  if (monthsBetween(from, end) <= 0) {
+    from = later(startOfMonthIST(end, -FALLBACK_MONTHS), firstMonth);
     fallback = true;
   }
-  const months = monthsBetween(from, thisMonth);
+  const months = monthsBetween(from, end);
   if (months <= 0) return null;
-  const to = new Date(thisMonth.getTime() - 1);
+  const to = new Date(end.getTime() - 1);
   const totals = await financeTotals({ from, to });
-  return { value: round2(totals.expenses / months), months, fromMonth: monthKeyIST(from), toMonth: monthKeyIST(to), fallback };
+  return {
+    value: round2(totals.expenses / months),
+    months,
+    fromMonth: monthKeyIST(from),
+    toMonth: monthKeyIST(to),
+    fallback,
+    ...(fallback && end.getTime() !== thisMonth.getTime() ? { beforeRangeEnd: true } : {}),
+  };
 }
 
-export async function getFinanceDashboard(period: DashboardPeriod): Promise<FinanceDashboardData> {
+/* Trends: months, financial quarters and financial years */
+
+const TREND_QUARTERS = 8;
+const TREND_YEARS = 5;
+
+/** Months from the start of the financial year TREND_YEARS - 1 years ago up to this month. */
+function trendMonths(now: Date): number {
+  const fyStartYear = Number(toDateInput(financialYearIST(now).start).slice(0, 4));
+  return monthsBetween(fromDateInput(`${fyStartYear - (TREND_YEARS - 1)}-04-01`), startOfMonthIST(now)) + 1;
+}
+
+/** "2026-11" → financial year start year and quarter (Q1 is April to June). */
+function fiscalOf(month: string) {
+  const [y, m] = month.split("-").map(Number);
+  const fy = m >= 4 ? y : y - 1;
+  return { fy, quarter: Math.floor(((m - 4 + 12) % 12) / 3) + 1 };
+}
+const fyShort = (fy: number) => `${String(fy % 100).padStart(2, "0")}-${String((fy + 1) % 100).padStart(2, "0")}`;
+
+function groupTrend(points: MonthlyPoint[], keyOf: (month: string) => { key: string; label: string }): TrendPoint[] {
+  const out = new Map<string, TrendPoint>();
+  for (const p of points) {
+    const { key, label } = keyOf(p.month);
+    const t = out.get(key) ?? { key, label, income: 0, expenses: 0, profit: 0 };
+    t.income = round2(t.income + p.income);
+    t.expenses = round2(t.expenses + p.expenses);
+    t.profit = round2(t.income - t.expenses);
+    out.set(key, t);
+  }
+  return [...out.values()];
+}
+
+/** Income and expenses (cash basis, as the cards) per month, financial quarter and financial year. */
+function buildTrends(points: MonthlyPoint[]): Trends {
+  return {
+    month: points.slice(-12).map((p) => ({ key: p.month, label: p.month, income: p.income, expenses: p.expenses, profit: p.profit })),
+    quarter: groupTrend(points, (m) => {
+      const { fy, quarter } = fiscalOf(m);
+      return { key: `${fy}-Q${quarter}`, label: `Q${quarter} ${fyShort(fy)}` };
+    }).slice(-TREND_QUARTERS),
+    year: groupTrend(points, (m) => {
+      const { fy } = fiscalOf(m);
+      return { key: String(fy), label: `FY ${fy}-${String((fy + 1) % 100).padStart(2, "0")}` };
+    }).slice(-TREND_YEARS),
+  };
+}
+
+/* Admin figures from the accounting engine */
+
+/**
+ * Balance sheet totals as of the period's end (today at the latest), and cash in and out and the
+ * P&L profit over the period. All three read the same computed ledger.
+ */
+async function positionFigures(range: { from?: Date; to?: Date }, now: Date): Promise<PositionFigures> {
+  // One date object for all three calls, so they share one ledger build per request.
+  const asOf = range.to ?? endOfDayIST(now);
+  const ledger = await ledgerAsOf(asOf);
+  // All time starts at the first record in the books.
+  const from = range.from ?? startOfDayIST(ledger.postings[0]?.date ?? now);
+  const [position, flow, pl] = await Promise.all([positionSummary(asOf), cashFlow(from, asOf), profitAndLoss(from, asOf)]);
+  // Activity lines leave out transfers between own accounts; per-account inflows would count them twice.
+  const lines = flow.activities.flatMap((a) => a.lines);
+  const cashIn = round2(lines.filter((l) => l.amount > 0).reduce((s, l) => s + l.amount, 0));
+  const cashOut = round2(-lines.filter((l) => l.amount < 0).reduce((s, l) => s + l.amount, 0));
+  return {
+    asOf: position.asOf,
+    asOfToday: position.asOf === toDateInput(now),
+    totalAssets: position.totalAssets,
+    totalLiabilities: position.totalLiabilities,
+    equity: position.equity,
+    cash: position.cash,
+    difference: position.difference,
+    cashIn,
+    cashOut,
+    plProfit: pl.profit,
+    // The period's own days: the statements stop at today by themselves, and a range that starts
+    // after today must not turn into a reversed from / to pair.
+    statementQuery: new URLSearchParams({ from: toDateInput(from), to: toDateInput(asOf) }).toString(),
+  };
+}
+
+/* Upcoming and overdue payments */
+
+const DUE_WINDOW_DAYS = 30;
+const DUE_LIST = 8;
+
+type PayablesSummary = Awaited<ReturnType<typeof payablesSummary>>;
+type ReceivablesSummary = Awaited<ReturnType<typeof receivablesSummary>>;
+
+/** Overdue first (oldest first), then the soonest due. */
+const byUrgency = (a: DueItem, b: DueItem) => Number(b.overdue) - Number(a.overdue) || a.date.localeCompare(b.date);
+const totalOf = (items: DueItem[], overdue: boolean) => round2(items.filter((i) => i.overdue === overdue).reduce((s, i) => s + i.amount, 0));
+
+/**
+ * What the company has to pay (supplier bills, loans for admins, recurring schedules) and to
+ * receive (customer invoices) that is overdue or due in the next 30 days. Members do not get
+ * salary bills or salary schedules in the lists, as elsewhere.
+ */
+async function duePayments(now: Date, isAdmin: boolean, payables: PayablesSummary, receivables: ReceivablesSummary): Promise<DuePayments> {
+  const seesSalaries = await canSeeSalaries();
+  const today = toDateInput(now);
+  const soon = toDateInput(addDays(now, DUE_WINDOW_DAYS));
+  const inWindow = (status: string, due: string | null) => status === "overdue" || Boolean(due && due >= today && due <= soon);
+
+  const [loans, schedules] = await Promise.all([
+    isAdmin ? liabilityRows(now) : Promise.resolve([]),
+    RecurringExpense.find({ status: "active", nextRunDate: { $lte: endOfDayIST(addDays(now, DUE_WINDOW_DAYS)) } }, { name: 1, amount: 1, category: 1, nextRunDate: 1, endDate: 1, vendor: 1 })
+      .sort({ nextRunDate: 1 })
+      .lean(),
+  ]);
+
+  const pay: DueItem[] = [
+    ...payables.rows
+      .filter((r) => inWindow(r.status, r.dueDate) && (seesSalaries || r.category !== "salaries"))
+      .map((r): DueItem => ({ id: r.id, kind: "bill", title: r.number, party: r.vendor, date: r.dueDate ?? r.date, amount: r.outstanding, overdue: r.status === "overdue", href: `/finance/expenses?view=${r.id}` })),
+    ...loans
+      .filter((l) => l.outstanding > 0 && inWindow(l.status, l.dueDate))
+      // Loans open on the loans page; other obligations (TDS, salaries due) on their side's page.
+      .map((l): DueItem => ({
+        id: l.id,
+        kind: l.kind === "loan" ? "loan" : "due",
+        title: l.name,
+        party: l.lender,
+        date: l.dueDate!,
+        amount: l.outstanding,
+        overdue: l.status === "overdue",
+        href: l.kind === "loan" ? `/finance/liabilities/loans?view=${l.id}` : `/finance/liabilities/${l.current ? "current" : "non-current"}?view=${l.id}`,
+      })),
+    // Schedules post their expense by themselves, so a run date in the past is not "overdue".
+    ...schedules
+      .filter((d) => (seesSalaries || d.category !== "salaries") && (!d.endDate || d.nextRunDate.getTime() <= d.endDate.getTime()))
+      .map((d): DueItem => ({
+        id: String(d._id),
+        kind: "recurring",
+        title: d.name,
+        party: d.vendor,
+        date: toDateInput(d.nextRunDate),
+        amount: d.amount,
+        overdue: false,
+        href: `/finance/recurring?view=${d._id}`,
+      })),
+  ].sort(byUrgency);
+
+  const receive = receivables.rows
+    .filter((r) => inWindow(r.status, r.dueDate))
+    .map((r): DueItem => ({ id: r.id, kind: "invoice", title: r.number, party: r.client, date: r.dueDate ?? r.date, amount: r.outstanding, overdue: r.status === "overdue", href: `/finance/invoices?view=${r.id}` }))
+    .sort(byUrgency);
+
+  return {
+    pay: pay.slice(0, DUE_LIST),
+    receive: receive.slice(0, DUE_LIST),
+    payCount: pay.length,
+    receiveCount: receive.length,
+    payOverdue: totalOf(pay, true),
+    payUpcoming: totalOf(pay, false),
+    receiveOverdue: totalOf(receive, true),
+    receiveUpcoming: totalOf(receive, false),
+    salariesHidden: !seesSalaries,
+  };
+}
+
+const openTotals = (s: PayablesSummary | ReceivablesSummary): OpenItemsTotals => ({
+  total: s.total,
+  count: s.count,
+  overdue: s.overdue,
+  overdueCount: s.overdueCount,
+  dueSoon: s.dueSoon,
+});
+
+/* Projects */
+
+const OPEN_STATUSES: ProjectStatus[] = ["planning", "active", "on_hold"];
+const PROJECT_ROWS = 8;
+
+/** Open projects' budget and lifetime spend, and the biggest of them by spend. */
+async function projectOverview(): Promise<{ totals: ProjectTotals; rows: ProjectSummaryRow[] }> {
+  const { rows } = await listProjectFinances(OPEN_STATUSES);
+  const budget = round2(rows.reduce((s, r) => s + r.budget, 0));
+  const spent = round2(rows.reduce((s, r) => s + r.finance.spent, 0));
+  return {
+    totals: { count: rows.length, budget, spent, utilisation: budget > 0 ? spent / budget : null },
+    rows: [...rows]
+      .sort((a, b) => b.finance.spent - a.finance.spent || b.finance.revenue.revenue - a.finance.revenue.revenue)
+      .slice(0, PROJECT_ROWS)
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        code: r.code,
+        color: r.color,
+        status: r.status,
+        revenue: r.finance.revenue.revenue,
+        received: r.finance.revenue.received,
+        outstanding: r.finance.revenue.outstanding,
+        spent: r.finance.spent,
+        budget: r.budget,
+        utilisation: r.outlook.utilisation,
+        estimatedProfit: r.outlook.estimatedProfit,
+      })),
+  };
+}
+
+/**
+ * Everything on the Finance dashboard for a period. Members get the dashboard without the
+ * balance sheet and cash figures (null `position`): those queries do not run for them at all.
+ */
+export async function getFinanceDashboard(selection: PeriodSelection | DashboardPeriod, viewer: { isAdmin: boolean } = { isAdmin: false }): Promise<FinanceDashboardData> {
   await connectDB();
+  const { period, from: customFrom, to: customTo } = typeof selection === "string" ? { period: selection, from: undefined, to: undefined } : selection;
   const now = new Date();
-  const range = resolvePeriod(period, now);
+  const range = resolvePeriod(period, now, { from: customFrom, to: customTo });
+  const custom = range.period === "custom" && range.from && range.to ? { from: toDateInput(range.from), to: toDateInput(range.to) } : null;
   const month = resolvePeriod("month", now);
   // The previous side of every delta stops at today's date, so the current side
   // must too: entries dated later this period (a rent bill for the 30th) would
@@ -224,23 +469,31 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
   const today = endOfDayIST(now);
   const toToday = (to: Date) => new Date(Math.min(to.getTime(), today.getTime()));
 
-  const [totals, current, previous, thisMonth, average, inventory, statusCounts, monthly, categoryRows, budgetRows, transactions, recurring, expenseLabel] =
+  const [totals, current, previous, thisMonth, average, inventory, statusCounts, trendPoints, categoryRows, budgetRows, transactions, recurring, expenseLabel] =
     await Promise.all([
       financeTotals({ from: range.from, to: range.to }),
       range.previous && range.to ? financeTotals({ from: range.from, to: toToday(range.to) }) : Promise.resolve(null),
       range.previous ? financeTotals({ from: range.previous.from, to: range.previous.to }) : Promise.resolve(null),
       financeTotals({ from: month.from, to: toToday(month.to!) }),
-      monthlyAverage(range.from, now),
+      monthlyAverage({ from: range.from, to: range.to, custom: range.period === "custom" }, now),
       inventorySnapshot(),
       Project.aggregate<{ _id: ProjectStatus; n: number }>([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
-      monthlyIncomeExpense(12),
+      monthlyIncomeExpense(trendMonths(now)),
       monthlyExpensesByCategory(6),
-      budgetUsage({ status: ["active", "planning", "on_hold"] }),
+      budgetUsage({ status: OPEN_STATUSES }),
       recentTransactions(10),
       recurringCommitments(),
       getExpenseCategoryLabeler(),
     ]);
+  const [payables, receivables, projects, position] = await Promise.all([
+    payablesSummary(now),
+    receivablesSummary(now),
+    projectOverview(),
+    viewer.isAdmin ? positionFigures(range, now) : Promise.resolve(null),
+  ]);
+  const due = await duePayments(now, viewer.isAdmin, payables, receivables);
 
+  const monthly = trendPoints.slice(-12);
   const projectCount = (status: ProjectStatus) => statusCounts.find((s) => s._id === status)?.n ?? 0;
   const months = monthly.slice(-6).map((m) => m.month);
 
@@ -254,7 +507,8 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
   const everything = await Promise.all([Income.estimatedDocumentCount(), Expense.estimatedDocumentCount()]);
 
   return {
-    period,
+    period: range.period,
+    custom,
     periodLabel: range.label,
     periodPhrase: range.phrase,
     periodDates: range.from && range.to ? { from: toDateInput(range.from), to: toDateInput(range.to) } : null,
@@ -277,6 +531,13 @@ export async function getFinanceDashboard(period: DashboardPeriod): Promise<Fina
       onHoldProjects: projectCount("on_hold"),
     },
     monthly,
+    trends: buildTrends(trendPoints),
+    position,
+    receivables: openTotals(receivables),
+    payables: openTotals(payables),
+    projectTotals: projects.totals,
+    projectSummaries: projects.rows,
+    due,
     categories: stackCategories(categoryRows, months, expenseLabel),
     budgets,
     transactions,

@@ -3,9 +3,21 @@ import "server-only";
 
 import { connectDB } from "@/server/db";
 import { Expense } from "@/server/models";
-import { expenseFilter } from "@/features/finance/expenses/queries";
-import { PAYMENT_METHODS, PROJECT_STAGES, labelOf, type PaymentMethod, type ProjectStage } from "@/lib/constants";
-import { getExpenseCategoryLabeler } from "@/server/expense-categories";
+import { expenseListFilter, paymentSummaryOf } from "@/features/finance/expenses/queries";
+import {
+  DEPARTMENTS,
+  EXPENSE_NATURES,
+  PAYMENT_METHODS,
+  PAYMENT_STATUSES,
+  PROJECT_STAGES,
+  labelOf,
+  type Department,
+  type PaymentMethod,
+  type ProjectStage,
+} from "@/lib/constants";
+import { getExpenseCategories } from "@/server/expense-categories";
+import { categoryNature, expenseCategoryLabel } from "@/lib/expense-categories";
+import { expenseNature } from "@/lib/expense-nature";
 import { round2 } from "@/lib/format";
 import { COMPANY_EXPENSES } from "@/server/services/metrics";
 import { col, day, describeFilters, sumTotals } from "../common";
@@ -29,6 +41,17 @@ export const EXPENSE_COLUMNS = [
   col("invoice", "Invoice no", "text", 16),
 ];
 
+/**
+ * Columns added after the GST register columns, so files built before them keep every column in
+ * place. The CA pack's expense register keeps EXPENSE_COLUMNS only.
+ */
+export const EXPENSE_STATUS_COLUMNS = [
+  col("paymentStatus", "Payment status today", "text", 16),
+  col("outstanding", "Outstanding today", "money", 15),
+  col("nature", "Direct / indirect", "text", 12),
+  col("department", "Department", "text", 16),
+];
+
 type PopulatedProject = { name: string } | null;
 
 /**
@@ -40,32 +63,40 @@ type PopulatedProject = { name: string } | null;
 export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> {
   await connectDB();
   const scope = await salaryScope();
-  const filterBase = expenseFilter({
-    q: f.q,
-    from: f.from,
-    to: f.to,
-    filters: {
-      ...(f.project.length ? { project: f.project } : {}),
-      ...(f.vendor.length ? { vendor: f.vendor } : {}),
-      ...(f.category.length ? { category: f.category } : {}),
-      ...(f.stage.length ? { stage: f.stage } : {}),
-      ...(f.paymentMethod.length ? { paymentMethod: f.paymentMethod } : {}),
-      ...(f.source.length ? { source: f.source } : {}),
+  // One "today" for the status filter and the status column, so a row filtered as overdue shows overdue.
+  const now = new Date();
+  // expenseListFilter applies the admins' direct / indirect category settings, as the Expenses list does.
+  const filterBase = await expenseListFilter(
+    {
+      q: f.q,
+      from: f.from,
+      to: f.to,
+      filters: {
+        ...(f.project.length ? { project: f.project } : {}),
+        ...(f.vendor.length ? { vendor: f.vendor } : {}),
+        ...(f.category.length ? { category: f.category } : {}),
+        ...(f.stage.length ? { stage: f.stage } : {}),
+        ...(f.paymentMethod.length ? { paymentMethod: f.paymentMethod } : {}),
+        ...(f.source.length ? { source: f.source } : {}),
+        ...(f.status?.length ? { status: f.status } : {}),
+        ...(f.nature?.length ? { nature: f.nature } : {}),
+        ...(f.department?.length ? { department: f.department } : {}),
+      },
     },
-  });
+    now,
+  );
   // Members never receive individual salary rows. Stock counted at purchase is always left out (as
   // in the Expenses list totals): its purchase is already a row. The project report shows it.
   const extra = [scope, COMPANY_EXPENSES].filter((x) => Object.keys(x).length);
   const filter = (extra.length ? { $and: [filterBase, ...extra] } : filterBase) as typeof filterBase;
   // Say so when it changes the result, since the Finance report and CA pack do show members a company salary total.
   const salariesHidden = Object.keys(scope).length > 0 && (f.category.length === 0 || f.category.includes("salaries"));
-  const [docs, categoryLabel] = await Promise.all([
-    Expense.find(filter).sort({ date: 1, _id: 1 }).populate("project", "name").lean(),
-    getExpenseCategoryLabeler(),
-  ]);
+  const [docs, categories] = await Promise.all([Expense.find(filter).sort({ date: 1, _id: 1 }).populate("project", "name").lean(), getExpenseCategories()]);
+  const categoryLabel = (value: string | null | undefined) => expenseCategoryLabel(categories, value);
 
   const rows: ReportRow[] = docs.map((e) => {
     const g = e.gst;
+    const payment = paymentSummaryOf(e, now);
     return {
       number: e.number,
       date: day(e.date),
@@ -82,16 +113,21 @@ export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> 
       total: e.amount,
       gstin: g?.gstin ?? "",
       invoice: g?.invoiceNumber ?? "",
+      // Stock assignments move no money of their own: paid when the stock was bought.
+      paymentStatus: payment.status === "stock" ? "From stock" : labelOf(PAYMENT_STATUSES, payment.status),
+      outstanding: payment.status === "stock" ? 0 : payment.outstanding,
+      nature: labelOf(EXPENSE_NATURES, expenseNature({ category: e.category, project: e.project }, categoryNature(categories, e.category))),
+      department: e.department ? labelOf(DEPARTMENTS, e.department as Department) : "",
     };
   });
-  const columns = EXPENSE_COLUMNS;
+  const columns = [...EXPENSE_COLUMNS, ...EXPENSE_STATUS_COLUMNS];
   const totals = sumTotals(columns, rows);
   const tax = round2(["cgst", "sgst", "igst", "cess"].reduce((s, k) => s + Number(totals[k] ?? 0), 0));
 
   return {
     type: "expense",
     title: "Expense report",
-    subtitle: [await describeFilters(f, { categories: "expense", passthrough: ["stage", "paymentMethod", "source"] }), salariesHidden ? "Salaries are hidden for your role" : ""].filter(Boolean).join(" · "),
+    subtitle: [await describeFilters(f, { categories: "expense", passthrough: ["stage", "paymentMethod", "source", "status", "nature", "department"] }), salariesHidden ? "Salaries are hidden for your role" : ""].filter(Boolean).join(" · "),
     columns,
     rows,
     totals,

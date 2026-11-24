@@ -5,9 +5,11 @@ import { connectDB } from "@/server/db";
 import { CapitalEntry, EquityHolder, Expense, Income, Invoice, Liability } from "@/server/models";
 import { maybeUnpaidFilter, paymentState } from "@/lib/payments";
 import { isCurrentLiabilityGroup } from "@/lib/finance-groups";
+import { loadFinanceGroups } from "@/server/finance-groups";
+import { sideOf } from "@/features/finance/liabilities/groups";
 import { addDays, endOfDayIST, startOfDayIST, toDateInput } from "@/lib/dates";
 import { balanceSheet } from "@/server/accounting/statements";
-import type { LiabilityStatus, PaymentStatus } from "@/lib/constants";
+import type { LiabilityKind, LiabilityStatus, PaymentStatus } from "@/lib/constants";
 
 /**
  * Open items and headline figures shared by the Finance dashboard, the Assets, Liabilities and
@@ -101,10 +103,19 @@ export type ReceivableRow = {
   total: number;
   received: number;
   outstanding: number;
+  /**
+   * Received above the invoice total: money the customer paid ahead, which the books carry as a
+   * customer advance. Always set by invoiceBalances; 0 when nothing was overpaid.
+   */
+  credit?: number;
   status: PaymentStatus;
 };
 
-/** Every issued invoice with what was received against it (income records that link it). */
+/**
+ * Every issued invoice with what was received against it (income records that link it), counting
+ * receipts dated up to the end of `now`'s day, as the ledger does. Outstanding never goes below 0;
+ * anything received above the total is the invoice's credit.
+ */
 export async function invoiceBalances(now: Date = new Date(), filter: Record<string, unknown> = {}): Promise<ReceivableRow[]> {
   await connectDB();
   const invoices = await Invoice.find({ status: { $ne: "cancelled" }, ...filter }, { number: 1, client: 1, project: 1, date: 1, dueDate: 1, total: 1 })
@@ -112,7 +123,7 @@ export async function invoiceBalances(now: Date = new Date(), filter: Record<str
     .lean();
   if (!invoices.length) return [];
   const received = await Income.aggregate<{ _id: Types.ObjectId; total: number }>([
-    { $match: { invoice: { $in: invoices.map((i) => i._id) } } },
+    { $match: { invoice: { $in: invoices.map((i) => i._id) }, date: { $lte: endOfDayIST(now) } } },
     { $group: { _id: "$invoice", total: { $sum: "$amount" } } },
   ]);
   const got = new Map(received.map((r) => [String(r._id), r.total]));
@@ -131,15 +142,17 @@ export async function invoiceBalances(now: Date = new Date(), filter: Record<str
       total: i.total,
       received: r,
       outstanding,
+      credit: round2(Math.max(0, r - i.total)),
       status: (outstanding <= 0 ? "paid" : overdue ? "overdue" : r > 0 ? "partial" : "unpaid") as PaymentStatus,
     };
   });
 }
 
+/** What customers owe today. Invoices dated after today are left out, as the ledger counts them only from their date. */
 export async function receivablesSummary(now: Date = new Date()) {
-  const rows = (await invoiceBalances(now)).filter((r) => r.outstanding > 0);
   const soon = toDateInput(addDays(now, 30));
   const today = toDateInput(now);
+  const rows = (await invoiceBalances(now)).filter((r) => r.outstanding > 0 && r.date <= today);
   const byClient = new Map<string, { client: string; outstanding: number; invoices: number; overdue: number }>();
   for (const r of rows) {
     const c = byClient.get(r.client) ?? { client: r.client, outstanding: 0, invoices: 0, overdue: 0 };
@@ -166,6 +179,8 @@ export type LiabilityRow = {
   code: string;
   name: string;
   group: string;
+  kind: LiabilityKind;
+  /** On the current side: the group or one of its parents is Current liabilities (custom subgroups included). */
   current: boolean;
   lender: string;
   originalAmount: number;
@@ -195,15 +210,21 @@ export function liabilityState(
 
 export async function liabilityRows(now: Date = new Date(), filter: Record<string, unknown> = {}): Promise<LiabilityRow[]> {
   await connectDB();
-  const docs = await Liability.find({ archivedAt: null, ...filter }).sort({ date: -1 }).lean();
+  const [docs, groups] = await Promise.all([
+    Liability.find({ archivedAt: null, ...filter }).sort({ date: -1 }).lean(),
+    loadFinanceGroups("liability", { includeArchived: true }),
+  ]);
   return docs.map((l) => {
     const s = liabilityState(l, now);
+    // A subgroup id is not a built-in key: walk its parents up to Current or Non-current liabilities.
+    const side = sideOf(groups, l.group);
     return {
       id: String(l._id),
       code: l.code,
       name: l.name,
       group: l.group,
-      current: isCurrentLiabilityGroup(l.group),
+      kind: (l.kind ?? "loan") as LiabilityKind,
+      current: side ? side === "current_liabilities" : isCurrentLiabilityGroup(l.group),
       lender: l.lender,
       originalAmount: l.originalAmount,
       principalPaid: s.principalPaid,

@@ -1,4 +1,4 @@
-import type { MovementType, ProjectStage } from "@/lib/constants";
+import type { MovementType, ProjectStage, WastageReason } from "@/lib/constants";
 
 /** A row in the stock movement table. */
 export type MovementRow = {
@@ -15,6 +15,10 @@ export type MovementRow = {
   unitCost: number;
   totalCost: number;
   vendor: string | null;
+  /** Wastage: why, and whether it was in storage or in use on `project`. */
+  wastage: { reason: WastageReason; from: "storage" | "project" } | null;
+  /** Location move: where the item was kept before and after. */
+  relocation: { from: string | null; to: string | null } | null;
   balance: { available: number; allocated: number };
   by: string | null;
   note: string | null;

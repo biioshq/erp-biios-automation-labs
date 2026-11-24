@@ -1,4 +1,5 @@
 import { startOfDayIST } from "@/lib/dates";
+import { PROJECT_STATUSES } from "@/lib/constants";
 
 /** Budget health: warning from 80% of the budget, danger above 100%. Client-safe. */
 export function budgetTone(usage: number, budget: number): "ok" | "warning" | "danger" {
@@ -36,4 +37,11 @@ export function timeElapsed(start: string | null, end: string | null, now: Date 
   const e = new Date(end).getTime();
   if (e <= s) return null;
   return Math.min(1, Math.max(0, (now.getTime() - s) / (e - s)));
+}
+
+/** Parses ?status= (a comma list) into known project statuses. */
+export function parseStatuses(value: string | string[] | undefined): string[] {
+  const v = (Array.isArray(value) ? value[0] : value) ?? "";
+  const known = new Set<string>(PROJECT_STATUSES.map((s) => s.value));
+  return v.split(",").filter((s) => known.has(s));
 }

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { postDueRecurringExpenses } from "@/server/services/recurring";
+import { notifyStockAlerts } from "@/server/services/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -16,13 +17,19 @@ function authorized(request: NextRequest) {
 export const maxDuration = 60;
 
 /**
- * Posts due recurring expenses. Called by Vercel Cron (GET, see vercel.json) or any external
- * scheduler (POST), with "Authorization: Bearer $CRON_SECRET". Exactly-once per due date.
+ * Posts due recurring expenses, then sends the daily low-stock alerts. Called by Vercel Cron (GET,
+ * see vercel.json) or any external scheduler (POST), with "Authorization: Bearer $CRON_SECRET".
+ * Exactly-once per due date; the alerts run once per IST day. A failure in the alerts never hides
+ * the expenses result.
  */
 async function run(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const result = await postDueRecurringExpenses();
-  return NextResponse.json(result);
+  const stockAlerts = await notifyStockAlerts().catch((error: unknown) => {
+    console.error("[stock-alerts] run failed", error);
+    return { ran: false, listed: 0, notified: 0, error: "failed" };
+  });
+  return NextResponse.json({ ...result, stockAlerts });
 }
 
 export const GET = run;

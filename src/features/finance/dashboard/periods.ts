@@ -1,4 +1,5 @@
-import { endOfDayIST, financialYearIST, fromDateInput, startOfMonthIST, toDateInput } from "@/lib/dates";
+import { addDays, endOfDayIST, financialYearIST, fromDateInput, startOfDayIST, startOfMonthIST, toDateInput } from "@/lib/dates";
+import { formatDate } from "@/lib/format";
 
 /** Period switcher values for the finance dashboard. Client-safe. */
 export const DASHBOARD_PERIODS = [
@@ -8,13 +9,38 @@ export const DASHBOARD_PERIODS = [
   { value: "all", label: "All time" },
 ] as const;
 
-export type DashboardPeriod = (typeof DASHBOARD_PERIODS)[number]["value"];
+/** A preset, or "custom" for a from / to range picked by the user (?period=custom&from=&to=). */
+export type DashboardPeriod = (typeof DASHBOARD_PERIODS)[number]["value"] | "custom";
 
 export const DEFAULT_PERIOD: DashboardPeriod = "fy";
 
+const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+
+/** A preset period from ?period=. "custom" needs its dates, so it is read with parsePeriodParams. */
 export function parsePeriod(value: string | string[] | undefined): DashboardPeriod {
-  const v = Array.isArray(value) ? value[0] : value;
+  const v = first(value);
   return DASHBOARD_PERIODS.some((p) => p.value === v) ? (v as DashboardPeriod) : DEFAULT_PERIOD;
+}
+
+/** The period the URL asks for, with the custom range's days ("yyyy-mm-dd"). */
+export type PeriodSelection = { period: DashboardPeriod; from?: string; to?: string };
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** A real calendar day in yyyy-mm-dd form (2026-02-30 is not). */
+export function isDayInput(value: string | undefined): value is string {
+  return Boolean(value && DAY_RE.test(value) && toDateInput(fromDateInput(value)) === value);
+}
+
+/**
+ * Reads ?period=, ?from= and ?to=. A custom range needs both days; reversed days are swapped;
+ * anything invalid falls back to the default period.
+ */
+export function parsePeriodParams(params: { period?: string | string[]; from?: string | string[]; to?: string | string[] }): PeriodSelection {
+  if (first(params.period) !== "custom") return { period: parsePeriod(params.period) };
+  const a = first(params.from);
+  const b = first(params.to);
+  if (!isDayInput(a) || !isDayInput(b)) return { period: DEFAULT_PERIOD };
+  return a <= b ? { period: "custom", from: a, to: b } : { period: "custom", from: b, to: a };
 }
 
 export type PeriodRange = {
@@ -55,8 +81,33 @@ function previousToDate(now: Date, months: number, from: Date, phrase: string) {
   return { from: startOfMonthIST(from, -months), to: new Date(end), phrase };
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A custom range, compared with the same number of days just before it. Like the presets, the
+ * previous side is cut at the same point as today when the range runs past today.
+ */
+function customRange(fromDay: string, toDay: string, now: Date): PeriodRange {
+  const from = fromDateInput(fromDay);
+  const to = endOfDayIST(fromDateInput(toDay));
+  const days = Math.round((startOfDayIST(to).getTime() - from.getTime()) / DAY_MS) + 1;
+  const today = endOfDayIST(now);
+  const elapsedEnd = Math.min(to.getTime(), today.getTime());
+  const prevFrom = addDays(from, -days);
+  const previous =
+    from.getTime() <= today.getTime()
+      ? { from: prevFrom, to: new Date(prevFrom.getTime() + (elapsedEnd - from.getTime())), phrase: `the ${days} ${days === 1 ? "day" : "days"} before` }
+      : undefined;
+  const label = fromDay === toDay ? formatDate(from) : `${formatDate(from)} to ${formatDate(to)}`;
+  return { period: "custom", label, phrase: "in this date range", from, to, previous };
+}
+
 /** Date bounds (IST) of a dashboard period and the equal period before it. */
-export function resolvePeriod(period: DashboardPeriod, now: Date = new Date()): PeriodRange {
+export function resolvePeriod(period: DashboardPeriod, now: Date = new Date(), custom?: { from?: string; to?: string }): PeriodRange {
+  if (period === "custom") {
+    if (isDayInput(custom?.from) && isDayInput(custom?.to)) return customRange(custom.from, custom.to, now);
+    return resolvePeriod(DEFAULT_PERIOD, now);
+  }
   if (period === "month") {
     const from = startOfMonthIST(now);
     const next = startOfMonthIST(now, 1);

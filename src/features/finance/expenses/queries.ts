@@ -2,18 +2,31 @@ import "server-only";
 
 import { Types, type QueryFilter } from "mongoose";
 import { connectDB } from "@/server/db";
-import { Expense, type ExpenseDoc } from "@/server/models";
+import { Expense, FixedAsset, type ExpenseDoc } from "@/server/models";
 import { idOf, iso } from "@/server/serialize";
 import { getFiles } from "@/features/files/server";
 import { salaryScope } from "@/server/auth/session";
 import { dateRangeFilter } from "@/lib/dates";
 import { mongoSort, searchRegex, type ListParams, type Paginated } from "@/lib/list-params";
-import type { ExpenseSource, PaymentMethod, ProjectStage } from "@/lib/constants";
-import { getExpenseCategoryLabeler } from "@/server/expense-categories";
+import { DEPARTMENTS, valuesOf, type Department, type ExpenseNature, type ExpenseSource, type PaymentMethod, type PaymentStatus, type ProjectStage } from "@/lib/constants";
+import { getExpenseCategories } from "@/server/expense-categories";
+import {
+  DEFAULT_EXPENSE_CATEGORIES,
+  categoryNature,
+  directCategoryValues,
+  expenseCategoryLabel,
+  type ExpenseCategoryOption,
+} from "@/lib/expense-categories";
+import { expenseNature } from "@/lib/expense-nature";
+import { paymentState } from "@/lib/payments";
 import { totalTax } from "@/lib/gst";
 import { round2 } from "@/lib/format";
 import { COMPANY_EXPENSES } from "@/server/services/metrics";
-import type { ExpenseDetail, ExpenseRow, ExpenseSummary } from "./types";
+import { EXPENSE_NATURE_FILTER_VALUES, EXPENSE_STATUS_FILTER_VALUES } from "./schemas";
+import { statusCondition } from "./payment-status";
+import type { ExpenseDetail, ExpensePaymentRecord, ExpensePaymentSummary, ExpenseRow, ExpenseSummary } from "./types";
+
+const DEPARTMENT_VALUES = valuesOf(DEPARTMENTS);
 
 type PopulatedProject = { _id: Types.ObjectId; name: string; code: string; color?: string } | null;
 
@@ -25,9 +38,27 @@ function refOf(value: unknown): { id: string; name: string } | null {
   return r?._id ? { id: String(r._id), name: r.name } : null;
 }
 
-type Labeler = (value: string | null | undefined) => string;
+/** What toRow needs to know about categories: names and direct/indirect settings. */
+type CategoryLookup = { label: (value: string | null | undefined) => string; nature: (value: string) => ExpenseNature };
 
-function toRow(e: ExpenseDoc & { project?: unknown }, labelOf: Labeler): ExpenseRow {
+function categoryLookup(categories: readonly ExpenseCategoryOption[]): CategoryLookup {
+  return { label: (v) => expenseCategoryLabel(categories, v), nature: (v) => categoryNature(categories, v) };
+}
+
+/** Paid and outstanding as of `now`. Generated stock assignments move no money, so they show "stock". */
+export function paymentSummaryOf(e: Pick<ExpenseDoc, "amount" | "date" | "paymentMethod" | "dueDate" | "payments" | "account">, now = new Date()): ExpensePaymentSummary {
+  const explicit = Array.isArray(e.payments);
+  const s = paymentState({ amount: e.amount, date: e.date, paymentMethod: e.paymentMethod, dueDate: e.dueDate, payments: e.payments }, now);
+  return {
+    status: !explicit && e.paymentMethod === "stock" ? "stock" : s.status,
+    paid: s.paid,
+    outstanding: s.outstanding,
+    dueOn: s.dueOn ? iso(s.dueOn) : null,
+    explicit,
+  };
+}
+
+function toRow(e: ExpenseDoc & { project?: unknown }, categories: CategoryLookup, now = new Date()): ExpenseRow {
   const project = e.project as PopulatedProject;
   return {
     id: String(e._id),
@@ -35,7 +66,7 @@ function toRow(e: ExpenseDoc & { project?: unknown }, labelOf: Labeler): Expense
     vendor: e.vendor,
     description: e.description ?? null,
     category: e.category,
-    categoryLabel: labelOf(e.category),
+    categoryLabel: categories.label(e.category),
     amount: e.amount,
     date: iso(e.date)!,
     paymentMethod: e.paymentMethod as PaymentMethod,
@@ -49,13 +80,41 @@ function toRow(e: ExpenseDoc & { project?: unknown }, labelOf: Labeler): Expense
     hasReceipt: Boolean(e.receipt),
     recurring: refOf(e.recurring),
     employee: refOf(e.employee),
+    department: (e.department as Department | undefined) ?? null,
+    nature: expenseNature({ category: e.category, project: e.project }, categories.nature(e.category)),
+    payment: paymentSummaryOf(e, now),
   };
 }
 
-/** Mongo filter from list params. Exported so reports can reuse the same filtering. */
-export function expenseFilter(params: Pick<ListParams, "q" | "filters" | "from" | "to">): QueryFilter<ExpenseDoc> {
+type FilterOptions = {
+  /**
+   * Categories set to direct, for the nature filter (directCategoryValues of getExpenseCategories).
+   * Without it the built-in defaults apply; expenseListFilter passes the admins' settings.
+   */
+  directCategories?: readonly string[];
+  /** "Today" for the status filter. */
+  now?: Date;
+};
+
+/** Direct: on a project, or a direct category. Indirect: neither. Both or neither selected: no condition. */
+function natureCondition(natures: string[], directCategories: readonly string[]): Record<string, unknown> | null {
+  const wanted = natures.filter((n) => (EXPENSE_NATURE_FILTER_VALUES as readonly string[]).includes(n));
+  if (wanted.length !== 1) return null;
+  const direct = [...directCategories];
+  return wanted[0] === "direct"
+    ? { $or: [{ project: { $ne: null } }, { category: { $in: direct } }] }
+    : { project: null, category: { $nin: direct } };
+}
+
+/**
+ * Mongo filter from list params. Exported so reports can reuse the same filtering. The status
+ * filter follows paymentState (payment-status.ts); the nature filter needs the category settings
+ * (see FilterOptions), so lists use expenseListFilter.
+ */
+export function expenseFilter(params: Pick<ListParams, "q" | "filters" | "from" | "to">, options: FilterOptions = {}): QueryFilter<ExpenseDoc> {
   // Built loosely: Mongoose 9's strict filter types reject `$in` over string lists from the URL.
   const filter: Record<string, unknown> = {};
+  const and: Record<string, unknown>[] = [];
   const { q, filters } = params;
   if (q) {
     const re = searchRegex(q);
@@ -73,14 +132,35 @@ export function expenseFilter(params: Pick<ListParams, "q" | "filters" | "from" 
   }
   const range = dateRangeFilter(params.from, params.to);
   if (range) filter.date = range;
+  // Unknown values from a hand-edited URL are ignored, as the report parser does, so the list and its export agree.
+  const departments = (filters.department ?? []).filter((d) => d === "none" || (DEPARTMENT_VALUES as readonly string[]).includes(d));
+  if (departments.length) {
+    const named = departments.filter((d) => d !== "none");
+    filter.department = departments.includes("none") ? { $in: [...named, null] } : { $in: named };
+  }
+  const statuses = (filters.status ?? []).filter((s): s is PaymentStatus => (EXPENSE_STATUS_FILTER_VALUES as readonly string[]).includes(s));
+  if (statuses.length) and.push(statusCondition(statuses, options.now));
+  if (filters.nature?.length) {
+    const direct = options.directCategories ?? directCategoryValues(DEFAULT_EXPENSE_CATEGORIES);
+    const condition = natureCondition(filters.nature, direct);
+    if (condition) and.push(condition);
+  }
+  if (and.length) filter.$and = and;
   return filter as QueryFilter<ExpenseDoc>;
+}
+
+/** expenseFilter with the admins' direct/indirect settings, for lists and summaries. */
+export async function expenseListFilter(params: Pick<ListParams, "q" | "filters" | "from" | "to">, now = new Date()): Promise<QueryFilter<ExpenseDoc>> {
+  const categories = await getExpenseCategories();
+  return expenseFilter(params, { directCategories: directCategoryValues(categories), now });
 }
 
 export async function listExpenses(params: ListParams): Promise<Paginated<ExpenseRow> & { summary: ExpenseSummary }> {
   await connectDB();
-  const scope = await salaryScope();
-  const filter = (Object.keys(scope).length ? { $and: [expenseFilter(params), scope] } : expenseFilter(params)) as ReturnType<typeof expenseFilter>;
-  const [docs, total, summary, labelOf] = await Promise.all([
+  const now = new Date();
+  const [scope, base, categories] = await Promise.all([salaryScope(), expenseListFilter(params, now), getExpenseCategories()]);
+  const filter = (Object.keys(scope).length ? { $and: [base, scope] } : base) as typeof base;
+  const [docs, total, summary] = await Promise.all([
     Expense.find(filter)
       .sort(mongoSort(params.sort ?? { id: "date", desc: true }))
       .skip((params.page - 1) * params.pageSize)
@@ -102,10 +182,10 @@ export async function listExpenses(params: ListParams): Promise<Paginated<Expens
         },
       },
     ]),
-    getExpenseCategoryLabeler(),
   ]);
+  const lookup = categoryLookup(categories);
   return {
-    rows: docs.map((d) => toRow(d, labelOf)),
+    rows: docs.map((d) => toRow(d, lookup, now)),
     total,
     page: params.page,
     pageSize: params.pageSize,
@@ -118,6 +198,55 @@ export async function listExpenses(params: ListParams): Promise<Paginated<Expens
   };
 }
 
+/** Rows for the given expenses, in the order given (pages that select ids by aggregation). */
+export async function expenseRowsByIds(ids: Types.ObjectId[], now = new Date()): Promise<ExpenseRow[]> {
+  if (!ids.length) return [];
+  await connectDB();
+  const [docs, categories] = await Promise.all([
+    Expense.find({ _id: { $in: ids } })
+      .populate("project", "name code color")
+      .populate("recurring", "name")
+      .populate("employee", "name")
+      .lean(),
+    getExpenseCategories(),
+  ]);
+  const lookup = categoryLookup(categories);
+  const byId = new Map(docs.map((d) => [String(d._id), d]));
+  return ids.flatMap((id) => {
+    const d = byId.get(String(id));
+    return d ? [toRow(d, lookup, now)] : [];
+  });
+}
+
+type PopulatedPayment = {
+  _id: Types.ObjectId;
+  date: Date;
+  amount: number;
+  paymentMethod: string;
+  account?: PopulatedRef | Types.ObjectId | null;
+  reference?: string | null;
+  note?: string | null;
+  bankTransaction?: Types.ObjectId | null;
+  createdBy?: PopulatedRef | Types.ObjectId | null;
+  createdAt?: Date | null;
+};
+
+function toPaymentRecord(p: PopulatedPayment): ExpensePaymentRecord {
+  return {
+    id: String(p._id),
+    date: iso(p.date)!,
+    amount: p.amount,
+    paymentMethod: p.paymentMethod as PaymentMethod,
+    account: refOf(p.account),
+    reference: p.reference ?? null,
+    note: p.note ?? null,
+    fromBankStatement: Boolean(p.bankTransaction),
+    bankTransactionId: p.bankTransaction ? String(p.bankTransaction) : null,
+    createdBy: refOf(p.createdBy),
+    createdAt: iso(p.createdAt ?? null),
+  };
+}
+
 export async function getExpense(id: string): Promise<ExpenseDetail | null> {
   if (!Types.ObjectId.isValid(id)) return null;
   await connectDB();
@@ -127,15 +256,26 @@ export async function getExpense(id: string): Promise<ExpenseDetail | null> {
     .populate("recurring", "name")
     .populate("employee", "name")
     .populate("createdBy", "name")
+    .populate("account", "name")
+    .populate("payments.account", "name")
+    .populate("payments.createdBy", "name")
+    .populate("liability", "name")
+    .populate("capitalAsset", "name code purchaseCost")
     .lean();
   if (!e) return null;
+  // An asset bought through this expense: by the expense's link, or by the asset's funding (older records).
+  type AssetRef = { _id: Types.ObjectId; name: string; code: string; purchaseCost: number } | null;
+  const asset = ((e.capitalAsset as unknown as AssetRef)?._id
+    ? e.capitalAsset
+    : await FixedAsset.findOne({ "funding.expense": e._id }, { name: 1, code: 1, purchaseCost: 1 }).lean()) as unknown as AssetRef;
   if (e.category === "salaries" && Object.keys(await salaryScope()).length) return null;
-  const [[receipt], labelOf] = await Promise.all([e.receipt ? getFiles([e.receipt]) : Promise.resolve([null]), getExpenseCategoryLabeler()]);
+  const [[receipt], categories] = await Promise.all([e.receipt ? getFiles([e.receipt]) : Promise.resolve([null]), getExpenseCategories()]);
   const item = e.item as unknown as { _id: Types.ObjectId; name: string; sku: string } | null;
   const creator = e.createdBy as unknown as { _id: Types.ObjectId; name?: string } | null;
+  const payments = ((e.payments ?? []) as unknown as PopulatedPayment[]).map(toPaymentRecord).sort((a, b) => a.date.localeCompare(b.date));
   const g = e.gst;
   return {
-    ...toRow(e, labelOf),
+    ...toRow(e, categoryLookup(categories)),
     vendorAddress: e.vendorAddress ?? null,
     notes: e.notes ?? null,
     gst: g
@@ -171,5 +311,13 @@ export async function getExpense(id: string): Promise<ExpenseDetail | null> {
     createdBy: creator?._id ? { id: idOf(creator._id)!, name: creator.name ?? "" } : null,
     createdAt: iso(e.createdAt as Date)!,
     updatedAt: iso(e.updatedAt as Date)!,
+    dueDate: iso(e.dueDate ?? null),
+    account: refOf(e.account),
+    payments,
+    prepaid: e.prepaid?.from && e.prepaid?.to ? { from: iso(e.prepaid.from)!, to: iso(e.prepaid.to)! } : null,
+    liability: refOf(e.liability),
+    capitalAsset: asset?._id ? { id: String(asset._id), name: asset.name, code: asset.code, purchaseCost: asset.purchaseCost } : null,
+    bankMatched: !Array.isArray(e.payments) && Boolean(e.bankTransaction),
+    bankTransactionId: e.bankTransaction ? String(e.bankTransaction) : null,
   };
 }

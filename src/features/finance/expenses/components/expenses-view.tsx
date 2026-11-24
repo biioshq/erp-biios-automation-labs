@@ -4,7 +4,7 @@ import { useEffect, useMemo, useOptimistic, useRef, useState, startTransition } 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
-import { Boxes, Download, Eye, MoreHorizontal, PackagePlus, Paperclip, Pencil, Plus, Receipt, Repeat, Trash2 } from "lucide-react";
+import { Boxes, Download, Eye, Landmark, MoreHorizontal, PackagePlus, PackageX, Paperclip, Pencil, Plus, Receipt, Repeat, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -23,17 +23,18 @@ import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { useIsAdmin } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
-import { EXPENSE_SOURCES, PAYMENT_METHODS, PROJECT_STAGES, labelOf } from "@/lib/constants";
+import { DEPARTMENTS, EXPENSE_NATURES, EXPENSE_SOURCES, PAYMENT_METHODS, PAYMENT_STATUSES, PROJECT_STAGES, labelOf } from "@/lib/constants";
 import { DEFAULT_EXPENSE_CATEGORIES, expenseCategoryFilterOptions, type ExpenseCategoryOption } from "@/lib/expense-categories";
 import { formatDate } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { emitDataChanged } from "@/lib/events";
 import type { Paginated } from "@/lib/list-params";
-import type { ProjectOption } from "@/server/lookups";
+import type { BankAccountOption, ProjectOption } from "@/server/lookups";
 import { deleteExpense, fetchExpense } from "../actions";
 import type { ExpenseDetail, ExpenseRow, ExpenseSummary } from "../types";
 import { ExpenseForm } from "./expense-form";
 import { ExpenseDetailSkeleton, ExpenseDetailView } from "./expense-detail";
-import { ExpenseMobileCard, ExpenseSourceBadge, isInventoryExpense } from "./expense-badges";
+import { ExpenseMobileCard, ExpenseSourceBadge, PaymentStatusBadge, isGeneratedExpense } from "./expense-badges";
 
 type Panel = { kind: "new" } | { kind: "view"; id: string } | { kind: "edit"; id: string } | null;
 
@@ -46,12 +47,15 @@ export function ExpensesView({
   projects,
   vendors,
   categories = DEFAULT_EXPENSE_CATEGORIES,
+  accounts = [],
 }: {
   data: Paginated<ExpenseRow> & { summary: ExpenseSummary };
   projects: ProjectOption[];
   vendors: string[];
   /** Built-in and custom categories, hidden ones included (getExpenseCategories). */
   categories?: ExpenseCategoryOption[];
+  /** Open bank and cash accounts, for "Paid from" and Record payment. */
+  accounts?: BankAccountOption[];
 }) {
   const isAdmin = useIsAdmin();
   const router = useRouter();
@@ -165,6 +169,10 @@ export function ExpensesView({
                 <PackagePlus className="size-4 text-brand-ink" />
               ) : row.original.source === "recurring" ? (
                 <Repeat className="size-4 text-brand-ink" />
+              ) : row.original.source === "inventory_wastage" ? (
+                <PackageX className="size-4 text-brand-ink" />
+              ) : row.original.source === "liability_interest" ? (
+                <Landmark className="size-4 text-brand-ink" />
               ) : (
                 <Receipt className="size-4" />
               )}
@@ -172,7 +180,11 @@ export function ExpensesView({
             <div className="min-w-0">
               <p className="flex items-center gap-2 font-medium">
                 <span className="truncate">{row.original.vendor}</span>
-                {row.original.source === "recurring" || row.original.source === "inventory_purchase" || row.original.countedAtPurchase ? (
+                {row.original.source === "recurring" ||
+                row.original.source === "inventory_purchase" ||
+                row.original.source === "inventory_wastage" ||
+                row.original.source === "liability_interest" ||
+                row.original.countedAtPurchase ? (
                   <ExpenseSourceBadge source={row.original.source} countedAtPurchase={row.original.countedAtPurchase} className="h-5 px-2 text-[11px]" />
                 ) : null}
               </p>
@@ -218,10 +230,27 @@ export function ExpensesView({
         meta: { label: "Category" },
         header: ({ column }) => <DataTableColumnHeader column={column} title="Category" />,
         cell: ({ row }) => (
-          <StatusBadge tone="neutral" dot={false}>
-            {row.original.categoryLabel}
-          </StatusBadge>
+          <div className="space-y-0.5">
+            <StatusBadge tone="neutral" dot={false}>
+              {row.original.categoryLabel}
+            </StatusBadge>
+            <p className={cn("pl-1 text-[11px]", row.original.nature === "direct" ? "text-brand-ink" : "text-muted-foreground")}>
+              {labelOf(EXPENSE_NATURES, row.original.nature)}
+            </p>
+          </div>
         ),
+      },
+      {
+        id: "department",
+        meta: { label: "Department" },
+        header: "Department",
+        enableSorting: false,
+        cell: ({ row }) =>
+          row.original.department ? (
+            <span className="whitespace-nowrap text-muted-foreground">{labelOf(DEPARTMENTS, row.original.department)}</span>
+          ) : (
+            <span className="text-muted-foreground/60">-</span>
+          ),
       },
       {
         id: "paymentMethod",
@@ -230,6 +259,25 @@ export function ExpensesView({
         header: "Payment",
         enableSorting: false,
         cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{labelOf(PAYMENT_METHODS, row.original.paymentMethod)}</span>,
+      },
+      {
+        id: "status",
+        meta: { label: "Payment status" },
+        header: "Status",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const p = row.original.payment;
+          return (
+            <div className="min-w-24 space-y-0.5">
+              <PaymentStatusBadge payment={p} />
+              {p.outstanding > 0 && p.status !== "stock" ? (
+                <p className="pl-1 text-[11px] whitespace-nowrap text-muted-foreground">
+                  <Money value={p.outstanding} /> owed{p.dueOn ? ` · due ${formatDate(p.dueOn)}` : ""}
+                </p>
+              ) : null}
+            </div>
+          );
+        },
       },
       {
         id: "gst",
@@ -302,7 +350,7 @@ export function ExpensesView({
                 <DropdownMenuItem onSelect={() => setPanel({ kind: "view", id: row.original.id })}>
                   <Eye /> View
                 </DropdownMenuItem>
-                {!isInventoryExpense(row.original.source) ? (
+                {!isGeneratedExpense(row.original.source) ? (
                   <>
                     <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
                       <Pencil /> Edit
@@ -336,7 +384,10 @@ export function ExpensesView({
         options: [{ value: "none", label: "No project (overhead)" }, ...projects.map((p) => ({ value: p.value, label: p.label }))],
       },
       { key: "stage", title: "Stage", options: PROJECT_STAGES.map((o) => ({ ...o })) },
-      { key: "paymentMethod", title: "Payment", options: PAYMENT_METHODS.map((o) => ({ ...o })) },
+      { key: "status", title: "Payment status", options: PAYMENT_STATUSES.map((o) => ({ ...o })) },
+      { key: "nature", title: "Direct / indirect", options: EXPENSE_NATURES.map((o) => ({ ...o })) },
+      { key: "paymentMethod", title: "Payment mode", options: PAYMENT_METHODS.map((o) => ({ ...o })) },
+      { key: "department", title: "Department", options: [{ value: "none", label: "No department" }, ...DEPARTMENTS.map((o) => ({ ...o }))] },
       { key: "source", title: "Source", options: EXPENSE_SOURCES.map((o) => ({ ...o })) },
     ],
     [projects, categories],
@@ -368,7 +419,7 @@ export function ExpensesView({
         getRowId={(r) => r.id}
         onRowClick={(r) => setPanel({ kind: "view", id: r.id })}
         renderMobileRow={(r) => <ExpenseMobileCard row={r} mutedIfCounted />}
-        initialHidden={["paymentMethod"]}
+        initialHidden={["paymentMethod", "department"]}
         toolbarActions={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -420,10 +471,17 @@ export function ExpensesView({
         }
       >
         {panel?.kind === "new" ? (
-          <ExpenseForm projects={projects} vendors={vendors} categories={categories} onDone={() => setPanel(null)} onCancel={() => setPanel(null)} />
+          <ExpenseForm
+            projects={projects}
+            vendors={vendors}
+            categories={categories}
+            accounts={accounts}
+            onDone={() => setPanel(null)}
+            onCancel={() => setPanel(null)}
+          />
         ) : panel && (loadingDetail || detail?.id !== panel.id) ? (
           <ExpenseDetailSkeleton />
-        ) : panel?.kind === "edit" && detail && !isInventoryExpense(detail.source) ? (
+        ) : panel?.kind === "edit" && detail && !isGeneratedExpense(detail.source) ? (
           <ExpenseForm
             // Keyed by the record only: a refresh must never remount the form and drop what is being typed.
             key={detail.id}
@@ -431,6 +489,7 @@ export function ExpensesView({
             projects={projects}
             vendors={vendors}
             categories={categories}
+            accounts={accounts}
             onDone={(id) => {
               setDetail(null);
               setVersion((v) => v + 1);
@@ -439,8 +498,14 @@ export function ExpensesView({
             onCancel={() => setPanel({ kind: "view", id: detail.id })}
           />
         ) : (panel?.kind === "view" || panel?.kind === "edit") && detail ? (
-          // An inventory expense opened for editing (an old link) shows read-only: it changes through inventory.
-          <ExpenseDetailView expense={detail} onEdit={() => setPanel({ kind: "edit", id: detail.id })} onDelete={() => remove(detail)} canDelete={isAdmin} />
+          // A generated expense opened for editing (an old link) shows read-only: it changes through its source.
+          <ExpenseDetailView
+            expense={detail}
+            accounts={accounts}
+            onEdit={() => setPanel({ kind: "edit", id: detail.id })}
+            onDelete={() => remove(detail)}
+            canDelete={isAdmin}
+          />
         ) : null}
       </FormSheet>
 

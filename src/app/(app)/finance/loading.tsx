@@ -9,7 +9,7 @@ export default function Loading() {
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-4 w-80 max-w-full" />
         </div>
-        <Skeleton className="h-8 w-72 max-w-full" />
+        <Skeleton className="h-8 w-[26rem] max-w-full" />
       </div>
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (
@@ -20,10 +20,24 @@ export default function Loading() {
           </div>
         ))}
       </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className={`space-y-3 rounded-xl border bg-card p-4 sm:p-5 ${i === 4 ? "max-sm:col-span-2" : ""}`}>
+            <Skeleton className="h-3.5 w-24" />
+            <Skeleton className="h-7 w-28" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        ))}
+      </div>
       <div className="grid gap-4 xl:grid-cols-3">
         <Skeleton className="h-96 rounded-xl xl:col-span-2" />
         <Skeleton className="h-96 rounded-xl" />
       </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Skeleton className="h-72 rounded-xl" />
+        <Skeleton className="h-72 rounded-xl" />
+      </div>
+      <Skeleton className="h-80 rounded-xl" />
       <div className="grid gap-4 xl:grid-cols-3">
         <Skeleton className="h-96 rounded-xl xl:col-span-2" />
         <div className="space-y-4">

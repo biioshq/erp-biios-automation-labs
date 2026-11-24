@@ -480,6 +480,8 @@ type ItemRef = {
   subcategory: string | null;
   description: string | null;
   attributes: ItemAttribute[];
+  /** Days from ordering to arrival; null when the item has none. */
+  leadTimeDays: number | null;
 };
 
 type ItemLookups = {
@@ -507,7 +509,7 @@ const purchaseName = (quantity: number, unit: string, ymd: string) => `the purch
 async function loadItemLookups(options: CsvOptions): Promise<ItemLookups> {
   const [categories, items] = await Promise.all([
     InventoryCategory.find({}, { name: 1 }).lean(),
-    InventoryItem.find({}, { name: 1, sku: 1, unit: 1, archivedAt: 1, subcategory: 1, description: 1, attributes: 1 }).lean(),
+    InventoryItem.find({}, { name: 1, sku: 1, unit: 1, archivedAt: 1, subcategory: 1, description: 1, attributes: 1, leadTimeDays: 1 }).lean(),
   ]);
   const fileCategories = new Map<string, { name: string; count: number }>();
   for (const c of options.fileCategories) {
@@ -535,6 +537,7 @@ async function loadItemLookups(options: CsvOptions): Promise<ItemLookups> {
       subcategory: i.subcategory || null,
       description: i.description || null,
       attributes: cleanAttributes(i.attributes),
+      leadTimeDays: typeof i.leadTimeDays === "number" ? i.leadTimeDays : null,
     });
   }
   return ctx;
@@ -698,21 +701,44 @@ function readCategory(raw: string, ctx: ItemLookups): CategoryRead {
 const DESCRIPTION_MAX = 2000;
 
 /** What a sheet row adds to an item already in inventory: only details the item does not have yet. */
-type DetailFill = { subcategory?: string; description?: string; attributes: ItemAttribute[] };
+type DetailFill = { subcategory?: string; description?: string; attributes: ItemAttribute[]; leadTimeDays?: number };
 
-function missingDetails(item: ItemRef, row: { subcategory?: string; description?: string; attributes: ItemAttribute[] }): DetailFill | undefined {
+function missingDetails(
+  item: ItemRef,
+  row: { subcategory?: string; description?: string; attributes: ItemAttribute[]; leadTimeDays?: number },
+): DetailFill | undefined {
   const have = new Set(item.attributes.map((a) => attributeKey(a.label)));
   const room = Math.max(0, MAX_ATTRIBUTES - item.attributes.length);
   const fill: DetailFill = {
     subcategory: !item.subcategory && row.subcategory ? row.subcategory.slice(0, SUBCATEGORY_MAX) : undefined,
     description: !item.description && row.description ? row.description.slice(0, DESCRIPTION_MAX) : undefined,
     attributes: row.attributes.filter((a) => !have.has(attributeKey(a.label))).slice(0, room),
+    // A lead time is set only on an item that has none: one entered on the item is never replaced.
+    leadTimeDays: item.leadTimeDays === null && row.leadTimeDays !== undefined ? row.leadTimeDays : undefined,
   };
-  return fill.subcategory || fill.description || fill.attributes.length ? fill : undefined;
+  return fill.subcategory || fill.description || fill.attributes.length || fill.leadTimeDays !== undefined ? fill : undefined;
 }
 
 const fillLabels = (fill: DetailFill) =>
-  [fill.subcategory ? "Subcategory" : "", fill.description ? "Description" : "", ...fill.attributes.map((a) => a.label)].filter(Boolean).join(", ");
+  [
+    fill.subcategory ? "Subcategory" : "",
+    fill.description ? "Description" : "",
+    fill.leadTimeDays !== undefined ? "Lead time" : "",
+    ...fill.attributes.map((a) => a.label),
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+/** The lead time cell: whole days from 0 to 365, or undefined when empty (the item's lead time is then left alone). */
+function readLeadTime(v: Values, issues: Issues): number | undefined {
+  const days = readNumber(v, "leadTimeDays", issues);
+  if (days === undefined) return undefined;
+  if (!Number.isInteger(days) || days > 365) {
+    issues.add("leadTimeDays", "Whole days from 0 to 365");
+    return undefined;
+  }
+  return days;
+}
 
 type BuiltItem = {
   issues: Issues;
@@ -812,6 +838,8 @@ function buildItem(row: CsvRowInput, ctx: ItemLookups, options: CsvOptions, mode
   shown.unit = unit;
 
   const minStock = readNumber(v, "minStock", issues);
+  const leadTimeDays = readLeadTime(v, issues);
+  if (leadTimeDays !== undefined) shown.leadTimeDays = formatNumber(leadTimeDays);
   const quantity = readNumber(v, "quantity", issues);
   if (quantity !== undefined) shown.quantity = formatNumber(quantity);
   const unitPrice = readMoney(v, "unitPrice", issues, null);
@@ -880,6 +908,8 @@ function buildItem(row: CsvRowInput, ctx: ItemLookups, options: CsvOptions, mode
     attributes,
     unit,
     minStock,
+    // Only when the cell has a number; an empty cell leaves the item without a lead time.
+    ...(leadTimeDays !== undefined ? { leadTimeDays } : {}),
     vendor,
     purchaseDate,
     description,
@@ -897,7 +927,7 @@ function buildItem(row: CsvRowInput, ctx: ItemLookups, options: CsvOptions, mode
   if (existing) {
     sku = existing.sku;
     shown.sku = existing.sku;
-    fill = missingDetails(existing, { subcategory, description, attributes });
+    fill = missingDetails(existing, { subcategory, description, attributes, leadTimeDays });
     const fills = fill ? ` Fills its empty details: ${fillLabels(fill)}.` : "";
     if (qty > 0 && !noPrice) {
       action = "purchase";
@@ -977,7 +1007,7 @@ function buildItem(row: CsvRowInput, ctx: ItemLookups, options: CsvOptions, mode
 async function fillItemDetails(itemId: string, fill: DetailFill): Promise<string[]> {
   const written: string[] = [];
   for (let attempt = 0; attempt < 3; attempt++) {
-    const item = await InventoryItem.findOne({ _id: itemId, archivedAt: null }, { subcategory: 1, description: 1, attributes: 1, updatedAt: 1 }).lean();
+    const item = await InventoryItem.findOne({ _id: itemId, archivedAt: null }, { subcategory: 1, description: 1, attributes: 1, leadTimeDays: 1, updatedAt: 1 }).lean();
     if (!item) return written;
     const current = cleanAttributes(item.attributes);
     const have = new Set(current.map((a) => attributeKey(a.label)));
@@ -986,11 +1016,14 @@ async function fillItemDetails(itemId: string, fill: DetailFill): Promise<string
     if (fill.subcategory && !item.subcategory) set.subcategory = fill.subcategory;
     if (fill.description && !item.description) set.description = fill.description;
     if (add.length) set.attributes = [...(item.attributes ?? []), ...add];
+    if (fill.leadTimeDays !== undefined && typeof item.leadTimeDays !== "number") set.leadTimeDays = fill.leadTimeDays;
     if (!Object.keys(set).length) return written;
     // Only over the copy just read: an edit saved meanwhile is never overwritten (read again instead).
     const res = await InventoryItem.updateOne({ _id: itemId, updatedAt: item.updatedAt }, { $set: set });
     if (res.modifiedCount) {
-      return [set.subcategory ? "Subcategory" : "", set.description ? "Description" : "", ...add.map((a) => a.label)].filter(Boolean);
+      return [set.subcategory ? "Subcategory" : "", set.description ? "Description" : "", set.leadTimeDays !== undefined ? "Lead time" : "", ...add.map((a) => a.label)].filter(
+        Boolean,
+      );
     }
   }
   return written;
@@ -1205,6 +1238,7 @@ async function importItemRows(rows: CsvRowInput[], options: CsvOptions): Promise
           continue;
         }
         b.existing.attributes = [...b.existing.attributes, ...b.fill.attributes];
+        if (b.fill.leadTimeDays !== undefined && b.existing.leadTimeDays === null) b.existing.leadTimeDays = b.fill.leadTimeDays;
         results.push({ line, status: "imported", message: `Filled details of ${b.existing.name}: ${written.join(", ")}`, ref: b.existing.name, amount: 0 });
         continue;
       }
@@ -1223,6 +1257,7 @@ async function importItemRows(rows: CsvRowInput[], options: CsvOptions): Promise
           ctx.purchases.set(purchaseKey(b.existing.id, b.suffix), purchaseName(b.quantity, b.existing.unit, b.date));
         }
         const written = b.fill ? await fillItemDetails(b.existing.id, b.fill) : [];
+        if (b.fill?.leadTimeDays !== undefined && b.existing.leadTimeDays === null) b.existing.leadTimeDays = b.fill.leadTimeDays;
         results.push({
           line,
           status: "imported",
@@ -1266,6 +1301,7 @@ async function importItemRows(rows: CsvRowInput[], options: CsvOptions): Promise
         subcategory: b.traits.subcategory ?? null,
         description: b.create.description ?? null,
         attributes: b.traits.attributes,
+        leadTimeDays: typeof b.create.leadTimeDays === "number" ? b.create.leadTimeDays : null,
       });
       // Its opening stock is a purchase movement, so a later row repeating it is caught too.
       if (qty > 0 && b.suffix && b.date) ctx.purchases.set(purchaseKey(result.data.id, b.suffix), purchaseName(qty, b.create.unit, b.date));

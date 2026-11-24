@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Archive, ArrowDownToLine, ArrowUpFromLine, Copy, MoreHorizontal, PackagePlus, Pencil, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Copy, MapPin, MoreHorizontal, PackagePlus, Pencil, SlidersHorizontal, Trash, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -44,7 +44,8 @@ export function ItemActions({
   const isAdmin = useIsAdmin();
 
   const outOfStock = item.status === "out_of_stock";
-  const noAllocation = item.allocated <= 0;
+  // Units wasted on a project stay in `allocated` but can no longer come back.
+  const noAllocation = item.allocated - item.wastedInUse <= 1e-9;
   const editing = searchParams.get("edit") === item.id;
   const hasHistory = item.movementCount > 0;
 
@@ -104,7 +105,7 @@ export function ItemActions({
               </Button>
             </span>
           </TooltipTrigger>
-          <TooltipContent>No units are assigned to projects.</TooltipContent>
+          <TooltipContent>No units are in use on projects.</TooltipContent>
         </Tooltip>
       ) : (
         <Button variant="outline" asChild>
@@ -124,6 +125,23 @@ export function ItemActions({
           <DropdownMenuItem onSelect={() => setAdjusting(true)}>
             <SlidersHorizontal /> Adjust stock
           </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link href={`/inventory/wastage?item=${item.id}`}>
+              <Trash /> Record wastage
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link href={`/inventory/transfer?mode=location&item=${item.id}`}>
+              <MapPin /> Move location
+            </Link>
+          </DropdownMenuItem>
+          {noAllocation ? null : (
+            <DropdownMenuItem asChild>
+              <Link href={`/inventory/transfer?item=${item.id}`}>
+                <ArrowLeftRight /> Move between projects
+              </Link>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onSelect={() => setEditing(true)}>
             <Pencil /> Edit item
           </DropdownMenuItem>

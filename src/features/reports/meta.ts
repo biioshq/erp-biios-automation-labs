@@ -1,82 +1,96 @@
-import { Boxes, Calculator, FileBarChart, FolderKanban, Landmark, Receipt, TrendingUp, type LucideIcon } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Armchair,
+  Banknote,
+  Boxes,
+  Calculator,
+  ChartLine,
+  ChartPie,
+  FileBarChart,
+  FileClock,
+  FlaskConical,
+  FolderKanban,
+  HandCoins,
+  Landmark,
+  ListChecks,
+  Receipt,
+  Scale,
+  TrendingDown,
+  TrendingUp,
+  Vault,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
 import type { ReportType } from "@/lib/constants";
+import { REPORT_CATALOG, REPORT_GROUPS, type ReportInfo } from "./catalog";
 
-export type ReportFilterKey = "date" | "project" | "vendor" | "category";
+export { REPORT_GROUPS, isAdminReport, isLegacyReport, type ReportFilterKey, type ReportGroup } from "./catalog";
 
-export type ReportMeta = {
-  type: ReportType;
-  label: string;
-  icon: LucideIcon;
-  description: string;
-  contains: string[];
-  /** Filters that change this report. Others are hidden. */
-  filters: ReportFilterKey[];
-  /** Which category list the category filter uses. */
-  categories?: "expense" | "income" | "inventory";
+const ICONS: Record<ReportType, LucideIcon> = {
+  finance: TrendingUp,
+  expense: Receipt,
+  income: Landmark,
+  gst: Calculator,
+  project: FolderKanban,
+  inventory: Boxes,
+  ca: FileBarChart,
+  balance_sheet: Scale,
+  profit_loss: ChartLine,
+  cash_flow: ArrowLeftRight,
+  trial_balance: ListChecks,
+  receivables: HandCoins,
+  payables: FileClock,
+  liabilities: Banknote,
+  fixed_assets: Armchair,
+  depreciation: TrendingDown,
+  equity: Vault,
+  project_financials: ChartPie,
+  cash_budget: Wallet,
+  // Scenario exports are logged in the export history; they are not a card in the picker.
+  scenario: FlaskConical,
 };
 
-export const REPORT_META: ReportMeta[] = [
-  {
-    type: "finance",
-    label: "Finance",
-    icon: TrendingUp,
-    description: "Profit and loss for the period.",
-    contains: ["Income and expenses by category", "Profit and margin", "Month by month table"],
-    filters: ["date", "project"],
-  },
-  {
-    type: "expense",
-    label: "Expense",
-    icon: Receipt,
-    description: "Every expense with its GST split.",
-    contains: ["Vendor, project, stage, category", "Taxable value, CGST, SGST, IGST, CESS", "GSTIN and invoice number"],
-    filters: ["date", "project", "vendor", "category"],
-    categories: "expense",
-  },
-  {
-    type: "income",
-    label: "Income",
-    icon: Landmark,
-    description: "Payments received, by client and project.",
-    contains: ["Client, project, category", "Payment method and reference", "Totals"],
-    filters: ["date", "project", "category"],
-    categories: "income",
-  },
-  {
-    type: "gst",
-    label: "GST",
-    icon: Calculator,
-    description: "Input tax credit register for return filing.",
-    contains: ["GST on expenses and stock purchases", "Totals by tax head and by GSTIN", "HSN or SAC codes"],
-    filters: ["date", "project", "vendor", "category"],
-    categories: "expense",
-  },
-  {
-    type: "project",
-    label: "Project",
-    icon: FolderKanban,
-    description: "Budget against spend and income per project.",
-    contains: ["Budget, spent, remaining, usage", "Spend across the 7 stages", "Income and profit"],
-    filters: ["project"],
-  },
-  {
-    type: "inventory",
-    label: "Inventory",
-    icon: Boxes,
-    description: "Stock valuation or the movement ledger.",
-    contains: ["On-hand and allocated value", "Category subtotals and stock status", "Optional movement ledger"],
-    filters: ["category"],
-    categories: "inventory",
-  },
-  {
-    type: "ca",
-    label: "CA pack",
-    icon: FileBarChart,
-    description: "One pack for your chartered accountant.",
-    contains: ["Summary with GST input by head", "Expense, income and GST registers", "Vendor-wise totals"],
-    filters: ["date", "project", "vendor", "category"],
-    categories: "expense",
-  },
-];
+/** A report as the cards show it: the catalog entry with its icon. */
+export type ReportMeta = ReportInfo & { icon: LucideIcon };
+
+export const REPORT_META: ReportMeta[] = REPORT_CATALOG.map((m) => ({ ...m, icon: ICONS[m.type] }));
 
 export const metaOf = (type: string | undefined) => REPORT_META.find((m) => m.type === type);
+
+/** The icon of a logged export, scenario exports included (they have no card). */
+export const reportIcon = (type: string): LucideIcon | undefined => ICONS[type as ReportType];
+
+/** Card order inside each group: the statements first, then the registers that feed them. */
+const CARD_ORDER: ReportType[] = [
+  "balance_sheet",
+  "profit_loss",
+  "cash_flow",
+  "trial_balance",
+  "finance",
+  "ca",
+  "income",
+  "receivables",
+  "expense",
+  "gst",
+  "fixed_assets",
+  "depreciation",
+  "inventory",
+  "payables",
+  "liabilities",
+  "equity",
+  "project",
+  "project_financials",
+  "cash_budget",
+];
+
+/** The report cards a viewer may open, under their group headings. Groups with no card are left out. */
+export function reportGroupsFor(isAdmin: boolean) {
+  const rank = (t: ReportType) => {
+    const i = CARD_ORDER.indexOf(t);
+    return i < 0 ? CARD_ORDER.length : i;
+  };
+  return REPORT_GROUPS.map((g) => ({
+    ...g,
+    reports: REPORT_META.filter((m) => m.group === g.key && (isAdmin || !m.adminOnly)).sort((a, b) => rank(a.type) - rank(b.type)),
+  })).filter((g) => g.reports.length > 0);
+}

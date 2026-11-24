@@ -3,62 +3,72 @@ import "server-only";
 import type { Types } from "mongoose";
 import { connectDB } from "@/server/db";
 import { InventoryItem } from "@/server/models";
+import { ALERT_BUFFER_DAYS, DEFAULT_WINDOW_DAYS, lookAheadAlerts } from "@/server/analytics/core";
 import { roundQty } from "@/server/services/inventory-ledger";
-import { getStockStatus, stockStatusFilter } from "@/lib/stock-status";
+import { getStockStatus } from "@/lib/stock-status";
+import { toDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import type { LowStockItem, LowStockSummary } from "./types";
 
 type PopulatedCategory = { _id: Types.ObjectId; name: string; color?: string } | null;
 
-/** Units worth ordering: back up to twice the minimum, and never less than the minimum itself. */
-export function suggestedReorder(available: number, minStock: number) {
-  return Math.max(Math.ceil(minStock * 2 - available), minStock, 1);
-}
-
-/** Every item that is low or out of stock: out of stock first, then the emptiest relative to its minimum. */
-export async function getLowStockItems(): Promise<{ items: LowStockItem[]; summary: LowStockSummary }> {
+/**
+ * The reorder list: items out of stock, at or below their minimum, or running out within their
+ * lead time plus a week at the recent rate of use (the shared rule in src/server/analytics/core.ts,
+ * the same one the daily alerts use). Out of stock first, then the soonest to run out.
+ */
+export async function getLowStockItems(asOf: Date = new Date()): Promise<{ items: LowStockItem[]; summary: LowStockSummary }> {
   await connectDB();
-  const docs = await InventoryItem.find({
-    archivedAt: null,
-    $or: [stockStatusFilter("out_of_stock"), stockStatusFilter("low_stock")],
-  } as Record<string, unknown>)
-    .populate("category", "name color")
-    .lean();
+  const alerts = await lookAheadAlerts(asOf);
+  const extra = alerts.length
+    ? await InventoryItem.find({ _id: { $in: alerts.map((a) => a.id) } }, { lastPurchasePrice: 1, category: 1 })
+        .populate("category", "name color")
+        .lean()
+    : [];
+  const byId = new Map(extra.map((i) => [String(i._id), i]));
 
-  const items: LowStockItem[] = docs.map((i) => {
-    const category = i.category as unknown as PopulatedCategory;
-    const unitPrice = i.lastPurchasePrice ?? i.unitPrice;
-    // Rounded to the ledger's 3 decimals, as the items list and the ledger forms, so drift that
-    // older writes stored (5.55e-17) shows as 0 and Out of Stock here too.
-    const available = roundQty(i.available);
-    const suggestedQuantity = suggestedReorder(available, i.minStock);
+  const items: LowStockItem[] = alerts.map((a) => {
+    const more = byId.get(a.id);
+    const category = more?.category as unknown as PopulatedCategory;
+    const unitPrice = more?.lastPurchasePrice ?? a.unitPrice;
+    // Rounded to the ledger's 3 decimals so drift older writes stored (5.55e-17) shows as 0.
+    const available = roundQty(a.available);
     return {
-      id: String(i._id),
-      name: i.name,
-      sku: i.sku,
-      unit: i.unit ?? "pcs",
-      status: getStockStatus(available, i.minStock) as LowStockItem["status"],
+      id: a.id,
+      name: a.name,
+      sku: a.sku,
+      unit: a.unit,
+      status: getStockStatus(available, a.minStock),
+      level: a.level,
+      reasons: a.reasons,
       available,
-      allocated: roundQty(i.allocated),
-      quantity: roundQty(i.quantity),
-      minStock: i.minStock,
-      suggestedQuantity,
+      allocated: roundQty(a.allocated),
+      quantity: roundQty(a.available + a.allocated),
+      minStock: a.minStock,
+      perDay: a.perDay,
+      daysOfCover: a.daysOfCover,
+      stockoutDate: a.stockoutDate,
+      orderBy: a.orderBy,
+      leadTimeDays: a.leadTimeDays,
+      suggestedQty: a.suggestedQty,
       unitPrice,
-      estimatedCost: round2(suggestedQuantity * unitPrice),
-      vendor: i.vendor ?? null,
+      estimatedCost: a.suggestedQty ? round2(a.suggestedQty * unitPrice) : null,
+      vendor: a.vendor,
       category: category?._id ? { name: category.name, color: category.color ?? "#4a82cc" } : null,
     };
   });
 
-  const ratio = (i: LowStockItem) => (i.minStock > 0 ? i.available / i.minStock : 0);
-  items.sort((a, b) => Number(b.status === "out_of_stock") - Number(a.status === "out_of_stock") || ratio(a) - ratio(b) || a.name.localeCompare(b.name));
-
+  const today = toDateInput(asOf);
   return {
     items,
     summary: {
-      low: items.filter((i) => i.status === "low_stock").length,
-      out: items.filter((i) => i.status === "out_of_stock").length,
-      estimatedCost: round2(items.reduce((sum, i) => sum + i.estimatedCost, 0)),
+      out: items.filter((i) => i.level === "out").length,
+      belowMin: items.filter((i) => i.level === "below_min").length,
+      runsOut: items.filter((i) => i.level === "runs_out").length,
+      orderNow: items.filter((i) => i.orderBy !== null && i.orderBy <= today).length,
+      estimatedCost: round2(items.reduce((sum, i) => sum + (i.estimatedCost ?? 0), 0)),
+      windowDays: DEFAULT_WINDOW_DAYS,
+      bufferDays: ALERT_BUFFER_DAYS,
     },
   };
 }

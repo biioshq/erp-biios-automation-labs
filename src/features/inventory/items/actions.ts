@@ -3,7 +3,7 @@
 import { Types } from "mongoose";
 import { defineAction } from "@/server/action";
 import { AppError, notFound } from "@/server/errors";
-import { InventoryCategory, InventoryItem, InventoryMovement } from "@/server/models";
+import { InventoryAllocation, InventoryCategory, InventoryItem, InventoryMovement } from "@/server/models";
 import { adjustStock, recordOpeningStock, roundQty } from "@/server/services/inventory-ledger";
 import { notifyStockLevel } from "@/server/services/notifications";
 import { getCurrentUser } from "@/server/auth/session";
@@ -102,6 +102,7 @@ export const createItem = defineAction(
     const created = await InventoryItem.create({
       ...descriptiveFields(input),
       ...(input.attributes?.length ? { attributes: input.attributes } : {}),
+      ...(typeof input.leadTimeDays === "number" ? { leadTimeDays: input.leadTimeDays } : {}),
       quantity: 0,
       available: 0,
       allocated: 0,
@@ -167,6 +168,8 @@ export const updateItem = defineAction(
           ...(keepSubcategory || !subcategory ? {} : { subcategory }),
           ...(keepVendor ? {} : { vendor }),
           ...(keepPurchaseDate ? {} : { purchaseDate }),
+          // Missing from the input (an older form) leaves the lead time as stored; null clears it.
+          ...(typeof input.leadTimeDays === "number" ? { leadTimeDays: input.leadTimeDays } : {}),
         },
         $unset: {
           ...(fields.category ? {} : { category: 1 }),
@@ -176,6 +179,7 @@ export const updateItem = defineAction(
           ...(!keepAttributes && input.attributes && !input.attributes.length ? { attributes: 1 } : {}),
           ...(fields.location ? {} : { location: 1 }),
           ...(purchaseDate || keepPurchaseDate ? {} : { purchaseDate: 1 }),
+          ...(input.leadTimeDays === null ? { leadTimeDays: 1 } : {}),
         },
       },
     );
@@ -191,6 +195,15 @@ export const updateItem = defineAction(
 /** Stock below this is float drift from older writes, not real units. */
 const EMPTY = 1e-9;
 
+/** Units of an item projects hold and could still return (held less wasted). */
+async function stockInUse(itemId: Types.ObjectId) {
+  const [row] = await InventoryAllocation.aggregate<{ n: number }>([
+    { $match: { item: itemId, quantity: { $gt: 0 } } },
+    { $group: { _id: null, n: { $sum: { $subtract: ["$quantity", { $ifNull: ["$quantityWasted", 0] }] } } } },
+  ]);
+  return roundQty(Math.max(0, row?.n ?? 0));
+}
+
 /**
  * Items with history are archived so their movements and project costs stay
  * traceable. Items that were never used are deleted. Admin-only, like every delete.
@@ -204,9 +217,12 @@ export const removeItem = defineAction(
   async ({ id }) => {
     const item = await InventoryItem.findOne({ _id: id, archivedAt: null }).lean();
     if (!item) throw notFound("The inventory item");
-    if (item.allocated > EMPTY) {
+    // Units wasted on a project stay in `allocated` for good (the project bore their cost), so only
+    // units still in use there block archiving.
+    const inUse = item.allocated > EMPTY ? await stockInUse(item._id) : 0;
+    if (inUse > EMPTY) {
       throw new AppError(
-        `${formatNumber(item.allocated)} ${item.unit} of ${item.name} are still assigned to projects. Return them before archiving.`,
+        `${formatNumber(inUse)} ${item.unit} of ${item.name} are still in use on projects. Return them before archiving.`,
         "conflict",
       );
     }
@@ -218,7 +234,7 @@ export const removeItem = defineAction(
     }
     // The writes repeat the checks, so a purchase or assignment that lands in between
     // makes this fail instead of leaving stock on an archived or deleted item.
-    const empty = { _id: item._id, archivedAt: null, available: { $lte: EMPTY }, allocated: { $lte: EMPTY } };
+    const empty = { _id: item._id, archivedAt: null, available: { $lte: EMPTY }, allocated: { $lte: item.allocated + EMPTY } };
     const changed = () => new AppError(`${item.name} changed while removing it. Reload and try again.`, "conflict");
     const movements = await InventoryMovement.countDocuments({ item: item._id });
     if (movements > 0) {

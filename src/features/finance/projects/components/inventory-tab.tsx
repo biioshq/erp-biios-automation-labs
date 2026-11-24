@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowDownToLine, Boxes, Plus } from "lucide-react";
+import { ArrowDownToLine, Boxes, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -8,8 +8,31 @@ import { Section } from "@/components/shared/page";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { PROJECT_STAGES, labelOf } from "@/lib/constants";
 import { formatDate, formatNumber } from "@/lib/format";
-import { getProjectInventory } from "../queries";
+import { getProjectInventory, type ProjectInventoryRow } from "../queries";
 import type { ProjectDetail } from "../types";
+
+/** What is left once a row cannot be returned: nothing held, or every unit held was wasted. */
+const doneLabel = (r: ProjectInventoryRow) => (r.quantityHeld === 0 ? "All returned" : "Rest wasted");
+
+/** Return and wastage links for units the project still has in use (held and not wasted). */
+function RowActions({ r, projectId }: { r: ProjectInventoryRow; projectId: string }) {
+  if (!r.item || r.returnable <= 0) return <span className="text-xs text-muted-foreground">{r.item ? doneLabel(r) : ""}</span>;
+  const query = `project=${projectId}&item=${r.item.id}`;
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <Button asChild variant="outline" size="sm">
+        <Link href={`/inventory/return?${query}`}>
+          <ArrowDownToLine /> Return
+        </Link>
+      </Button>
+      <Button asChild variant="ghost" size="sm">
+        <Link href={`/inventory/wastage?${query}`}>
+          <Trash2 /> Wastage
+        </Link>
+      </Button>
+    </div>
+  );
+}
 
 /** Stock the project holds, from inventory assignments. Nothing is entered here by hand. */
 export async function InventoryTab({ project }: { project: ProjectDetail }) {
@@ -36,7 +59,7 @@ export async function InventoryTab({ project }: { project: ProjectDetail }) {
   return (
     <Section
       title="Inventory used"
-      description="Cost is the quantity still held times the unit cost at assignment."
+      description="Held is what the project can still return. Cost is what the project is charged: every unit still assigned, wasted ones included, times the unit cost at assignment."
       actions={assign}
       contentClassName="p-0"
     >
@@ -55,22 +78,15 @@ export async function InventoryTab({ project }: { project: ProjectDetail }) {
               <Money value={r.totalCost} className="shrink-0 font-semibold" />
             </div>
             <p className="text-xs text-muted-foreground">
-              <span className="tabular">{formatNumber(r.quantityHeld)}</span> {r.item?.unit} held
+              <span className="tabular">{formatNumber(r.returnable)}</span> {r.item?.unit} held
+              {r.quantityWasted > 0 ? <> · <span className="tabular">{formatNumber(r.quantityWasted)}</span> wasted</> : null}
               {r.quantityReturned > 0 ? <> · <span className="tabular">{formatNumber(r.quantityReturned)}</span> returned</> : null} · {formatDate(r.assignedAt)}
             </p>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <StatusBadge tone="neutral" dot={false} className="h-5 px-2 text-[11px]">
                 {labelOf(PROJECT_STAGES, r.stage)}
               </StatusBadge>
-              {r.item && r.quantityHeld > 0 ? (
-                <Button asChild variant="outline" size="sm">
-                  <Link href={`/inventory/return?project=${project.id}&item=${r.item.id}`}>
-                    <ArrowDownToLine /> Return
-                  </Link>
-                </Button>
-              ) : r.quantityHeld === 0 ? (
-                <span className="text-xs text-muted-foreground">All returned</span>
-              ) : null}
+              <RowActions r={r} projectId={project.id} />
             </div>
           </li>
         ))}
@@ -109,7 +125,10 @@ export async function InventoryTab({ project }: { project: ProjectDetail }) {
                 )}
               </TableCell>
               <TableCell className="tabular text-right font-medium">
-                {formatNumber(r.quantityHeld)} <span className="text-xs font-normal text-muted-foreground">{r.item?.unit}</span>
+                {formatNumber(r.returnable)} <span className="text-xs font-normal text-muted-foreground">{r.item?.unit}</span>
+                {r.quantityWasted > 0 ? (
+                  <span className="block text-xs font-normal text-muted-foreground">{formatNumber(r.quantityWasted)} wasted</span>
+                ) : null}
               </TableCell>
               <TableCell className="tabular text-right text-muted-foreground">{formatNumber(r.quantityReturned)}</TableCell>
               <TableCell className="text-right">
@@ -125,15 +144,7 @@ export async function InventoryTab({ project }: { project: ProjectDetail }) {
                 </StatusBadge>
               </TableCell>
               <TableCell className="pr-5 text-right">
-                {r.item && r.quantityHeld > 0 ? (
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={`/inventory/return?project=${project.id}&item=${r.item.id}`}>
-                      <ArrowDownToLine /> Return
-                    </Link>
-                  </Button>
-                ) : (
-                  <span className="text-xs text-muted-foreground">{r.quantityHeld === 0 ? "All returned" : ""}</span>
-                )}
+                <RowActions r={r} projectId={project.id} />
               </TableCell>
             </TableRow>
           ))}
@@ -141,7 +152,10 @@ export async function InventoryTab({ project }: { project: ProjectDetail }) {
         <TableFooter>
           <TableRow>
             <TableCell className="pl-5 font-semibold">Total</TableCell>
-            <TableCell className="tabular text-right font-semibold">{formatNumber(totals.held)}</TableCell>
+            <TableCell className="tabular text-right font-semibold">
+              {formatNumber(totals.returnable)}
+              {totals.wasted > 0 ? <span className="block text-xs font-normal text-muted-foreground">{formatNumber(totals.wasted)} wasted</span> : null}
+            </TableCell>
             <TableCell className="tabular text-right font-semibold">{formatNumber(totals.returned)}</TableCell>
             <TableCell />
             <TableCell className="text-right">

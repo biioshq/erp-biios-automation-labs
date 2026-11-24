@@ -61,14 +61,15 @@ export function ItemCard({ item, index = 0 }: { item: ItemRow; index?: number })
           value={formatNumber(item.available)}
           tone={item.status === "out_of_stock" ? "danger" : item.status === "low_stock" ? "warning" : undefined}
         />
-        <Figure label="Allocated" value={formatNumber(item.allocated)} />
+        {/* Units in use: listItems already leaves out units wasted on projects, as the item page and dashboard do. */}
+        <Figure label="In use" value={formatNumber(item.allocated)} />
         <Figure label="Minimum" value={formatNumber(item.minStock)} />
       </div>
 
       <div className="space-y-1.5">
         <StockLevelBar available={item.available} minStock={item.minStock} quantity={item.quantity} />
         <p className="text-[11px] text-muted-foreground">
-          {formatNumber(item.available)} of {formatNumber(item.quantity)} {unit} available, rest assigned
+          {formatNumber(item.available)} of {formatNumber(item.quantity)} {unit} available, rest in use on projects
         </p>
       </div>
 

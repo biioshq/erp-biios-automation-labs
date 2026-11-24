@@ -8,7 +8,7 @@ import { round2 } from "@/lib/format";
 import { COMPANY_EXPENSES } from "@/server/services/metrics";
 import { filtersForReport } from "../../schemas";
 import { col, coversWholeMonths, describeFilters, rangeOf, sumTotals } from "../common";
-import { buildExpenseReport } from "./expense";
+import { EXPENSE_COLUMNS, buildExpenseReport } from "./expense";
 import { buildGstReport } from "./gst";
 import { buildIncomeReport } from "./income";
 import type { ReportData, ReportFilters, ReportRow, ReportSection } from "../../types";
@@ -190,7 +190,8 @@ export async function buildCaReport(filters: ReportFilters): Promise<ReportData>
     totals: null,
   };
 
-  const expenseSection: ReportSection = { title: "Expense register", columns: expense.columns, rows: expense.rows, totals: expense.totals };
+  // The register keeps the GST register columns; the payment status columns the expense report adds are left out.
+  const expenseSection: ReportSection = { title: "Expense register", columns: EXPENSE_COLUMNS, rows: expense.rows, totals: expense.totals };
   const incomeSection: ReportSection = { title: "Income register", columns: income.columns, rows: income.rows, totals: income.totals };
   const gstSection: ReportSection = { title: "GST register", columns: gst.columns, rows: gst.rows, totals: gst.totals };
 

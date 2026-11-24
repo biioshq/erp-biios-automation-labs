@@ -9,6 +9,7 @@ import { round2 } from "@/lib/format";
 import { iso } from "@/server/serialize";
 import { getStockStatus } from "@/lib/stock-status";
 import { allocatedValueByItem } from "@/server/services/metrics";
+import { isLegacyReport, reportInfo } from "./catalog";
 import { reportHref } from "./schemas";
 import { buildReport, rowCountOf, sectionsOf } from "./server/build";
 import type { ReportFilters, ReportHistoryRow, ReportPreview } from "./types";
@@ -16,6 +17,7 @@ import type { ReportType } from "@/lib/constants";
 import { roundQty } from "@/server/services/inventory-ledger";
 
 export const PREVIEW_ROWS = 50;
+
 
 export async function getReportPreview(type: ReportType, filters: ReportFilters): Promise<ReportPreview> {
   const report = await buildReport(type, filters);
@@ -35,10 +37,23 @@ export async function getReportPreview(type: ReportType, filters: ReportFilters)
   };
 }
 
+/** How a newer report reads its dates, in words: one day, a period, or the position on the day it was exported. */
+function datesInWords(type: ReportType, filters: Partial<ReportFilters>): string | null {
+  const meta = reportInfo(type);
+  if (!meta) return null;
+  if (meta.filters.includes("asOf")) return `As of ${filters.to ?? "the export day"}`;
+  if (!meta.filters.includes("date")) return "Position on the export day";
+  return `${filters.from ?? "financial year start"} to ${filters.to ?? "today"}`;
+}
+
+const COLUMN_WORDS = { month: "monthly columns", quarter: "quarterly columns", year: "yearly columns" } as const;
+
 /** Every filter "Download again" reapplies, in words. Older log rows may lack some keys. */
-function summarise(filters: Partial<ReportFilters> & { movements?: boolean }): string {
+function summarise(type: ReportType, filters: Partial<ReportFilters> & { movements?: boolean }): string {
   const parts: string[] = [];
-  if (filters.from || filters.to) parts.push(`${filters.from ?? "start"} to ${filters.to ?? "today"}`);
+  const legacy = isLegacyReport(type);
+  if (!legacy) parts.push(datesInWords(type, filters) ?? "");
+  else if (filters.from || filters.to) parts.push(`${filters.from ?? "start"} to ${filters.to ?? "today"}`);
   const count = (n: number | undefined, one: string, many = `${one}s`) => (n ? `${n} ${n === 1 ? one : many}` : null);
   for (const p of [
     count(filters.project?.length, "project"),
@@ -49,12 +64,33 @@ function summarise(filters: Partial<ReportFilters> & { movements?: boolean }): s
     count(filters.source?.length, "source"),
     count(filters.movementType?.length, "movement type"),
     count(filters.item?.length, "item"),
+    count(filters.status?.length, "payment status", "payment statuses"),
+    count(filters.nature?.length, "nature", "natures"),
+    count(filters.department?.length, "department"),
   ]) {
     if (p) parts.push(p);
   }
   if (filters.q) parts.push(`Search "${filters.q}"`);
   if (filters.movements) parts.push("movement ledger");
-  return parts.join(" · ") || "All data";
+  if (filters.columns && filters.columns !== "total") parts.push(COLUMN_WORDS[filters.columns]);
+  return parts.filter(Boolean).join(" · ") || "All data";
+}
+
+type ScenarioLogFilters = { scenarios?: string[]; basis?: string };
+
+/** A logged what-if scenario export: its link back to the scenario export and its filters in words. */
+function scenarioEntry(format: string, filters: ScenarioLogFilters): { href: string; summary: string } {
+  const ids = (filters.scenarios ?? []).filter((id) => /^[a-f0-9]{24}$/i.test(id));
+  const basis = filters.basis === "saved" ? "saved" : "today";
+  const fmt = format === "pdf" ? "pdf" : "xlsx";
+  const href =
+    ids.length === 1
+      ? `/api/analytics/scenarios/${ids[0]}/export?format=${fmt}&basis=${basis}`
+      : `/api/analytics/scenarios/compare?ids=${ids.join(",")}&basis=${basis}&format=${fmt}`;
+  const summary = [ids.length > 1 ? `${ids.length} scenarios compared` : "", basis === "saved" ? "Figures as saved" : "Figures with the data of the export day"]
+    .filter(Boolean)
+    .join(" · ");
+  return { href, summary };
 }
 
 /**
@@ -70,16 +106,18 @@ export async function listReportHistory(limit = 20): Promise<ReportHistoryRow[]>
   return docs.map((d) => {
     const filters = (d.filters ?? {}) as Partial<ReportFilters>;
     const by = d.generatedBy as unknown as { name?: string } | null;
+    // Scenario files come from the scenario export, not /api/reports.
+    const scenario = d.type === "scenario" ? scenarioEntry(d.format, (d.filters ?? {}) as ScenarioLogFilters) : null;
     return {
       id: String(d._id),
       type: d.type as ReportType,
       format: d.format,
       title: d.title,
-      filtersSummary: summarise(filters),
+      filtersSummary: scenario ? scenario.summary : summarise(d.type as ReportType, filters),
       rowCount: d.rowCount ?? 0,
       by: by?.name ?? null,
       createdAt: iso(d.createdAt as Date)!,
-      href: reportHref(d.type as ReportType, d.format, filters),
+      href: scenario ? scenario.href : reportHref(d.type as ReportType, d.format, filters),
     };
   });
 }

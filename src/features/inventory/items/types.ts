@@ -1,4 +1,4 @@
-import type { InventoryUnit, MovementType, StockStatus } from "@/lib/constants";
+import type { InventoryUnit, MovementType, StockStatus, WastageReason } from "@/lib/constants";
 import type { ItemAttribute } from "./attributes";
 
 export type ItemCategoryRef = { id: string; name: string; color: string };
@@ -41,6 +41,8 @@ export type ItemFormRecord = {
   attributes: ItemAttribute[];
   unit: InventoryUnit;
   minStock: number;
+  /** Days from ordering to having it in stock; null when not set. */
+  leadTimeDays: number | null;
   vendor: string | null;
   purchaseDate: string | null;
   description: string | null;
@@ -63,6 +65,10 @@ export type ItemMovementRow = {
   type: MovementType;
   quantity: number;
   availableDelta: number;
+  /** Wastage: why and from where. */
+  wastage: { reason: WastageReason; from: "storage" | "project" } | null;
+  /** Location move: where the item was kept before and after. */
+  relocation: { from: string | null; to: string | null } | null;
   project: { id: string; name: string; code: string; color: string } | null;
   /** Available stock right after this movement. */
   remaining: number;
@@ -80,6 +86,8 @@ export type ItemMovementSummary = {
   returned: number;
   /** Net of manual adjustments (signed). */
   adjusted: number;
+  /** Units written off, from storage and on projects. */
+  wasted: number;
   remaining: number;
   count: number;
 };
@@ -89,16 +97,33 @@ export type ItemAllocationRow = {
   name: string;
   code: string;
   color: string;
+  /** Units in use on the project (held and not wasted). */
   quantity: number;
+  /** Units wasted on the project: charged to it, no longer returnable. */
+  wasted: number;
+  /** Value of the units in use, at the cost they were assigned at. */
   cost: number;
   lastAssignedAt: string;
 };
 
 export type ItemPurchasePoint = { id: string; date: string; unitCost: number; quantity: number; vendor: string | null };
 
+/** How long stock lasts at the recent rate of use (src/server/analytics/core.ts). */
+export type ItemCoverage = {
+  /** Units used per day over the window (issued less returned), null without recorded use. */
+  perDay: number | null;
+  windowDays: number;
+  daysOfCover: number | null;
+  stockoutDate: string | null;
+  orderBy: string | null;
+};
+
 export type ItemDetail = ItemRow &
   ItemFormRecord & {
     lastPurchasePrice: number | null;
+    coverage: ItemCoverage;
+    /** Units wasted on projects that projects still hold on their books (in item.allocated). */
+    wastedInUse: number;
     createdAt: string;
     movementCount: number;
     movements: ItemMovementRow[];

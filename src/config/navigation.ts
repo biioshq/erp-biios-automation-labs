@@ -279,10 +279,10 @@ export const MODULES: NavModule[] = [
         ],
       },
       {
-        title: "Scenario comparison",
+        title: "Comparison",
         href: "/analytics/compare",
         icon: Columns3,
-        keywords: ["compare scenarios", "side by side"],
+        keywords: ["scenario comparison", "compare scenarios", "side by side"],
         children: [
           { title: "Compare scenarios", tab: "Compare", href: "/analytics/compare", icon: Columns3, keywords: ["side by side"] },
           { title: "Scenario history", tab: "History", href: "/analytics/compare/history", icon: History, keywords: ["changes", "approvals"] },
@@ -303,10 +303,10 @@ export const MODULES: NavModule[] = [
         ],
       },
       {
-        title: "Project & cost analytics",
+        title: "Project analytics",
         href: "/analytics/projects",
         icon: FolderKanban,
-        keywords: ["project analytics"],
+        keywords: ["project and cost analytics", "cost analytics"],
         children: [
           { title: "Project cost analysis", tab: "Cost", href: "/analytics/projects", icon: IndianRupee, keywords: ["material cost", "labour cost"] },
           { title: "Budget vs actual", tab: "Budget vs actual", href: "/analytics/projects/budget", icon: Gauge, keywords: ["variance"] },
@@ -316,10 +316,10 @@ export const MODULES: NavModule[] = [
         ],
       },
       {
-        title: "Management insights",
+        title: "Insights",
         href: "/analytics/insights",
         icon: Lightbulb,
-        keywords: ["management reports"],
+        keywords: ["management insights", "management reports"],
         children: [
           { title: "Business performance", tab: "Overall", href: "/analytics/insights", icon: Briefcase, keywords: ["overview"] },
           { title: "Financial performance", tab: "Financial", href: "/analytics/insights/financial", icon: TrendingUp, keywords: ["revenue trend", "cash flow"] },

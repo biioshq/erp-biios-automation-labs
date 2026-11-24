@@ -325,8 +325,8 @@ export function ItemsView({
       {
         id: "allocated",
         accessorKey: "allocated",
-        meta: { label: "Allocated", align: "right" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Allocated" align="right" />,
+        meta: { label: "In use", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="In use" align="right" />,
         cell: ({ row }) => <span className="tabular text-muted-foreground">{formatNumber(row.original.allocated)}</span>,
       },
       {
@@ -543,7 +543,7 @@ function ItemMobileRow({ item }: { item: ItemRow }) {
           <dd className={cn("tabular text-sm font-semibold", tone)}>{formatNumber(item.available)}</dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-muted-foreground">Allocated</dt>
+          <dt className="text-muted-foreground">In use</dt>
           <dd className="tabular text-sm font-medium">{formatNumber(item.allocated)}</dd>
         </div>
         <div className="min-w-0">

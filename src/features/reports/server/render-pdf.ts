@@ -87,8 +87,10 @@ export function renderPdf(report: ReportData): Buffer {
   doc.text(`Generated ${formatDateTime(new Date())} IST`, pageW - margin, 44, { align: "right" });
   let y = 82;
   if (report.subtitle) {
+    // Measured at the size it prints in, so a long subtitle wraps inside the margins.
+    doc.setFontSize(9);
     const lines = doc.splitTextToSize(clean(report.subtitle), pageW - margin * 2) as string[];
-    doc.setFontSize(9).text(lines, margin, y);
+    doc.text(lines, margin, y);
     y += lines.length * 11 + 4;
   }
 

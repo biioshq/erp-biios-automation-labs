@@ -10,10 +10,12 @@ import {
   InventoryMovement,
   type InventoryItemDoc,
 } from "@/server/models";
-import { roundQty } from "@/server/services/inventory-ledger";
+import { returnableOf, roundQty } from "@/server/services/inventory-ledger";
+import { DEFAULT_WINDOW_DAYS, coverage, usageByItem } from "@/server/analytics/core";
+import { inUseOf, wastedInUseByItem } from "@/features/inventory/ledger/queries";
 import { iso } from "@/server/serialize";
 import { mongoSort, searchRegex, type ListParams, type Paginated } from "@/lib/list-params";
-import { STOCK_STATUSES, type InventoryUnit, type MovementType, type StockStatus } from "@/lib/constants";
+import { STOCK_STATUSES, type InventoryUnit, type MovementType, type StockStatus, type WastageReason } from "@/lib/constants";
 import { getStockStatus, stockStatusFilter } from "@/lib/stock-status";
 import { round2 } from "@/lib/format";
 import { toDateInput } from "@/lib/dates";
@@ -93,10 +95,33 @@ export function itemFilter(params: Pick<ListParams, "q" | "filters">): Record<st
 export async function listItems(params: ListParams): Promise<Paginated<ItemRow>> {
   await connectDB();
   const filter = itemFilter(params);
-  const sort = mongoSort(params.sort ?? { id: "name", desc: false });
+  const sort = mongoSort(params.sort ?? { id: "name", desc: false }, { allocated: "inUse" });
+  // The "In use" column shows allocated less units wasted on projects, so it sorts by that figure.
+  const inUseStages: PipelineStage[] =
+    "inUse" in sort
+      ? [
+          {
+            $lookup: {
+              from: InventoryAllocation.collection.name,
+              let: { item: "$_id" },
+              pipeline: [
+                { $match: { $expr: { $eq: ["$item", "$$item"] }, quantity: { $gt: 0 }, quantityWasted: { $gt: 0 } } },
+                { $group: { _id: null, wasted: { $sum: { $min: ["$quantityWasted", "$quantity"] } } } },
+              ],
+              as: "wastedInUse",
+            },
+          },
+          {
+            $addFields: {
+              inUse: { $max: [0, { $subtract: ["$allocated", { $ifNull: [{ $first: "$wastedInUse.wasted" }, 0] }] }] },
+            },
+          },
+        ]
+      : [];
   const pipeline: PipelineStage[] = [
     { $match: filter as PipelineStage.Match["$match"] },
     { $addFields: { value: { $multiply: ["$available", "$unitPrice"] } } },
+    ...inUseStages,
     { $sort: sort },
     { $skip: (params.page - 1) * params.pageSize },
     { $limit: params.pageSize },
@@ -106,7 +131,14 @@ export async function listItems(params: ListParams): Promise<Paginated<ItemRow>>
     InventoryItem.countDocuments(filter as never),
     categoryMap(),
   ]);
-  return { rows: docs.map((d) => toRow(d, categories)), total, page: params.page, pageSize: params.pageSize };
+  // Allocated shows units in use: units wasted on a project stay in `allocated` but are used up.
+  const wasted = await wastedInUseByItem(docs.map((d) => d._id));
+  const rows = docs.map((d) => {
+    const row = toRow(d, categories);
+    const allocated = inUseOf(row.allocated, wasted.get(row.id));
+    return allocated === row.allocated ? row : { ...row, allocated, quantity: roundQty(row.available + allocated) };
+  });
+  return { rows, total, page: params.page, pageSize: params.pageSize };
 }
 
 /** Distinct subcategories of active items, for the list filter and the item form's suggestions. */
@@ -133,6 +165,7 @@ function toFormRecord(i: ItemLean): ItemFormRecord {
     attributes: cleanAttributes(i.attributes),
     unit: (i.unit ?? "pcs") as InventoryUnit,
     minStock: i.minStock,
+    leadTimeDays: typeof i.leadTimeDays === "number" ? i.leadTimeDays : null,
     vendor: i.vendor ?? null,
     purchaseDate: i.purchaseDate ? toDateInput(i.purchaseDate) : null,
     description: i.description ?? null,
@@ -158,7 +191,7 @@ export const getItemDetail = cache(async (id: string): Promise<ItemDetail | null
   const item = await InventoryItem.findOne({ _id: id, archivedAt: null }).lean<ItemLean>();
   if (!item) return null;
 
-  const [categories, movementDocs, totals, allocationDocs, purchaseDocs] = await Promise.all([
+  const [categories, movementDocs, totals, allocationDocs, purchaseDocs, usage] = await Promise.all([
     categoryMap(item.category ? [item.category] : []),
     InventoryMovement.find({ item: item._id })
       .sort({ date: -1, _id: -1 })
@@ -174,6 +207,7 @@ export const getItemDetail = cache(async (id: string): Promise<ItemDetail | null
       .populate("project", "name code color")
       .lean(),
     InventoryMovement.find({ item: item._id, type: "purchase" }).sort({ date: -1, _id: -1 }).limit(12).lean(),
+    usageByItem(DEFAULT_WINDOW_DAYS, new Date(), [String(item._id)]),
   ]);
 
   const movements: ItemMovementRow[] = movementDocs.map((m) => {
@@ -184,6 +218,8 @@ export const getItemDetail = cache(async (id: string): Promise<ItemDetail | null
       type: m.type as MovementType,
       quantity: m.quantity,
       availableDelta: m.availableDelta,
+      wastage: m.wastage ? { reason: m.wastage.reason as WastageReason, from: m.wastage.from as "storage" | "project" } : null,
+      relocation: m.relocation ? { from: m.relocation.from ?? null, to: m.relocation.to ?? null } : null,
       project: project?._id ? { id: String(project._id), name: project.name, code: project.code, color: project.color ?? DEFAULT_COLOR } : null,
       remaining: m.balance?.available ?? 0,
       unitCost: m.unitCost ?? 0,
@@ -201,13 +237,17 @@ export const getItemDetail = cache(async (id: string): Promise<ItemDetail | null
     assigned: byType.get("assign")?.quantity ?? 0,
     returned: byType.get("return")?.quantity ?? 0,
     adjusted: byType.get("adjustment")?.delta ?? 0,
+    wasted: roundQty(byType.get("wastage")?.quantity ?? 0),
     remaining: roundQty(item.available),
     count: totals.reduce((n, t) => n + t.count, 0),
   };
 
   const grouped = new Map<string, ItemAllocationRow>();
+  let wastedInUse = 0;
   for (const a of allocationDocs) {
     const project = a.project as unknown as PopulatedProject;
+    const wasted = roundQty(a.quantityWasted ?? 0);
+    wastedInUse = roundQty(wastedInUse + wasted);
     if (!project?._id) continue;
     const key = String(project._id);
     const row = grouped.get(key) ?? {
@@ -216,16 +256,22 @@ export const getItemDetail = cache(async (id: string): Promise<ItemDetail | null
       code: project.code,
       color: project.color ?? DEFAULT_COLOR,
       quantity: 0,
+      wasted: 0,
       cost: 0,
       lastAssignedAt: iso(a.assignedAt)!,
     };
-    row.quantity = roundQty(row.quantity + a.quantity);
-    // Per lot, as the project's expenses and the Return screen round it.
-    row.cost = round2(row.cost + round2(a.quantity * a.unitCost));
+    // In use: held less wasted, as the Return screen counts it. Each lot's value is what returning
+    // all of it would credit (its expense less the wasted units' share), so the figures match.
+    row.quantity = roundQty(row.quantity + returnableOf(a));
+    row.wasted = roundQty(row.wasted + wasted);
+    row.cost = round2(row.cost + round2(a.quantity * a.unitCost) - round2(wasted * a.unitCost));
     if (new Date(a.assignedAt) > new Date(row.lastAssignedAt)) row.lastAssignedAt = iso(a.assignedAt)!;
     grouped.set(key, row);
   }
-  const allocations: ItemAllocationRow[] = [...grouped.values()].sort((a, b) => b.quantity - a.quantity);
+  const allocations: ItemAllocationRow[] = [...grouped.values()].filter((r) => r.quantity > 0).sort((a, b) => b.quantity - a.quantity);
+  const used = usage.get(String(item._id));
+  const leadTimeDays = typeof item.leadTimeDays === "number" ? item.leadTimeDays : null;
+  const cover = coverage(roundQty(item.available), used?.perDay ?? null, leadTimeDays);
 
   // Oldest first, so the trend chart reads left to right.
   const purchases: ItemPurchasePoint[] = purchaseDocs
@@ -236,6 +282,8 @@ export const getItemDetail = cache(async (id: string): Promise<ItemDetail | null
     ...toRow(item, categories),
     ...toFormRecord(item),
     lastPurchasePrice: item.lastPurchasePrice ?? null,
+    coverage: { perDay: used?.perDay ?? null, windowDays: DEFAULT_WINDOW_DAYS, ...cover },
+    wastedInUse,
     createdAt: iso(item.createdAt)!,
     movementCount: summary.count,
     movements,

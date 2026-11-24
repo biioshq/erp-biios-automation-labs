@@ -52,6 +52,8 @@ const liabilitySchema = new Schema(
           mode: { type: String, enum: valuesOf(LIABILITY_SOURCES), required: true },
           account: { type: Schema.Types.ObjectId, ref: "BankAccount" },
           paymentMethod: { type: String, enum: valuesOf(PAYMENT_METHODS) },
+          /** Mode "accrued" only: the expense category the cost belongs to (an expense category value). */
+          category: { type: String, trim: true, maxlength: 80 },
         },
         { _id: false },
       ),

@@ -1,11 +1,11 @@
-import { PiggyBank, Receipt, Wallet } from "lucide-react";
+import { History, PiggyBank, Receipt, Wallet } from "lucide-react";
 import { Money } from "@/components/shared/money";
 import { ResponsiveMoney } from "@/features/finance/dashboard/components/responsive-money";
 import { Section } from "@/components/shared/page";
 import { StatCard } from "@/components/shared/stat-card";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { formatPercent, round2 } from "@/lib/format";
+import { formatDate, formatPercent, round2 } from "@/lib/format";
 import { BUDGET_TEXT_CLASS, budgetTone } from "../utils";
 import { stageRows } from "../queries";
 import type { ProjectDetail } from "../types";
@@ -26,11 +26,19 @@ export function BudgetTab({ project }: { project: ProjectDetail }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
-        <StatCard className={KPI} label="Total budget" value={<ResponsiveMoney value={project.budget} />} icon={Wallet} tone="info" hint={planned > 0 ? `${formatPercent(project.budget > 0 ? planned / project.budget : 0)} planned by stage` : "No stage budgets set"} />
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <StatCard
+          className={KPI}
+          label="Original budget"
+          value={<ResponsiveMoney value={project.originalBudget} />}
+          icon={History}
+          tone="default"
+          hint={project.budgetHistory.length ? `Revised ${project.budgetHistory.length} ${project.budgetHistory.length === 1 ? "time" : "times"}` : "Never revised"}
+        />
+        <StatCard className={KPI} label="Revised budget" value={<ResponsiveMoney value={project.budget} />} icon={Wallet} tone="info" hint={planned > 0 ? `${formatPercent(project.budget > 0 ? planned / project.budget : 0)} planned by stage` : "No stage budgets set"} />
         <StatCard className={KPI} label="Total spent" value={<ResponsiveMoney value={project.spent} />} icon={Receipt} tone={tone === "danger" ? "danger" : tone === "warning" ? "warning" : "brand"} hint={project.budget > 0 ? `${formatPercent(project.usage)} of budget` : undefined} footer={<BudgetBar spent={project.spent} budget={project.budget} />} />
         <StatCard
-          className={`${KPI} max-sm:col-span-2`}
+          className={KPI}
           label="Remaining budget"
           value={<ResponsiveMoney value={project.remaining} tone={project.remaining < 0 ? "negative" : undefined} />}
           icon={PiggyBank}
@@ -39,6 +47,8 @@ export function BudgetTab({ project }: { project: ProjectDetail }) {
         />
       </div>
       <SalariesHiddenNote className="-mt-3" />
+
+      <BudgetHistory project={project} />
 
       <Section title="Stage-wise spending" description="Planned stage budget against what has been spent. Inventory assignments count in the stage they were assigned to.">
         <StageChart rows={rows} showPlanned={planned > 0} />
@@ -145,5 +155,46 @@ export function BudgetTab({ project }: { project: ProjectDetail }) {
         ) : null}
       </Section>
     </div>
+  );
+}
+
+/** Every budget change, oldest first: the budget before and after, when, by whom and why. */
+function BudgetHistory({ project }: { project: ProjectDetail }) {
+  const changes = project.budgetHistory.map((h, i) => ({
+    ...h,
+    after: project.budgetHistory[i + 1]?.budget ?? project.budget,
+  }));
+  return (
+    <Section title="Budget history" description="The original budget and every revision. Older entries are never changed.">
+      {changes.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          The budget has not been revised since the project was created. When you change it with Edit, the earlier figure is kept here.
+        </p>
+      ) : (
+        <ol className="divide-y">
+          {changes.map((c, i) => {
+            const diff = round2(c.after - c.budget);
+            return (
+              <li key={`${c.changedAt}-${i}`} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm">
+                    <Money value={c.budget} /> <span className="text-muted-foreground">to</span> <Money value={c.after} className="font-medium" />{" "}
+                    <span className={cn("text-xs", diff > 0 ? "text-warning" : "text-success")}>
+                      ({diff > 0 ? "+" : "-"}
+                      <Money value={Math.abs(diff)} />)
+                    </span>
+                  </p>
+                  {c.note ? <p className="mt-0.5 text-xs text-muted-foreground">{c.note}</p> : null}
+                </div>
+                <p className="shrink-0 text-xs text-muted-foreground">
+                  {formatDate(c.changedAt)}
+                  {c.changedBy ? ` by ${c.changedBy}` : ""}
+                </p>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </Section>
   );
 }

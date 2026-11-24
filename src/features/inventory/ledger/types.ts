@@ -7,7 +7,9 @@ export type LedgerItem = {
   sku: string;
   unit: string;
   available: number;
+  /** In use on projects: allocated less units wasted there. */
   allocated: number;
+  /** available + allocated (in use). */
   quantity: number;
   minStock: number;
   /** Average cost per unit of the stock on hand. */
@@ -20,6 +22,8 @@ export type LedgerItem = {
   unexpensedValue: number | null;
   lastPurchasePrice: number | null;
   vendor: string | null;
+  /** Where the item is kept, for the wastage and location forms. */
+  location: string | null;
   status: StockStatus;
   /** The part's value or rating, to tell same-named parts apart in pickers. */
   variant: string | null;
@@ -70,15 +74,21 @@ export type ProjectImpact = {
   salariesHidden: boolean;
 };
 
-/** What a project holds of one item, with its assignments (latest first) to price a return. */
+/** What a project holds of one item and can return, with its assignments (latest first) to price a return. */
 export type HeldItem = {
   itemId: string;
   name: string;
   sku: string;
   unit: string;
+  /** Units that can be returned (held less wasted). */
   held: number;
+  /** What returning all of them would credit. */
   cost: number;
-  lots: { quantity: number; unitCost: number; stage: ProjectStage; assignedAt: string }[];
+  /**
+   * `quantity` is what the assignment's expense is charged on (wasted units included);
+   * `returnable` is what can still come back.
+   */
+  lots: { quantity: number; returnable: number; unitCost: number; stage: ProjectStage; assignedAt: string }[];
 };
 
 export type PurchaseResult = {

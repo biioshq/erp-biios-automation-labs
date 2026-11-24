@@ -4,7 +4,7 @@ import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
 import { InventoryAllocation, InventoryItem, InventoryMovement, Project } from "@/server/models";
 import { getProjectOptions } from "@/server/lookups";
-import { roundQty } from "@/server/services/inventory-ledger";
+import { returnableOf, roundQty } from "@/server/services/inventory-ledger";
 import { projectSpend } from "@/server/services/metrics";
 import { iso } from "@/server/serialize";
 import { round2 } from "@/lib/format";
@@ -14,28 +14,47 @@ import type { MovementType, ProjectStage } from "@/lib/constants";
 import { variantHint } from "@/features/inventory/items/attributes";
 import type { HeldItem, LastPurchase, LedgerItem, LedgerProject, ProjectImpact, RecentOperation } from "./types";
 
+/**
+ * Units wasted on projects, per item. They stay in `item.allocated` (and `quantity`) for good, as
+ * the projects bore their cost, but are no longer in use: lists show allocated less these.
+ */
+export async function wastedInUseByItem(itemIds?: Types.ObjectId[]): Promise<Map<string, number>> {
+  const rows = await InventoryAllocation.aggregate<{ _id: Types.ObjectId; wasted: number }>([
+    { $match: { quantity: { $gt: 0 }, quantityWasted: { $gt: 0 }, ...(itemIds ? { item: { $in: itemIds } } : {}) } },
+    { $group: { _id: "$item", wasted: { $sum: { $min: ["$quantityWasted", "$quantity"] } } } },
+  ]);
+  return new Map(rows.map((r) => [String(r._id), roundQty(r.wasted)]));
+}
+
+/** Units in use on projects: allocated less what was wasted there. */
+export const inUseOf = (allocated: number, wasted = 0) => roundQty(Math.max(0, allocated - wasted));
+
 export async function getLedgerItems(): Promise<LedgerItem[]> {
   await connectDB();
-  const items = await InventoryItem.find({ archivedAt: null }).sort({ name: 1 }).lean();
+  const [items, wasted] = await Promise.all([InventoryItem.find({ archivedAt: null }).sort({ name: 1 }).lean(), wastedInUseByItem()]);
   // Rounded to the ledger's 3 decimals so float drift stored by older writes
   // (0.19999999999999998 kg) does not make the forms refuse the 0.2 they show.
-  return items.map((i) => ({
-    id: String(i._id),
-    name: i.name,
-    sku: i.sku,
-    unit: i.unit ?? "pcs",
-    available: roundQty(i.available),
-    allocated: roundQty(i.allocated),
-    quantity: roundQty(i.quantity),
-    minStock: i.minStock,
-    unitPrice: i.unitPrice,
-    unexpensedQty: typeof i.unexpensedQty === "number" ? i.unexpensedQty : null,
-    unexpensedValue: typeof i.unexpensedValue === "number" ? i.unexpensedValue : null,
-    lastPurchasePrice: i.lastPurchasePrice ?? null,
-    vendor: i.vendor ?? null,
-    status: getStockStatus(roundQty(i.available), i.minStock),
-    variant: variantHint({ attributes: i.attributes, subcategory: null }, 30),
-  }));
+  return items.map((i) => {
+    const allocated = inUseOf(i.allocated, wasted.get(String(i._id)));
+    return {
+      id: String(i._id),
+      name: i.name,
+      sku: i.sku,
+      unit: i.unit ?? "pcs",
+      available: roundQty(i.available),
+      allocated,
+      quantity: roundQty(roundQty(i.available) + allocated),
+      minStock: i.minStock,
+      unitPrice: i.unitPrice,
+      unexpensedQty: typeof i.unexpensedQty === "number" ? i.unexpensedQty : null,
+      unexpensedValue: typeof i.unexpensedValue === "number" ? i.unexpensedValue : null,
+      lastPurchasePrice: i.lastPurchasePrice ?? null,
+      vendor: i.vendor ?? null,
+      location: i.location?.trim() || null,
+      status: getStockStatus(roundQty(i.available), i.minStock),
+      variant: variantHint({ attributes: i.attributes, subcategory: null }, 30),
+    };
+  });
 }
 
 type StoredInvoice = { gstin?: string | null; hsnSac?: string | null; taxableAmount?: number | null; cgst?: number | null; sgst?: number | null; igst?: number | null };
@@ -112,7 +131,10 @@ export async function getRecentOperations(type: MovementType, limit = 8): Promis
   });
 }
 
-/** Items a project currently holds, with the assignments to price a return (latest first). */
+/**
+ * Items a project currently holds and can return, with the assignments to price a return (latest
+ * first). Units wasted on the project are left out of `held` and `cost`: they cannot come back.
+ */
 export async function getHeldItems(projectId: string): Promise<HeldItem[]> {
   if (!Types.ObjectId.isValid(projectId)) return [];
   await connectDB();
@@ -124,14 +146,16 @@ export async function getHeldItems(projectId: string): Promise<HeldItem[]> {
   for (const a of allocations) {
     const item = a.item as unknown as (PopulatedItem & { archivedAt?: Date | null }) | null;
     if (!item?._id || item.archivedAt) continue;
+    const returnable = returnableOf(a);
+    if (returnable <= 0) continue;
     const id = String(item._id);
     const entry =
       byItem.get(id) ?? { itemId: id, name: item.name, sku: item.sku, unit: item.unit ?? "pcs", held: 0, cost: 0, lots: [] };
-    entry.held = roundQty(entry.held + a.quantity);
-    // Each lot rounded to paise, as its expense and the return credit are, so the value shown
-    // next to "Credit to project" matches what returning everything would credit.
-    entry.cost = round2(entry.cost + round2(a.quantity * a.unitCost));
-    entry.lots.push({ quantity: a.quantity, unitCost: a.unitCost, stage: a.stage as ProjectStage, assignedAt: iso(a.assignedAt)! });
+    entry.held = roundQty(entry.held + returnable);
+    // What returning all of the lot credits (its expense drops to the wasted units' share),
+    // rounded as the expense is, so this matches "Credit to project" for everything.
+    entry.cost = round2(entry.cost + round2(a.quantity * a.unitCost) - round2(roundQty(a.quantity - returnable) * a.unitCost));
+    entry.lots.push({ quantity: a.quantity, returnable, unitCost: a.unitCost, stage: a.stage as ProjectStage, assignedAt: iso(a.assignedAt)! });
     byItem.set(id, entry);
   }
   return [...byItem.values()].sort((a, b) => a.name.localeCompare(b.name));

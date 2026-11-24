@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FolderKanban, Plus, Wallet, PiggyBank, Receipt } from "lucide-react";
+import { BadgeIndianRupee, FolderKanban, HandCoins, Plus, Wallet, PiggyBank, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
@@ -41,7 +41,19 @@ export default async function ProjectsPage({ searchParams }: PageProps<"/finance
       <PageHeader
         eyebrow="Finance"
         title="Projects"
-        description="Budgets, spend and stock for every project. Open one for stage-wise spending, inventory used, a timeline and documents."
+        description={
+          <>
+            Value, budgets, income and spend for every project. Open one for stage-wise spending, inventory used, a timeline and documents. Compare them on{" "}
+            <Link href="/finance/projects/profitability" className="font-medium text-brand-ink hover:underline">
+              Profitability
+            </Link>{" "}
+            and{" "}
+            <Link href="/finance/projects/budgets" className="font-medium text-brand-ink hover:underline">
+              Budget tracking
+            </Link>
+            .
+          </>
+        }
         actions={
           <Button asChild>
             <Link href="?new=1" scroll={false}>
@@ -50,7 +62,18 @@ export default async function ProjectsPage({ searchParams }: PageProps<"/finance
           </Button>
         }
       />
-      <StatGrid>
+      <StatGrid className="xl:grid-cols-3">
+        <StatCard
+          label="Total project value"
+          value={<Money value={summary.totalContractValue} compact />}
+          icon={BadgeIndianRupee}
+          tone="success"
+          hint={
+            summary.withContractValue === summary.count
+              ? "Agreed with clients"
+              : `${formatNumber(summary.withContractValue)} of ${formatNumber(summary.count)} projects have a value set`
+          }
+        />
         <StatCard label="Total budget" value={<Money value={summary.totalBudget} compact />} icon={Wallet} tone="info" hint={`Across ${formatNumber(summary.count)} project${summary.count === 1 ? "" : "s"}`} />
         <StatCard label="Total spent" value={<Money value={summary.totalSpent} compact />} icon={Receipt} tone="brand" hint={summary.totalBudget > 0 ? `${formatPercent(usage)} of budget` : undefined} />
         <StatCard
@@ -60,7 +83,14 @@ export default async function ProjectsPage({ searchParams }: PageProps<"/finance
           tone={summary.remaining < 0 ? "danger" : "success"}
           hint={summary.remaining < 0 ? "Spend is above the combined budget" : "Budget not yet spent"}
         />
-        <StatCard label="Active projects" value={formatNumber(summary.activeCount)} icon={FolderKanban} tone="success" hint={`${formatNumber(summary.count)} in total`} />
+        <StatCard
+          label="Payments received"
+          value={<Money value={summary.totalReceived} compact />}
+          icon={HandCoins}
+          tone="success"
+          hint={summary.totalOutstanding > 0 ? <><Money value={summary.totalOutstanding} compact /> still due on invoices</> : "Nothing due on invoices"}
+        />
+        <StatCard label="Active projects" value={formatNumber(summary.activeCount)} icon={FolderKanban} tone="info" hint={`${formatNumber(summary.count)} in total`} />
       </StatGrid>
       <SalariesHiddenNote className="-mt-2" />
       <ProjectsView rows={rows} editTarget={editTarget} clients={clients} layout={layout} hasAny={summary.count > 0} />

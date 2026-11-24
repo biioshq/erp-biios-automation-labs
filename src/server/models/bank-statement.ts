@@ -45,6 +45,12 @@ const bankTransactionSchema = new Schema(
       type: new Schema({ kind: { type: String, required: true }, id: { type: Schema.Types.ObjectId, required: true } }, { _id: false }),
       default: undefined,
     },
+    /**
+     * Set when an admin unmatched the line from its record (and cleared when the line is claimed
+     * again), so the line reads "Needs review" whatever later writes do to updatedAt.
+     */
+    unmatchedAt: { type: Date },
+    unmatchedBy: { type: Schema.Types.ObjectId, ref: "User" },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },

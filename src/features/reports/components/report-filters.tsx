@@ -4,13 +4,16 @@ import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DateRangeFilter, useTableUrl } from "@/components/data-table";
 import { FacetedFilter, type FilterOption } from "@/components/data-table/faceted-filter";
 import { cn } from "@/lib/utils";
-import type { ReportFilterKey, ReportMeta } from "../meta";
-
-export type FilterMeta = Pick<ReportMeta, "type" | "filters" | "categories">;
+import type { ReportFilterKey, ReportInfo } from "../catalog";
+import { PL_COLUMN_OPTIONS } from "../schemas";
 import type { ReportFilters } from "../types";
+import { AsOfFilter } from "./as-of-filter";
+
+export type FilterMeta = Pick<ReportInfo, "type" | "filters" | "categories">;
 
 export type ReportFilterOptions = {
   projects: FilterOption[];
@@ -45,6 +48,7 @@ export function ReportFilterBar({
   const has = (k: ReportFilterKey) => shown.includes(k);
   const dirty =
     (has("date") && (filters.from || filters.to)) ||
+    (has("asOf") && filters.to) ||
     (has("project") && filters.project.length) ||
     (has("vendor") && filters.vendor.length) ||
     (has("category") && filters.category.length);
@@ -57,6 +61,31 @@ export function ReportFilterBar({
       {has("date") ? (
         <div className="col-span-2 sm:col-auto max-sm:[&>button]:w-full max-sm:[&>button]:justify-start">
           <DateRangeFilter from={filters.from} to={filters.to} onChange={(r) => url.set({ from: r.from, to: r.to })} label="Period" />
+        </div>
+      ) : null}
+      {has("asOf") ? (
+        <div className="col-span-2 sm:col-auto max-sm:[&>button]:w-full max-sm:[&>button]:justify-start">
+          <AsOfFilter value={filters.to} onChange={(d) => url.set({ to: d, from: null })} />
+        </div>
+      ) : null}
+      {has("columns") ? (
+        <div className="col-span-2 sm:col-auto">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            spacing={0}
+            value={filters.columns ?? "total"}
+            onValueChange={(v) => v && url.set({ columns: v === "total" ? null : v })}
+            aria-label="Columns"
+            className="max-sm:w-full"
+          >
+            {PL_COLUMN_OPTIONS.map((o) => (
+              <ToggleGroupItem key={o.value} value={o.value} className="px-3 text-[13px] max-md:h-10 max-sm:flex-1 data-[state=on]:bg-brand/10 data-[state=on]:text-brand-ink">
+                {o.label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </div>
       ) : null}
       {has("project") ? (
@@ -93,7 +122,7 @@ export function ReportFilterBar({
           className="col-span-2 h-8 px-2 sm:col-auto"
           onClick={() =>
             url.set({
-              ...(has("date") ? { from: null, to: null } : {}),
+              ...(has("date") || has("asOf") ? { from: null, to: null } : {}),
               ...(has("project") ? { project: null } : {}),
               ...(has("vendor") ? { vendor: null } : {}),
               ...(has("category") ? { category: null } : {}),

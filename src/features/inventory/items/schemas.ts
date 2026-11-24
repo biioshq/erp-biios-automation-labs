@@ -42,6 +42,11 @@ export const itemFormSchema = z
     attributes: itemAttributesSchema.optional(),
     unit: z.enum(valuesOf(INVENTORY_UNITS), { error: "Pick a unit" }),
     minStock: optionalMoney,
+    /**
+     * Days from ordering to having it in stock. Missing: left as stored (callers that do not show
+     * it, such as imports); null: cleared. Never defaulted to 0, which would mean "arrives today".
+     */
+    leadTimeDays: z.number({ error: "Enter a number of days" }).int("Whole days only").min(0, "Cannot be negative").max(365, "At most 365 days").nullable().optional(),
     vendor: optionalText(200),
     purchaseDate: optionalDateInput,
     description: optionalText(2000),

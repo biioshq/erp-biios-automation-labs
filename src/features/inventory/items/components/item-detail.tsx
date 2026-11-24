@@ -6,11 +6,12 @@ import { Money } from "@/components/shared/money";
 import { MovementTypeBadge, StockStatusBadge } from "@/components/shared/status-badge";
 import { StockLevelBar } from "@/components/shared/stock-level-bar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { INVENTORY_UNITS, labelOf } from "@/lib/constants";
+import { INVENTORY_UNITS, WASTAGE_REASONS, labelOf } from "@/lib/constants";
+import { toDateInput } from "@/lib/dates";
 import { formatDate, formatNumber, formatRelative } from "@/lib/format";
 import { STOCK_STATUS_META } from "@/lib/stock-status";
 import { cn } from "@/lib/utils";
-import type { ItemDetail } from "../types";
+import type { ItemDetail, ItemMovementRow } from "../types";
 import { ItemActions } from "./item-actions";
 import { ItemPhotoPanel } from "./item-photo-panel";
 import type { CategoryOption } from "./item-form";
@@ -66,6 +67,62 @@ function SummaryPill({ label, value, tone }: { label: string; value: string; ton
 
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "-" : ""}${formatNumber(Math.abs(n))}`;
 
+/** The change a movement made to available stock; a move or project wastage shows its units unsigned. */
+const movementQty = (m: ItemMovementRow) => (m.availableDelta === 0 ? formatNumber(m.quantity) : signed(m.availableDelta));
+
+/** What a movement touched besides the stock room: a project, a vendor, a location move. */
+function MovementWhere({ m, className }: { m: ItemMovementRow; className?: string }) {
+  if (m.relocation) {
+    return (
+      <span className={cn("min-w-0 truncate text-muted-foreground", className)}>
+        {m.relocation.from ?? "No location"} → {m.relocation.to ?? "No location"}
+      </span>
+    );
+  }
+  if (m.project) {
+    return (
+      <Link href={`/finance/projects/${m.project.id}?tab=inventory`} className={cn("flex min-w-0 items-center gap-1.5 hover:underline", className)}>
+        <span className="size-2 shrink-0 rounded-full" style={{ background: m.project.color }} />
+        <span className="max-w-40 truncate">{m.project.name}</span>
+      </Link>
+    );
+  }
+  return <span className={cn("min-w-0 truncate text-muted-foreground", className)}>{m.vendor ?? (m.type === "wastage" ? "Storage" : "Stock room")}</span>;
+}
+
+/** Wastage reason and source under the badge, so a write-off reads without opening anything. */
+function wastageNote(m: ItemMovementRow) {
+  if (!m.wastage) return null;
+  return `${labelOf(WASTAGE_REASONS, m.wastage.reason)}, ${m.wastage.from === "project" ? "in use on the project" : "from storage"}`;
+}
+
+function OutlookFact({ item }: { item: ItemDetail }) {
+  const c = item.coverage;
+  const unit = labelOf(INVENTORY_UNITS, item.unit).toLowerCase();
+  const today = toDateInput(new Date());
+  const late = c.orderBy !== null && c.orderBy <= today;
+  return (
+    <div className="grid grid-cols-2 gap-4 border-t pt-5 sm:grid-cols-4">
+      <Fact label="Lead time">{item.leadTimeDays !== null ? `${formatNumber(item.leadTimeDays)} ${item.leadTimeDays === 1 ? "day" : "days"}` : "Not set"}</Fact>
+      <Fact label={`Use per day (last ${c.windowDays} days)`}>
+        {c.perDay !== null ? `${formatNumber(Math.round(c.perDay * 100) / 100)} ${unit}` : "No recorded use"}
+      </Fact>
+      <Fact label="Days of cover">
+        {c.daysOfCover !== null ? (
+          <span title={c.stockoutDate ? `Runs out around ${formatDate(c.stockoutDate)}` : undefined}>
+            {formatNumber(c.daysOfCover)} {c.stockoutDate ? <span className="text-xs font-normal text-muted-foreground">to {formatDate(c.stockoutDate)}</span> : null}
+          </span>
+        ) : (
+          "-"
+        )}
+      </Fact>
+      <Fact label="Order by">
+        {c.orderBy ? <span className={cn(late && "text-danger")}>{late ? "Order now" : formatDate(c.orderBy)}</span> : "-"}
+      </Fact>
+    </div>
+  );
+}
+
 /** The item page: levels, status callouts, movement history, allocations and purchase prices. */
 export function ItemDetailView({
   item,
@@ -81,6 +138,9 @@ export function ItemDetailView({
   const unit = labelOf(INVENTORY_UNITS, item.unit).toLowerCase();
   const tone = item.status === "in_stock" ? "success" : item.status === "low_stock" ? "warning" : "danger";
   const { summary } = item;
+  // Units wasted on a project stay in `allocated` (the project bore their cost) but are no longer in use.
+  const inUse = Math.max(0, Math.round((item.allocated - item.wastedInUse) * 1000) / 1000);
+  const total = Math.round((item.available + inUse) * 1000) / 1000;
 
   return (
     <Page>
@@ -154,8 +214,13 @@ export function ItemDetailView({
           <div className="min-w-0 flex-1 space-y-6">
             <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:gap-x-6 sm:gap-y-6 xl:grid-cols-4">
               <Figure label="Available" value={formatNumber(item.available)} big tone={tone} hint={unit} />
-              <Figure label="Allocated" value={formatNumber(item.allocated)} big hint={`${unit} on projects`} />
-              <Figure label="Total" value={formatNumber(item.quantity)} big hint={`${unit} held in all`} />
+              <Figure
+                label="In use"
+                value={formatNumber(inUse)}
+                big
+                hint={item.wastedInUse > 0 ? `${unit} on projects, ${formatNumber(item.wastedInUse)} more wasted there` : `${unit} on projects`}
+              />
+              <Figure label="Total" value={formatNumber(total)} big hint={`${unit} in storage and in use`} />
               <Figure label="Minimum" value={formatNumber(item.minStock)} big hint="Low Stock at or below" />
             </div>
             <div className="space-y-2">
@@ -175,6 +240,7 @@ export function ItemDetailView({
           <Fact label="Last purchase date">{item.purchaseDate ? formatDate(item.purchaseDate) : "Not purchased yet"}</Fact>
           <Fact label="Added">{formatRelative(item.createdAt)}</Fact>
         </div>
+        <OutlookFact item={item} />
         {item.description ? <p className="max-w-3xl text-sm text-pretty text-muted-foreground">{item.description}</p> : null}
         {item.attributes.length ? (
           <dl className="grid max-w-4xl gap-x-6 gap-y-3 border-t pt-5 sm:grid-cols-2" aria-label="Details">
@@ -207,6 +273,7 @@ export function ItemDetailView({
             <SummaryPill label="Assigned" value={formatNumber(summary.assigned)} tone="brand" />
             <SummaryPill label="Returned" value={formatNumber(summary.returned)} tone="info" />
             {summary.adjusted !== 0 ? <SummaryPill label="Adjusted" value={signed(summary.adjusted)} /> : null}
+            {summary.wasted > 0 ? <SummaryPill label="Wasted" value={formatNumber(summary.wasted)} tone="danger" /> : null}
             <SummaryPill label="Remaining" value={formatNumber(summary.remaining)} />
           </div>
           {item.movements.length === 0 ? (
@@ -215,7 +282,7 @@ export function ItemDetailView({
                 compact
                 icon={History}
                 title="No movements yet"
-                description="Purchases, assignments, returns and adjustments appear here."
+                description="Purchases, assignments, returns, wastage, adjustments and location moves appear here."
               />
             </div>
           ) : (
@@ -232,18 +299,11 @@ export function ItemDetailView({
                         m.availableDelta < 0 && "text-danger",
                       )}
                     >
-                      {signed(m.availableDelta)} <span className="text-xs font-normal text-muted-foreground">{unit}</span>
+                      {movementQty(m)} <span className="text-xs font-normal text-muted-foreground">{unit}</span>
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3 text-sm">
-                    {m.project ? (
-                      <Link href={`/finance/projects/${m.project.id}?tab=inventory`} className="flex min-w-0 items-center gap-1.5 hover:underline">
-                        <span className="size-2 shrink-0 rounded-full" style={{ background: m.project.color }} />
-                        <span className="truncate">{m.project.name}</span>
-                      </Link>
-                    ) : (
-                      <span className="min-w-0 truncate text-muted-foreground">{m.vendor ?? "Stock room"}</span>
-                    )}
+                    <MovementWhere m={m} />
                     <span className="tabular shrink-0 text-xs text-muted-foreground">{formatNumber(m.remaining)} left</span>
                   </div>
                   <p className="flex flex-wrap items-center justify-between gap-x-3 text-xs text-muted-foreground">
@@ -253,6 +313,7 @@ export function ItemDetailView({
                     </span>
                     {m.unitCost > 0 ? <Money value={m.unitCost} /> : null}
                   </p>
+                  {wastageNote(m) ? <p className="text-xs text-danger">{wastageNote(m)}</p> : null}
                   {m.note ? <p className="line-clamp-2 text-xs text-muted-foreground">{m.note}</p> : null}
                 </li>
               ))}
@@ -263,7 +324,7 @@ export function ItemDetailView({
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="h-10 pl-5 text-xs">Type</TableHead>
                     <TableHead className="h-10 text-right text-xs">Quantity</TableHead>
-                    <TableHead className="h-10 text-xs">Project</TableHead>
+                    <TableHead className="h-10 text-xs">Project or place</TableHead>
                     <TableHead className="h-10 text-right text-xs">Remaining</TableHead>
                     <TableHead className="h-10 text-right text-xs">Unit cost</TableHead>
                     <TableHead className="h-10 text-xs">Date</TableHead>
@@ -276,6 +337,7 @@ export function ItemDetailView({
                       <TableCell className="py-2.5 pl-5">
                         <div className="space-y-1">
                           <MovementTypeBadge type={m.type} />
+                          {wastageNote(m) ? <p className="max-w-48 truncate text-[11px] text-danger">{wastageNote(m)}</p> : null}
                           {m.note ? <p className="max-w-48 truncate text-[11px] text-muted-foreground" title={m.note}>{m.note}</p> : null}
                         </div>
                       </TableCell>
@@ -286,17 +348,10 @@ export function ItemDetailView({
                           m.availableDelta < 0 && "text-danger",
                         )}
                       >
-                        {signed(m.availableDelta)}
+                        {movementQty(m)}
                       </TableCell>
                       <TableCell className="py-2.5">
-                        {m.project ? (
-                          <Link href={`/finance/projects/${m.project.id}?tab=inventory`} className="flex items-center gap-1.5 hover:underline">
-                            <span className="size-2 shrink-0 rounded-full" style={{ background: m.project.color }} />
-                            <span className="max-w-40 truncate">{m.project.name}</span>
-                          </Link>
-                        ) : (
-                          <span className="text-muted-foreground">{m.vendor ?? "-"}</span>
-                        )}
+                        <MovementWhere m={m} className="max-w-56" />
                       </TableCell>
                       <TableCell className="tabular py-2.5 text-right">{formatNumber(m.remaining)}</TableCell>
                       <TableCell className="py-2.5 text-right">{m.unitCost > 0 ? <Money value={m.unitCost} /> : <span className="text-muted-foreground">-</span>}</TableCell>
@@ -312,7 +367,7 @@ export function ItemDetailView({
         </Section>
 
         <div className="flex flex-col gap-6">
-          <Section title="Allocation by project" description="Projects holding this item now">
+          <Section title="In use by project" description="Units projects hold now and can still return">
             {item.allocations.length === 0 ? (
               <EmptyState compact icon={FolderKanban} title="Not assigned to any project" description="Assign stock to a project to see its cost here." />
             ) : (
@@ -334,6 +389,7 @@ export function ItemDetailView({
                         <span className="tabular block text-sm font-semibold">
                           {formatNumber(a.quantity)} {unit}
                         </span>
+                        {a.wasted > 0 ? <span className="tabular block text-xs text-danger">{formatNumber(a.wasted)} wasted</span> : null}
                         <Money value={a.cost} className="text-xs text-muted-foreground" />
                       </span>
                     </Link>

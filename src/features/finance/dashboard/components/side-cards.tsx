@@ -35,6 +35,40 @@ export function QuickActions() {
   );
 }
 
+const SHORTCUTS: { title: string; href: string; adminOnly?: boolean }[] = [
+  { title: "Income summary", href: "/finance/income/summary" },
+  { title: "Expense summary", href: "/finance/expenses/summary" },
+  { title: "Invoices & receivables", href: "/finance/invoices" },
+  { title: "Payment tracking", href: "/finance/payments" },
+  { title: "Project profitability", href: "/finance/projects/profitability" },
+  { title: "Budget tracking", href: "/finance/projects/budgets" },
+  { title: "Balance sheet", href: "/finance/reports/balance-sheet", adminOnly: true },
+  { title: "Profit & loss", href: "/finance/reports/profit-loss", adminOnly: true },
+  { title: "Cash flow", href: "/finance/reports/cash-flow", adminOnly: true },
+  { title: "All reports", href: "/finance/reports" },
+];
+
+/** Links to the detailed Finance pages behind the dashboard's figures. */
+export function ShortcutLinks({ isAdmin }: { isAdmin: boolean }) {
+  return (
+    <Section title="Detailed pages" contentClassName="p-2 sm:p-3">
+      <ul className="grid grid-cols-2 gap-1">
+        {SHORTCUTS.filter((s) => isAdmin || !s.adminOnly).map((s) => (
+          <li key={s.href}>
+            <Link
+              href={s.href}
+              className="flex min-h-10 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-sm transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
+              <span className="min-w-0 truncate">{s.title}</span>
+              <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
 /** GST paid on expense invoices in the selected period. */
 export function GstSummary({ data }: { data: FinanceDashboardData }) {
   const { gstPaid, expenses } = data.kpis;

@@ -1,5 +1,6 @@
 import type { FileDTO } from "@/features/files/types";
 import type { ProjectStage, ProjectStatus } from "@/lib/constants";
+import type { ProjectFinance, ProjectOutlook } from "./finance";
 
 /** What blocks a project from being deleted. */
 export type ProjectLinks = {
@@ -20,7 +21,12 @@ export type ProjectRow = {
   description: string | null;
   status: ProjectStatus;
   color: string;
+  /** The current (revised) budget. */
   budget: number;
+  /** The first recorded budget (the budget itself when it never changed). */
+  originalBudget: number;
+  /** What the client pays for the whole project; null when not recorded. */
+  contractValue: number | null;
   stageBudgets: Record<ProjectStage, number>;
   startDate: string | null;
   endDate: string | null;
@@ -34,15 +40,35 @@ export type ProjectRow = {
   createdAt: string;
 };
 
+/** A project with its revenue, spend by type and forecast figures (list, profitability, budgets). */
+export type ProjectFinanceRow = ProjectRow & { finance: ProjectFinance; outlook: ProjectOutlook };
+
+/** One earlier budget, as kept in Project.budgetHistory. */
+export type BudgetChange = {
+  /** The budget before this change. */
+  budget: number;
+  changedAt: string;
+  changedBy: string | null;
+  note: string | null;
+};
+
 export type ProjectsSummary = {
   count: number;
   activeCount: number;
   totalBudget: number;
   totalSpent: number;
   remaining: number;
+  /** Sum of recorded contract values, and how many projects have one. */
+  totalContractValue: number;
+  withContractValue: number;
+  totalRevenue: number;
+  totalReceived: number;
+  totalOutstanding: number;
 };
 
-export type ProjectDetail = ProjectRow & {
+export type ProjectDetail = ProjectFinanceRow & {
+  /** Earlier budgets, oldest first. */
+  budgetHistory: BudgetChange[];
   byStage: Record<ProjectStage, number>;
   /** Value of stock the project holds right now (held quantity x the unit cost charged at assignment). */
   inventoryValue: number;

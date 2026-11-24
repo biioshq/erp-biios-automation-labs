@@ -354,7 +354,7 @@ function ImpactPanel({
       </p>
       <div className="mt-2 divide-y">
         <ImpactRow label="Available" before={item.available} after={preview.availableAfter} format={(n) => `${formatNumber(n)} ${unit}`} />
-        <ImpactRow label="Allocated" before={item.allocated} after={preview.allocatedAfter} format={(n) => `${formatNumber(n)} ${unit}`} />
+        <ImpactRow label="In use on projects" before={item.allocated} after={preview.allocatedAfter} format={(n) => `${formatNumber(n)} ${unit}`} />
         {hasProject ? (
           loading ? (
             <p className="py-2 text-sm text-muted-foreground">Loading project budget…</p>

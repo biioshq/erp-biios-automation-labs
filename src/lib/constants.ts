@@ -174,6 +174,19 @@ export const REPORT_TYPES = options([
   { value: "project", label: "Project report" },
   { value: "inventory", label: "Inventory report" },
   { value: "ca", label: "CA report" },
+  { value: "balance_sheet", label: "Balance sheet" },
+  { value: "profit_loss", label: "Profit & loss statement" },
+  { value: "cash_flow", label: "Cash flow statement" },
+  { value: "trial_balance", label: "Trial balance" },
+  { value: "fixed_assets", label: "Fixed asset register" },
+  { value: "depreciation", label: "Depreciation report" },
+  { value: "receivables", label: "Receivables report" },
+  { value: "payables", label: "Payables report" },
+  { value: "liabilities", label: "Liabilities report" },
+  { value: "equity", label: "Capital and equity report" },
+  { value: "project_financials", label: "Project financials report" },
+  { value: "cash_budget", label: "Cash flow and budget report" },
+  { value: "scenario", label: "What-if scenario" },
 ] as const);
 export type ReportType = (typeof REPORT_TYPES)[number]["value"];
 
@@ -314,6 +327,7 @@ export type LiabilityKind = (typeof LIABILITY_KINDS)[number]["value"];
 export const LIABILITY_SOURCES = options([
   { value: "account", label: "Received into a bank or cash account" },
   { value: "opening", label: "Owed before the books started" },
+  { value: "accrued", label: "An expense not paid yet (for example salaries or TDS due)" },
 ] as const);
 export type LiabilitySource = (typeof LIABILITY_SOURCES)[number]["value"];
 

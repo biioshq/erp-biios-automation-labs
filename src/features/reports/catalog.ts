@@ -1,4 +1,5 @@
 import type { ReportType } from "@/lib/constants";
+import { resourceOf } from "@/lib/permissions";
 
 /**
  * What each report is, which filters it takes and who may open it. Plain data with no icons, so
@@ -34,8 +35,6 @@ export type ReportInfo = {
   /** Which category list the category filter uses. */
   categories?: "expense" | "income" | "inventory";
   group: ReportGroup;
-  /** Company position figures (statements, loans, capital, cash): admins only, in the API route too. */
-  adminOnly?: boolean;
   /** The on-screen statement page, when the report has one. */
   page?: string;
 };
@@ -105,7 +104,6 @@ export const REPORT_CATALOG: ReportInfo[] = [
   {
     type: "balance_sheet",
     group: "statements",
-    adminOnly: true,
     page: "/finance/reports/balance-sheet",
     label: "Balance sheet",
     description: "Assets, liabilities and equity on one day.",
@@ -115,7 +113,6 @@ export const REPORT_CATALOG: ReportInfo[] = [
   {
     type: "profit_loss",
     group: "statements",
-    adminOnly: true,
     page: "/finance/reports/profit-loss",
     label: "Profit & loss",
     description: "Accrual profit and loss from the books.",
@@ -125,7 +122,6 @@ export const REPORT_CATALOG: ReportInfo[] = [
   {
     type: "cash_flow",
     group: "statements",
-    adminOnly: true,
     page: "/finance/reports/cash-flow",
     label: "Cash flow statement",
     description: "Cash in and out by activity (direct method).",
@@ -135,7 +131,6 @@ export const REPORT_CATALOG: ReportInfo[] = [
   {
     type: "trial_balance",
     group: "statements",
-    adminOnly: true,
     page: "/finance/reports/trial-balance",
     label: "Trial balance",
     description: "Every ledger account's debit or credit balance.",
@@ -153,7 +148,6 @@ export const REPORT_CATALOG: ReportInfo[] = [
   {
     type: "payables",
     group: "liability",
-    adminOnly: true,
     label: "Payables",
     description: "What is still owed to vendors, today.",
     contains: ["Vendor-wise outstanding and overdue", "Every unpaid or part-paid bill", "Due dates and status"],
@@ -162,7 +156,6 @@ export const REPORT_CATALOG: ReportInfo[] = [
   {
     type: "liabilities",
     group: "liability",
-    adminOnly: true,
     label: "Liabilities",
     description: "Current and non-current liabilities and loans.",
     contains: ["Liabilities from the balance sheet", "Loan outstanding: lender, original, paid, rate", "Due date and status"],
@@ -187,7 +180,6 @@ export const REPORT_CATALOG: ReportInfo[] = [
   {
     type: "equity",
     group: "equity",
-    adminOnly: true,
     label: "Capital & equity",
     description: "Owners' and investors' capital, drawings and retained earnings.",
     contains: ["Owner and investor capital summaries", "Contribution history and drawings", "Retained earnings"],
@@ -204,7 +196,6 @@ export const REPORT_CATALOG: ReportInfo[] = [
   {
     type: "cash_budget",
     group: "cash",
-    adminOnly: true,
     label: "Cash flow & budget",
     description: "Cash in and out, cash position and what is expected.",
     contains: ["Cash inflow, outflow and position", "Expected payments and receipts", "Budget allocation against actual"],
@@ -219,7 +210,47 @@ export const REPORT_CATALOG: ReportInfo[] = [
 const LEGACY = new Set<ReportType>(["finance", "expense", "income", "gst", "project", "inventory", "ca"]);
 export const isLegacyReport = (type: ReportType) => LEGACY.has(type);
 
-/** Report types only admins can build or download. */
-export const isAdminReport = (type: ReportType) => REPORT_CATALOG.some((m) => m.type === type && m.adminOnly);
+/**
+ * What building or downloading a report needs: every permission listed. The operational reports
+ * need the Reports export permission; statements, assets, receivables, liabilities and equity need
+ * the export permission of their own area (its view permission while that area has no export
+ * action); cash flow and budget also needs the company position. These match what members could
+ * download before roles existed: the reports marked admin only then need a permission members do
+ * not get by default.
+ */
+const exportOf = (resource: string) => (resourceOf(resource)?.actions.includes("export") ? `${resource}:export` : `${resource}:view`);
+
+const REPORT_PERMISSIONS: Record<Exclude<ReportType, "scenario">, string[]> = {
+  finance: ["finance.reports:export"],
+  expense: ["finance.reports:export"],
+  income: ["finance.reports:export"],
+  gst: ["finance.reports:export"],
+  project: ["finance.reports:export"],
+  inventory: ["finance.reports:export"],
+  ca: ["finance.reports:export"],
+  project_financials: ["finance.reports:export"],
+  cash_budget: ["finance.reports:export", "data.financial_position"],
+  balance_sheet: ["finance.statements:export"],
+  profit_loss: ["finance.statements:export"],
+  cash_flow: ["finance.statements:export"],
+  trial_balance: ["finance.statements:export"],
+  receivables: [exportOf("finance.receivables")],
+  payables: [exportOf("finance.liabilities")],
+  liabilities: [exportOf("finance.liabilities")],
+  fixed_assets: [exportOf("finance.fixed_assets")],
+  depreciation: [exportOf("finance.fixed_assets")],
+  equity: [exportOf("finance.equity")],
+};
+
+/** The permissions a report type needs, all of them. A type without a card (scenario) is never built here. */
+export function reportPermissions(type: ReportType): string[] | null {
+  return type === "scenario" ? null : (REPORT_PERMISSIONS[type] ?? null);
+}
+
+/** Whether someone with the given permission check may build or download this report. */
+export function mayExportReport(type: ReportType, can: (permission: string) => boolean): boolean {
+  const needed = reportPermissions(type);
+  return Boolean(needed && needed.every(can));
+}
 
 export const reportInfo = (type: string | undefined) => REPORT_CATALOG.find((m) => m.type === type);

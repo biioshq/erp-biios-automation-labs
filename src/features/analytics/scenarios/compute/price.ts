@@ -2,7 +2,7 @@ import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import type { PriceInputs } from "../schemas";
 import type { ScenarioResults } from "../types";
 import type { AllocationFact, ComputeContext, ItemFact, ProjectFact } from "./facts";
-import { PRICE_BASIS_LABEL, SALARIES_NOTE, budgetImpactTable, compareRow, emptyMetrics, priceOf, round2, splitAmount, splitIsWeighted, stat, sumOf } from "./common";
+import { PRICE_BASIS_LABEL, SALARIES_NOTE, budgetImpactTable, compareRow, emptyMetrics, priceOf, round2, splitAmount, splitIsWeighted, stat, sumOf, viewOf } from "./common";
 
 export type PriceFacts = {
   item: ItemFact;
@@ -48,14 +48,14 @@ export function computePrice(inputs: PriceInputs, facts: PriceFacts, ctx: Comput
       : "No project was picked, so no project budget changes.",
     `Overall procurement is every stock purchase booked in ${facts.procurement.label}.`,
   ];
-  if (!ctx.admin && inputs.projectIds.length) notes.push(SALARIES_NOTE);
+  if (!ctx.salaries && inputs.projectIds.length) notes.push(SALARIES_NOTE);
 
   const direction = diff > 0 ? "additional expenditure" : diff < 0 ? "savings" : "no change";
   return {
     version: 1,
     type: "price",
     computedAt: new Date().toISOString(),
-    view: ctx.admin ? "admin" : "member",
+    view: viewOf(ctx),
     headline: `At ${formatCurrency(revisedPrice)} instead of ${formatCurrency(current.price)} a ${item.unit}, ${formatNumber(qty)} ${item.unit} of ${item.name} cost ${formatCurrency(revisedCost)}: ${
       diff === 0 ? "no change" : `${formatCurrency(Math.abs(diff))} ${direction}`
     }${pct !== null && diff !== 0 ? ` (${formatPercent(pct)})` : ""}.`,

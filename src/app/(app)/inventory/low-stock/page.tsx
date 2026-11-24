@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils";
 import { getLowStockItems } from "@/features/inventory/low-stock/queries";
 import { LowStockList } from "@/features/inventory/low-stock/components/low-stock-list";
 import type { AlertLevel } from "@/features/inventory/low-stock/types";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 
 export const metadata: Metadata = { title: "Low stock" };
 
@@ -26,7 +27,8 @@ const LEVEL_OF: Record<Exclude<View, "all">, AlertLevel> = { out: "out", low: "b
 
 export default async function LowStockPage({ searchParams }: PageProps<"/inventory/low-stock">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "inventory.low_stock:view")) return <NoAccess eyebrow="Inventory" title="Low stock" />;
   const sp = await searchParams;
   const raw = Array.isArray(sp.status) ? sp.status[0] : sp.status;
   const view: View = VIEWS.find((v) => v.value === raw)?.value ?? "all";
@@ -110,7 +112,7 @@ export default async function LowStockPage({ searchParams }: PageProps<"/invento
           </nav>
 
           {shown.length > 0 ? (
-            <LowStockList items={shown} today={toDateInput(new Date())} />
+            <LowStockList items={shown} today={toDateInput(new Date())} canPurchase={can(user, "inventory.purchase:create")} />
           ) : (
             <p className="rounded-xl border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">Nothing in this view.</p>
           )}

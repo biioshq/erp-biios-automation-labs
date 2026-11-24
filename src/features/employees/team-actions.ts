@@ -36,7 +36,7 @@ export const addProjectMember = defineAction(
     });
     return { id: String(created._id) };
   },
-  { revalidate: REVALIDATE, message: "Added to the project team" },
+  { revalidate: REVALIDATE, message: "Added to the project team", permission: "finance.projects:edit" },
 );
 
 export const updateProjectMember = defineAction(
@@ -46,7 +46,7 @@ export const updateProjectMember = defineAction(
     if (!updated.matchedCount) throw notFound("That team membership");
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Membership updated" },
+  { revalidate: REVALIDATE, message: "Membership updated", permission: "finance.projects:edit" },
 );
 
 export const endProjectMember = defineAction(
@@ -59,5 +59,5 @@ export const endProjectMember = defineAction(
     await ProjectMember.updateOne({ _id: m._id }, { $set: { endDate: end } });
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Membership ended" },
+  { revalidate: REVALIDATE, message: "Membership ended", permission: "finance.projects:edit" },
 );

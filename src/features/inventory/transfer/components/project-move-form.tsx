@@ -325,7 +325,7 @@ export function ProjectMoveForm({
                       tone={toImpact.budget - toImpact.spent - value < 0 ? "bad" : undefined}
                     />
                   ) : null}
-                  {fromImpact?.salariesHidden ? <p className="py-2 text-xs text-muted-foreground">Spend excludes salaries, which only admins can see.</p> : null}
+                  {fromImpact?.salariesHidden ? <p className="py-2 text-xs text-muted-foreground">Spend excludes salaries, which your role cannot see.</p> : null}
                 </div>
                 <div className="mt-1 flex items-center justify-between border-t pt-3 text-sm">
                   <span className="text-muted-foreground">Cost moved</span>

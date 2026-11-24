@@ -2,6 +2,7 @@
 
 import { Archive, ArchiveRestore, ArrowUpFromLine, Landmark, Mail, Pencil, Phone, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useCan } from "@/components/current-user";
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
@@ -40,6 +41,10 @@ export function HolderDetailView({
   onDelete: () => Promise<boolean>;
 }) {
   const kind = HOLDER_KIND_LABELS[holder.kind];
+  // These only hide controls; the actions check the same permissions on the server.
+  const canCreate = useCan("finance.equity:create");
+  const canEdit = useCan("finance.equity:edit");
+  const canDelete = useCan("finance.equity:delete");
   return (
     <>
       <FormSheetBody className="space-y-6">
@@ -92,7 +97,7 @@ export function HolderDetailView({
         <section className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">History</h3>
-            {holder.archived ? null : (
+            {holder.archived || !canCreate ? null : (
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => onRecord("capital")}>
                   <Plus /> Record capital
@@ -140,23 +145,25 @@ export function HolderDetailView({
         ) : null}
       </FormSheetBody>
       <FormSheetFooter>
-        {holder.entries === 0 && holder.archived ? (
+        {canEdit && holder.entries === 0 && holder.archived ? (
           <Button variant="ghost" onClick={() => void onRestore()}>
             <ArchiveRestore /> Restore
           </Button>
         ) : null}
         {holder.entries === 0 ? (
-          <ConfirmDialog
-            title={`Delete ${holder.name}?`}
-            description="They have no entries, so nothing else changes."
-            onConfirm={onDelete}
-            trigger={
-              <Button variant="ghost" className="mr-auto text-danger hover:bg-danger/10 hover:text-danger">
-                <Trash2 /> Delete
-              </Button>
-            }
-          />
-        ) : holder.archived ? (
+          canDelete ? (
+            <ConfirmDialog
+              title={`Delete ${holder.name}?`}
+              description="They have no entries, so nothing else changes."
+              onConfirm={onDelete}
+              trigger={
+                <Button variant="ghost" className="mr-auto text-danger hover:bg-danger/10 hover:text-danger">
+                  <Trash2 /> Delete
+                </Button>
+              }
+            />
+          ) : null
+        ) : !canEdit ? null : holder.archived ? (
           <Button variant="ghost" className="mr-auto" onClick={() => void onRestore()}>
             <ArchiveRestore /> Restore
           </Button>
@@ -174,9 +181,11 @@ export function HolderDetailView({
             }
           />
         )}
-        <Button onClick={onEdit}>
-          <Pencil /> Edit
-        </Button>
+        {canEdit ? (
+          <Button onClick={onEdit}>
+            <Pencil /> Edit
+          </Button>
+        ) : null}
       </FormSheetFooter>
     </>
   );

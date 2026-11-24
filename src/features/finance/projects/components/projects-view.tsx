@@ -19,7 +19,7 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
 import { ProjectStatusBadge } from "@/components/shared/status-badge";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { PROJECT_STATUSES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { emitDataChanged } from "@/lib/events";
@@ -64,7 +64,8 @@ export function ProjectsView({
   layout: Layout;
   hasAny: boolean;
 }) {
-  const isAdmin = useIsAdmin();
+  const canDelete = useCan("finance.projects:delete");
+  const canEdit = useCan("finance.projects:edit");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -259,10 +260,12 @@ export function ProjectsView({
                     <Eye /> Open
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => update({ edit: row.original.id, new: null })}>
-                  <Pencil /> Edit
-                </DropdownMenuItem>
-                {isAdmin ? (
+                {canEdit ? (
+                  <DropdownMenuItem onSelect={() => update({ edit: row.original.id, new: null })}>
+                    <Pencil /> Edit
+                  </DropdownMenuItem>
+                ) : null}
+                {canDelete ? (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(row.original)}>
@@ -277,7 +280,7 @@ export function ProjectsView({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchParams, isAdmin],
+    [searchParams, canDelete, canEdit],
   );
 
   const filtered = q !== "" || status !== "all";
@@ -413,7 +416,7 @@ export function ProjectsView({
         <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
           <AnimatePresence mode="popLayout" initial={false}>
             {rows.map((p, i) => (
-              <ProjectCard key={p.id} project={p} index={i} onEdit={() => update({ edit: p.id, new: null })} onDelete={isAdmin ? () => setDeleting(p) : undefined} />
+              <ProjectCard key={p.id} project={p} index={i} onEdit={canEdit ? () => update({ edit: p.id, new: null }) : undefined} onDelete={canDelete ? () => setDeleting(p) : undefined} />
             ))}
           </AnimatePresence>
         </div>

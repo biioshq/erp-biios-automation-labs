@@ -3,7 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { analyticsViewer } from "@/features/analytics/viewer";
 import { getScenarioDetail } from "@/features/analytics/scenarios/queries";
 import { ScenarioStatusBadge, ScenarioTypeBadge } from "@/features/analytics/scenarios/components/badges";
 import { ScenarioActions } from "@/features/analytics/scenarios/components/scenario-actions";
@@ -15,9 +18,10 @@ export const metadata: Metadata = { title: "Scenario" };
 export default async function ScenarioPage({ params }: { params: Promise<{ id: string }> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
+  if (!can(user, ANALYTICS.scenarios.view)) return <NoAccess eyebrow="Analytics & Planning" title="Scenario" />;
   const { id } = await params;
   // Worked out again from today's records on every visit; the saved figures stay as they were.
-  const s = await getScenarioDetail(id, { admin: user.role === "admin" });
+  const s = await getScenarioDetail(id, analyticsViewer(user));
   if (!s) notFound();
 
   return (

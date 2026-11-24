@@ -15,7 +15,8 @@ import { parseStatuses } from "@/features/finance/projects/utils";
 import type { ProjectFinanceRow } from "@/features/finance/projects/types";
 import { ProjectStatusFilter } from "@/features/finance/projects/components/status-filter";
 import { BudgetTrackingTable, StageBudgetTable, type StageBudgetRow } from "@/features/finance/projects/components/budgets-view";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Budget tracking" };
 
@@ -44,7 +45,8 @@ function stageBudgetRows(rows: ProjectFinanceRow[]): StageBudgetRow[] {
 
 export default async function BudgetTrackingPage({ searchParams }: Props) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.project_finance:view")) return <NoAccess title="Budget tracking" />;
   const status = parseStatuses((await searchParams).status);
   const { rows, total } = await listProjectFinances(status);
 

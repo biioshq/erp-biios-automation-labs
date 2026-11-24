@@ -27,7 +27,7 @@ const signUpSchema = z.object({
 
 /** Where to go after signing in: the page that sent people here, or the Finance dashboard. */
 function safeNext(next: string | null): string {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/api/") ? next : "/finance";
+  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/api/") ? next : "/";
 }
 
 export function AuthForm({
@@ -74,8 +74,8 @@ export function AuthForm({
       const result = await signIn.social({
         provider: "google",
         callbackURL: next,
-        newUserCallbackURL: "/finance",
-        errorCallbackURL: next === "/finance" ? errorPage : `${errorPage}?next=${encodeURIComponent(next)}`,
+        newUserCallbackURL: "/",
+        errorCallbackURL: next === "/" ? errorPage : `${errorPage}?next=${encodeURIComponent(next)}`,
       });
       // On success the browser is already on its way to Google; only errors return here.
       if (result.error) {

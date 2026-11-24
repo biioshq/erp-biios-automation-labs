@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SelectField, TextField, TextareaField } from "@/components/forms/fields";
 import { applyFieldErrors } from "@/lib/action-result";
+import { useCan } from "@/components/current-user";
 import { createSubgroup } from "../actions";
 import { subgroupFormSchema, type SubgroupFormInput, type SubgroupFormValues } from "../schemas";
 import type { GroupOption } from "../types";
@@ -17,6 +18,7 @@ import type { GroupOption } from "../types";
 /**
  * "+ Add subgroup": a small dialog for a name, description and details, placed under one of
  * `parents` (a built-in group or another subgroup). `onAdded` gets the new group's key.
+ * Hidden for people without the subgroup create permission (the action checks it too).
  */
 export function AddSubgroupButton({
   parents,
@@ -37,6 +39,7 @@ export function AddSubgroupButton({
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const canAdd = useCan("finance.groups:create");
   const form = useForm<SubgroupFormInput, unknown, SubgroupFormValues>({
     resolver: zodResolver(subgroupFormSchema),
     defaultValues: { parent: defaultParent ?? parents[0]?.key ?? "", name: "", description: "", details: "" },
@@ -57,6 +60,8 @@ export function AddSubgroupButton({
       router.refresh();
     }),
   );
+
+  if (!canAdd) return null;
 
   return (
     <>

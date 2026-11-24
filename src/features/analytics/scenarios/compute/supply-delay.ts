@@ -3,7 +3,7 @@ import { fromDateInput } from "@/lib/dates";
 import type { SupplyDelayInputs } from "../schemas";
 import type { ScenarioResults } from "../types";
 import type { ComputeContext, ItemFact, ProjectFact } from "./facts";
-import { PRICE_BASIS_LABEL, compareRow, daysBetween, emptyMetrics, priceOf, round2, round3, shiftDate, stat, wholeUp } from "./common";
+import { PRICE_BASIS_LABEL, compareRow, daysBetween, emptyMetrics, priceOf, round2, round3, shiftDate, stat, wholeUp, viewOf } from "./common";
 
 export type SupplyDelayFacts = {
   item: ItemFact;
@@ -70,7 +70,7 @@ export function computeSupplyDelay(inputs: SupplyDelayInputs, facts: SupplyDelay
     version: 1,
     type: "supply_delay",
     computedAt: new Date().toISOString(),
-    view: ctx.admin ? "admin" : "member",
+    view: viewOf(ctx),
     headline,
     stats: [
       stat("revised", "Revised delivery", "date", revised, { hint: `was ${show(original)}` }),

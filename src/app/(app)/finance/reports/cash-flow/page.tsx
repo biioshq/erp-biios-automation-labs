@@ -6,14 +6,14 @@ import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { DownloadButtons } from "@/features/reports/components/download-buttons";
 import { ReportFilterBar } from "@/features/reports/components/report-filters";
 import { CheckBadge, GrandTotal, InvertedPeriod, RelatedStatements, StatementBlock, StatementMatrix } from "@/features/reports/components/statements/statement-view";
 import { filtersForReport, parseReportFilters } from "@/features/reports/schemas";
 import type { ReportColumn, ReportRow } from "@/features/reports/types";
 import { cashFlow, periodFromInputs } from "@/server/accounting/statements";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import { fromDateInput } from "@/lib/dates";
 import { formatDate, round2 } from "@/lib/format";
 
@@ -37,7 +37,7 @@ const ACTIVITY_HINTS = {
 
 export default async function CashFlowPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Cash flow statement" />;
+  if (!can(user, "finance.statements:view")) return <NoAccess title="Cash flow statement" />;
   const filters = filtersForReport("cash_flow", parseReportFilters(await searchParams));
   // A hand-edited link can put the start after the end: the downloads refuse it, so the page says so too.
   if (filters.from && filters.to && filters.from > filters.to) return <InvertedPeriod title="Cash flow statement" filters={filters} />;
@@ -58,7 +58,7 @@ export default async function CashFlowPage({ searchParams }: { searchParams: Pro
         eyebrow="Reports"
         title="Cash flow statement"
         description={`Cash received and paid from ${periodWords}, by activity (direct method). Only money that moved through a cash or bank account counts.`}
-        actions={<DownloadButtons type="cash_flow" filters={filters} refreshOnDownload={false} />}
+        actions={can(user, "finance.statements:export") ? <DownloadButtons type="cash_flow" filters={filters} refreshOnDownload={false} /> : undefined}
       />
       <ReportFilterBar meta={{ type: "cash_flow", filters: ["date"] }} filters={filters} options={NO_OPTIONS} />
 

@@ -11,6 +11,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SCENARIO_TYPES, labelOf, type ScenarioType } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/components/current-user";
+import { ANALYTICS } from "../../links";
 
 const MAX = 8;
 
@@ -27,6 +29,7 @@ export function ComparePicker({
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const mayExport = useCan(ANALYTICS.compare.export);
   const [pending, startTransition] = useTransition();
 
   const go = (ids: string[], b: "today" | "saved") => {
@@ -76,7 +79,7 @@ export function ComparePicker({
           <ToggleGroupItem value="today">Today&apos;s data</ToggleGroupItem>
           <ToggleGroupItem value="saved">As saved</ToggleGroupItem>
         </ToggleGroup>
-        {selected.length ? (
+        {selected.length && mayExport ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-8">

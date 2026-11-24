@@ -8,7 +8,10 @@ import { Money } from "@/components/shared/money";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatCompactCurrency, formatPercent } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { choiceParam, parseRange } from "@/features/analytics/inventory/params";
 import { GRANULARITIES, MIN_PERIODS, defaultGranularity, getConsumption, type Granularity } from "@/features/analytics/inventory/consumption-queries";
 import { ParamToggle, RangeControl } from "@/features/analytics/inventory/components/controls";
@@ -26,7 +29,10 @@ const GRAIN_LABEL: Record<Granularity, { option: string; per: string }> = {
 
 export default async function ConsumptionPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.inventory)) return <NoAccess eyebrow="Analytics & Planning" title="Consumption trends" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const range = parseRange(sp, 90);
   const fallback = defaultGranularity(range.days);
@@ -50,16 +56,20 @@ export default async function ConsumptionPage({ searchParams }: { searchParams: 
         description="Stock used by projects over time: issued less returned, by day, week or month, compared with the period just before."
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/analytics/inventory">
-                <ArrowLeftRight /> Movement analysis
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/analytics/forecasting/consumption">
-                <Activity /> Consumption forecast
-              </Link>
-            </Button>
+            {open("/analytics/inventory") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/inventory">
+                  <ArrowLeftRight /> Movement analysis
+                </Link>
+              </Button>
+            ) : null}
+            {open("/analytics/forecasting/consumption") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/forecasting/consumption">
+                  <Activity /> Consumption forecast
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCan } from "@/components/current-user";
 import { CAPITAL_ENTRY_TYPES, EQUITY_HOLDER_KINDS, type CapitalEntryType, type EquityHolderKind } from "@/lib/constants";
 
 /**
@@ -44,24 +45,27 @@ export function useEquityPanel(defaultNew: CapitalEntryType = "capital") {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // A form opens only with its permission (the actions check it too); without it a link shows the record or nothing.
+  const canCreate = useCan("finance.equity:create");
+  const canEdit = useCan("finance.equity:edit");
 
   const panel: EquityPanel = useMemo(() => {
     const created = searchParams.get("new");
-    if (created) return { kind: "newEntry", type: isType(created) ? created : defaultNew, holderId: searchParams.get("for") ?? undefined };
+    if (created) return canCreate ? { kind: "newEntry", type: isType(created) ? created : defaultNew, holderId: searchParams.get("for") ?? undefined } : null;
     const edit = searchParams.get("edit");
-    if (edit) return { kind: "editEntry", id: edit };
+    if (edit) return canEdit ? { kind: "editEntry", id: edit } : { kind: "viewEntry", id: edit };
     const view = searchParams.get("view");
     if (view) return { kind: "viewEntry", id: view };
     const editHolder = searchParams.get("editHolder");
-    if (editHolder) return { kind: "editHolder", id: editHolder };
+    if (editHolder) return canEdit ? { kind: "editHolder", id: editHolder } : { kind: "viewHolder", id: editHolder };
     const holder = searchParams.get("holder");
     if (holder === "new") {
       const kind = searchParams.get("kind");
-      return { kind: "newHolder", holderKind: isKind(kind) ? kind : undefined };
+      return canCreate ? { kind: "newHolder", holderKind: isKind(kind) ? kind : undefined } : null;
     }
     if (holder) return { kind: "viewHolder", id: holder };
     return null;
-  }, [searchParams, defaultNew]);
+  }, [searchParams, defaultNew, canCreate, canEdit]);
 
   const open = (next: EquityPanel) => {
     const qs = panelQuery(searchParams, next);

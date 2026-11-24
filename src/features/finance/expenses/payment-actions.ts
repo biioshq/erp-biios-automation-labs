@@ -80,18 +80,20 @@ export const recordExpensePayment = defineAction(
     if (!res.matchedCount) throw changedMeanwhile();
     return { id: input.id, paymentId: String(paymentId), outstanding: round2(Math.max(0, outstanding - amount)) };
   },
-  { revalidate: REVALIDATE, message: "Payment recorded" },
+  { revalidate: REVALIDATE, message: "Payment recorded", permission: "finance.payments:create" },
 );
 
 /**
- * Removes one recorded payment (admins only). The list stays even when it becomes empty: an empty
+ * Removes one recorded payment (needs the payments delete permission). The list stays even when it becomes empty: an empty
  * list means nothing paid, while no list would mean paid in full on the expense date.
  */
 export const deleteExpensePayment = defineAction(
   expensePaymentIdSchema,
-  async ({ id, paymentId }) => {
-    const existing = await Expense.findById(id, { source: 1, countedAtPurchase: 1, payments: 1 }).lean();
+  async ({ id, paymentId }, user) => {
+    const existing = await Expense.findById(id, { source: 1, countedAtPurchase: 1, payments: 1, category: 1 }).lean();
     if (!existing) throw notFound("The expense");
+    // Payments on a salary expense are pay records, as when recording one.
+    assertMaySalary(user, existing.category);
     assertTakesPayments(existing);
     const payment = (existing.payments ?? []).find((p) => String((p as { _id?: unknown })._id) === paymentId);
     if (!payment) throw notFound("The payment");
@@ -103,5 +105,5 @@ export const deleteExpensePayment = defineAction(
     if (!res.modifiedCount) throw notFound("The payment");
     return { id, paymentId };
   },
-  { revalidate: REVALIDATE, message: "Payment deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Payment deleted", permission: "finance.payments:delete" },
 );

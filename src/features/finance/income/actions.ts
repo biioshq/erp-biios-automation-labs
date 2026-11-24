@@ -6,7 +6,7 @@ import { AppError, notFound } from "@/server/errors";
 import { FileModel, Income } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
 import { attachFiles, removeFile } from "@/features/files/server";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { fromDateInput, toDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import { incomeFormSchema, incomeIdSchema, type IncomeFormValues } from "./schemas";
@@ -105,7 +105,7 @@ export const createIncome = defineAction(
     if (input.receiptId) await attachFiles([input.receiptId], { type: "income", id: String(created._id) }, input.projectId);
     return { id: String(created._id), number };
   },
-  { revalidate: REVALIDATE, message: "Income recorded" },
+  { revalidate: REVALIDATE, message: "Income recorded", permission: "finance.income:create" },
 );
 
 export const updateIncome = defineAction(
@@ -114,9 +114,9 @@ export const updateIncome = defineAction(
     const existing = await Income.findById(input.id).lean();
     if (!existing) throw notFound("The income record");
     assertReceivedMethod(input.paymentMethod, existing.paymentMethod);
-    // Removing or replacing a saved receipt deletes the stored file, and deletes are admin-only.
-    if (user.role !== "admin" && existing.receipt && String(existing.receipt) !== input.receiptId) {
-      throw new AppError("Only an admin can remove or replace a saved receipt.", "forbidden", { receiptId: ["Only an admin can change this receipt"] });
+    // Removing or replacing a saved receipt deletes the stored file, so it needs the delete permission.
+    if (!can(user, "finance.income:delete") && existing.receipt && String(existing.receipt) !== input.receiptId) {
+      throw new AppError("You do not have permission to remove or replace a saved receipt.", "forbidden", { receiptId: ["You cannot change this receipt"] });
     }
     await assertUsableReceipt(input.receiptId, user.id, { id: input.id, receipt: existing.receipt });
     await assertLinks(input, { id: input.id, amount: existing.amount, account: existing.account, invoice: existing.invoice });
@@ -147,7 +147,7 @@ export const updateIncome = defineAction(
     }
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Income updated" },
+  { revalidate: REVALIDATE, message: "Income updated", permission: "finance.income:edit" },
 );
 
 export const deleteIncome = defineAction(
@@ -159,12 +159,13 @@ export const deleteIncome = defineAction(
     if (existing.receipt) await removeFile(String(existing.receipt));
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Income deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Income deleted", permission: "finance.income:delete" },
 );
 
 /** Loads one income record for the detail drawer / edit form. */
 export async function fetchIncome(id: string): Promise<IncomeDetail | null> {
-  if (!(await getCurrentUser())) return null;
+  const user = await getCurrentUser();
+  if (!user || !can(user, "finance.income:view")) return null;
   return getIncome(id);
 }
 

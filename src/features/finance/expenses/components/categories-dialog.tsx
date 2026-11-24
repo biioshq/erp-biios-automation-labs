@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { useCan } from "@/components/current-user";
 import { emitDataChanged } from "@/lib/events";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -39,10 +40,10 @@ const usageText = (u: ExpenseCategoryUsage[string] | undefined) => {
 /** Why a category cannot be hidden, for the ones the app relies on. */
 const SYSTEM_NOTE: Record<string, string> = {
   inventory: "Used for stock assigned to projects",
-  salaries: "Only admins see these payments",
+  salaries: "Only people who may see individual salaries see these payments",
 };
 
-/** "Categories" in the Expenses header (admins only): add, rename, hide and delete expense categories. */
+/** "Categories" in the Expenses header (expense categories permission): add, rename, hide and delete expense categories. */
 export function ExpenseCategoriesButton({ categories }: { categories: ExpenseCategoryOption[] }) {
   const [open, setOpen] = useState(false);
   return (
@@ -75,6 +76,10 @@ function CategoriesManager({ categories }: { categories: ExpenseCategoryOption[]
   const [busy, setBusy] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<ExpenseCategoryOption | null>(null);
   const [, startTransition] = useTransition();
+  // Each control follows its own permission; the actions refuse anyone else too.
+  const canCreate = useCan("finance.expense_categories:create");
+  const canEdit = useCan("finance.expense_categories:edit");
+  const canDelete = useCan("finance.expense_categories:delete");
 
   const loadUsage = () => {
     void fetchExpenseCategoryUsage({}).then((r) => {
@@ -127,34 +132,36 @@ function CategoriesManager({ categories }: { categories: ExpenseCategoryOption[]
 
   return (
     <>
-      <form onSubmit={add} noValidate className="space-y-1.5">
-        <label htmlFor="new-category" className="text-[13px] font-medium">
-          New category
-        </label>
-        <div className="flex gap-2">
-          <Input
-            id="new-category"
-            value={newLabel}
-            onChange={(e) => {
-              setNewLabel(e.target.value);
-              if (newError) setNewError(null);
-            }}
-            placeholder="Site visits"
-            maxLength={60}
-            aria-invalid={newError ? true : undefined}
-            aria-describedby={newError ? "new-category-error" : undefined}
-            className="min-w-0 flex-1"
-          />
-          <Button type="submit" disabled={busy === "new"} className="shrink-0">
-            {busy === "new" ? <Spinner /> : <Plus />} Add
-          </Button>
-        </div>
-        {newError ? (
-          <p id="new-category-error" className="text-xs text-destructive">
-            {newError}
-          </p>
-        ) : null}
-      </form>
+      {canCreate ? (
+        <form onSubmit={add} noValidate className="space-y-1.5">
+          <label htmlFor="new-category" className="text-[13px] font-medium">
+            New category
+          </label>
+          <div className="flex gap-2">
+            <Input
+              id="new-category"
+              value={newLabel}
+              onChange={(e) => {
+                setNewLabel(e.target.value);
+                if (newError) setNewError(null);
+              }}
+              placeholder="Site visits"
+              maxLength={60}
+              aria-invalid={newError ? true : undefined}
+              aria-describedby={newError ? "new-category-error" : undefined}
+              className="min-w-0 flex-1"
+            />
+            <Button type="submit" disabled={busy === "new"} className="shrink-0">
+              {busy === "new" ? <Spinner /> : <Plus />} Add
+            </Button>
+          </div>
+          {newError ? (
+            <p id="new-category-error" className="text-xs text-destructive">
+              {newError}
+            </p>
+          ) : null}
+        </form>
+      ) : null}
 
       <ul className="-mx-1 min-h-0 flex-1 divide-y overflow-y-auto rounded-lg border px-1" aria-label="Expense categories">
         {categories.map((c) => {
@@ -206,7 +213,7 @@ function CategoriesManager({ categories }: { categories: ExpenseCategoryOption[]
                       {SYSTEM_NOTE[c.value] ? ` · ${SYSTEM_NOTE[c.value]}` : ""}
                     </p>
                     {/* Said in the row, not a tooltip, so it also reaches people on phones. */}
-                    {canDeleteExpenseCategory(c) && inUse ? (
+                    {canDelete && canDeleteExpenseCategory(c) && inUse ? (
                       <p id={`category-note-${c.value}`} className="text-xs text-muted-foreground">
                         In use, so it cannot be deleted. Hide it instead.
                       </p>
@@ -217,7 +224,7 @@ function CategoriesManager({ categories }: { categories: ExpenseCategoryOption[]
                       size="sm"
                       spacing={0}
                       value={c.nature}
-                      disabled={busy !== null}
+                      disabled={busy !== null || !canEdit}
                       onValueChange={(v) => {
                         if (!v || v === c.nature) return;
                         const nature = v as ExpenseNature;
@@ -242,17 +249,19 @@ function CategoriesManager({ categories }: { categories: ExpenseCategoryOption[]
                     </ToggleGroup>
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Rename ${c.label}`}
-                      disabled={busy !== null}
-                      onClick={() => setEditing({ value: c.value, label: c.label })}
-                    >
-                      <Pencil />
-                    </Button>
-                    {canHideExpenseCategory(c.value) ? (
+                    {canEdit ? (
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`Rename ${c.label}`}
+                        disabled={busy !== null}
+                        onClick={() => setEditing({ value: c.value, label: c.label })}
+                      >
+                        <Pencil />
+                      </Button>
+                    ) : null}
+                    {canEdit && canHideExpenseCategory(c.value) ? (
                       <Button
                         type="button"
                         size="icon-sm"
@@ -273,7 +282,7 @@ function CategoriesManager({ categories }: { categories: ExpenseCategoryOption[]
                     ) : (
                       <span className="size-7 max-md:size-10" aria-hidden />
                     )}
-                    {canDeleteExpenseCategory(c) ? (
+                    {canDelete && canDeleteExpenseCategory(c) ? (
                       inUse ? (
                         <Button
                           type="button"

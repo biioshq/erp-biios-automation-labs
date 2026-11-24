@@ -4,7 +4,7 @@ import { Types, type QueryFilter } from "mongoose";
 import { defineAction } from "@/server/action";
 import { AppError, isDuplicateKeyError, notFound } from "@/server/errors";
 import { Employee, Expense, ProjectMember, RecurringExpense, User, type EmployeeDoc, type RecurringExpenseDoc } from "@/server/models";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { nextNumber } from "@/server/services/numbering";
 import { fromDateInput, startOfDayIST, toDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
@@ -166,7 +166,7 @@ async function assertUnique(input: EmployeeFormValues, selfId?: string) {
   }
 }
 
-/** Fields stored on the employee from the form (salary is added separately for admins). */
+/** Fields stored on the employee from the form (salary is added separately, with the salaries data permission). */
 function baseFields(v: EmployeeFormValues) {
   const exited = v.status === "exited";
   return {
@@ -225,13 +225,14 @@ export const createEmployee = defineAction(
   employeeFormSchema,
   async (input, user) => {
     await assertUnique(input);
-    const isAdmin = user.role === "admin";
+    // Pay is set only by people who may see individual salaries.
+    const seesPay = can(user, "data.salaries");
     const fields = baseFields(input);
     const code = await nextNumber("employee");
     const created = await Employee.create({
       ...fields,
       code,
-      monthlySalary: isAdmin ? round2(input.monthlySalary ?? 0) : 0,
+      monthlySalary: seesPay ? round2(input.monthlySalary ?? 0) : 0,
       createdBy: new Types.ObjectId(user.id),
     });
     const scheduleId = await syncSalarySchedule(created, {
@@ -242,13 +243,13 @@ export const createEmployee = defineAction(
       monthlySalary: input.monthlySalary ?? 0,
       pay: Boolean(input.paySalary),
       userId: user.id,
-      canChangePay: isAdmin,
+      canChangePay: seesPay,
     });
     if (scheduleId) await Employee.updateOne({ _id: created._id }, { $set: { salaryRecurring: scheduleId } });
     if (fields.exitDate) await syncMemberships(created._id, null, fields.exitDate);
     return { id: String(created._id), code };
   },
-  { revalidate: REVALIDATE, message: "Employee added" },
+  { revalidate: REVALIDATE, message: "Employee added", permission: "finance.employees:create" },
 );
 
 export const updateEmployee = defineAction(
@@ -257,9 +258,10 @@ export const updateEmployee = defineAction(
     const existing = await Employee.findById(input.id);
     if (!existing) throw notFound("The employee");
     await assertUnique(input, input.id);
-    const isAdmin = user.role === "admin";
+    // Without the salaries data permission the saved pay is kept as it is.
+    const seesPay = can(user, "data.salaries");
     const fields = baseFields(input);
-    const monthlySalary = isAdmin ? round2(input.monthlySalary ?? 0) : (existing.monthlySalary ?? 0);
+    const monthlySalary = seesPay ? round2(input.monthlySalary ?? 0) : (existing.monthlySalary ?? 0);
 
     const scheduleId = await syncSalarySchedule(existing, {
       name: input.name,
@@ -269,7 +271,7 @@ export const updateEmployee = defineAction(
       monthlySalary,
       pay: Boolean(input.paySalary),
       userId: user.id,
-      canChangePay: isAdmin,
+      canChangePay: seesPay,
     });
 
     const unset: Record<string, 1> = {};
@@ -286,7 +288,7 @@ export const updateEmployee = defineAction(
     await syncMemberships(existing._id, existing.status === "exited" ? existing.exitDate : null, fields.exitDate);
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Employee updated" },
+  { revalidate: REVALIDATE, message: "Employee updated", permission: "finance.employees:edit" },
 );
 
 /** Only people with no pay history and no project history can be deleted; everyone else is marked as exited. */
@@ -309,11 +311,12 @@ export const deleteEmployee = defineAction(
     await Employee.deleteOne({ _id: existing._id });
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Employee deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Employee deleted", permission: "finance.employees:delete" },
 );
 
-/** Loads one employee for the edit form (salary stripped for members). */
+/** Loads one employee for the edit form (salary stripped without the salaries data permission). */
 export async function fetchEmployee(id: string): Promise<EmployeeDetail | null> {
-  if (!(await getCurrentUser())) return null;
+  const user = await getCurrentUser();
+  if (!user || !can(user, "finance.employees:view")) return null;
   return getEmployee(id);
 }

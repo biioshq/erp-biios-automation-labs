@@ -32,7 +32,8 @@ import { computeEquipment } from "../compute/equipment";
  * and stockout dates from the analytics core, cash from the accounting statements).
  */
 
-export type Viewer = { admin: boolean };
+/** What the viewer may see: salaries (pay, salary expenses) and cash (cash, bank and P&L figures). */
+export type Viewer = { salaries: boolean; cash: boolean };
 
 const oid = (id: string) => new Types.ObjectId(id);
 const validIds = (ids: string[]) => [...new Set(ids)].filter((id) => Types.ObjectId.isValid(id));
@@ -93,7 +94,7 @@ export async function loadProjects(ids: string[] | null, viewer: Viewer): Promis
     .lean();
   const spend = await projectSpend(
     docs.map((d) => d._id),
-    { includeSalaries: viewer.admin },
+    { includeSalaries: viewer.salaries },
   );
   return docs.map((p) => {
     const s = spend.get(String(p._id));
@@ -135,8 +136,8 @@ export async function loadPeople(viewer: Viewer, asOf: Date = new Date()): Promi
       department: p.department ?? "engineering",
       designation: p.designation ?? null,
       skills: p.skills ?? [],
-      // Pay is admin-only: members never receive it, not even inside a calculation.
-      monthlySalary: viewer.admin ? (p.monthlySalary ?? 0) : null,
+      // Pay goes only to viewers who see salaries, not even inside a calculation for anyone else.
+      monthlySalary: viewer.salaries ? (p.monthlySalary ?? 0) : null,
     })),
     memberships: members
       .filter((m) => !done.has(String(m.project)))
@@ -175,7 +176,7 @@ export async function loadEquipment(filter: { ids?: string[]; name?: string } = 
   }));
 }
 
-/** Cash and bank balances from the accounting engine. Admins only. */
+/** Cash and bank balances from the accounting engine. Only for viewers who see cash figures. */
 export async function loadCash(): Promise<CashFact> {
   const rows = await cashBalances();
   const accounts = rows.filter((r) => !r.archived || Math.abs(r.balance) >= 0.005).map((r) => ({ name: r.name, balance: r.balance }));
@@ -227,7 +228,7 @@ async function newProjectFacts(spec: Extract<ScenarioSpec, { type: "new_project"
     assetIds.length ? loadEquipment({ ids: assetIds }) : Promise.resolve([]),
     loadPeople(viewer, asOf),
     loadProjects(null, viewer),
-    viewer.admin ? loadCash() : Promise.resolve(null),
+    viewer.cash ? loadCash() : Promise.resolve(null),
   ]);
   return { items, allocations, equipment: new Map(equipment.map((e) => [e.id, e])), ...people, projects, cash };
 }
@@ -268,7 +269,7 @@ async function budgetFacts(spec: Extract<ScenarioSpec, { type: "budget" }>, view
     Object.assign(match, COMPANY_EXPENSES);
     if (v.scope === "department") match.department = v.department;
   }
-  if (!viewer.admin) match.category = { $ne: "salaries" };
+  if (!viewer.salaries) match.category = { $ne: "salaries" };
   // A project or stage budget covers the whole project, not one period: spend booked before the
   // period counts against it too. Department and company budgets are for the period only.
   const lifetime = v.scope === "project" && Boolean(v.projectId);
@@ -302,7 +303,7 @@ export class ScenarioDataMissing extends Error {}
 /** Runs a scenario against today's recorded data. Throws ScenarioDataMissing when a record it needs is gone. */
 export async function runScenario(spec: ScenarioSpec, viewer: Viewer, asOf: Date = new Date()): Promise<ScenarioResults> {
   await connectDB();
-  const ctx: ComputeContext = { today: toDateInput(asOf), admin: viewer.admin };
+  const ctx: ComputeContext = { today: toDateInput(asOf), salaries: viewer.salaries, cash: viewer.cash };
   switch (spec.type) {
     case "demand": {
       const facts = await demandFacts(spec, viewer, asOf);

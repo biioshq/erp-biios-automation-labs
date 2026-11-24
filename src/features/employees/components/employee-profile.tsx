@@ -48,8 +48,9 @@ function MembershipRow({ m, past }: { m: MembershipDTO; past?: boolean }) {
   );
 }
 
-/** The employee detail page body: header, projects, salary (admins), profile facts and tasks. */
-export function EmployeeProfile({ data }: { data: EmployeePageData }) {
+/** The employee detail page body: header, projects, salary (salaries data permission), profile facts and tasks. */
+/** `canEdit`: the viewer has the employees edit permission (checked on the server page). */
+export function EmployeeProfile({ data, canEdit }: { data: EmployeePageData; canEdit: boolean }) {
   const { employee: e, current, past, salary, linkedUser, tasks } = data;
   const total = current.reduce((sum, m) => sum + m.allocation, 0);
 
@@ -86,11 +87,13 @@ export function EmployeeProfile({ data }: { data: EmployeePageData }) {
             </div>
           </div>
         </div>
-        <Button asChild variant="outline" className="h-10 w-full sm:h-9 sm:w-auto">
-          <Link href={`?edit=${e.id}`} scroll={false}>
-            <Pencil /> Edit
-          </Link>
-        </Button>
+        {canEdit ? (
+          <Button asChild variant="outline" className="h-10 w-full sm:h-9 sm:w-auto">
+            <Link href={`?edit=${e.id}`} scroll={false}>
+              <Pencil /> Edit
+            </Link>
+          </Button>
+        ) : null}
       </header>
 
       <div className="grid gap-5 lg:grid-cols-3 lg:gap-6">
@@ -139,7 +142,7 @@ export function EmployeeProfile({ data }: { data: EmployeePageData }) {
           {salary ? (
             <Section
               title="Salary"
-              description="Visible to admins only."
+              description="Visible only to people who may see individual salaries."
               actions={
                 salary.scheduleId ? (
                   <Button asChild variant="outline" size="sm" className="h-10 sm:h-8">

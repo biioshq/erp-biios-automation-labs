@@ -24,6 +24,7 @@ import { PAYMENT_METHODS, labelOf } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import { emitDataChanged } from "@/lib/events";
+import { useCan } from "@/components/current-user";
 import { cn } from "@/lib/utils";
 import { archiveBankAccount, fetchBankAccount, restoreBankAccount } from "../actions";
 import type { AccountOption, AccountRow, BankAccountDetail } from "../types";
@@ -53,12 +54,15 @@ function useUrlParams() {
 
 function AccountCard({
   account,
+  canEdit,
   onEdit,
   onArchive,
   onRestore,
   historyHref,
 }: {
   account: AccountRow;
+  /** Cash & bank edit: shows Edit, Archive and Restore. */
+  canEdit: boolean;
   onEdit: () => void;
   onArchive: () => void;
   onRestore: () => void;
@@ -98,19 +102,23 @@ function AccountCard({
                   <History /> Transactions
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onEdit}>
-                <Pencil /> Edit
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {account.archived ? (
-                <DropdownMenuItem onSelect={onRestore}>
-                  <ArchiveRestore /> Restore
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem onSelect={onArchive}>
-                  <Archive /> Archive
-                </DropdownMenuItem>
-              )}
+              {canEdit ? (
+                <>
+                  <DropdownMenuItem onSelect={onEdit}>
+                    <Pencil /> Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {account.archived ? (
+                    <DropdownMenuItem onSelect={onRestore}>
+                      <ArchiveRestore /> Restore
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem onSelect={onArchive}>
+                      <Archive /> Archive
+                    </DropdownMenuItem>
+                  )}
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
@@ -158,13 +166,16 @@ export function AccountsGrid({ accounts, transferAccounts }: { accounts: Account
   const url = useUrlParams();
   const [detail, setDetail] = useState<BankAccountDetail | null>(null);
   const [archiving, setArchiving] = useState<AccountRow | null>(null);
+  // These only hide controls; every action checks the same permission on the server.
+  const canCreate = useCan("finance.cash_bank:create");
+  const canEdit = useCan("finance.cash_bank:edit");
 
   const panel: Panel = useMemo(() => {
-    if (url.searchParams.get("new") === "1") return { kind: "new" };
-    if (url.searchParams.get("transfer") === "1") return { kind: "transfer" };
+    if (url.searchParams.get("new") === "1") return canCreate ? { kind: "new" } : null;
+    if (url.searchParams.get("transfer") === "1") return canCreate ? { kind: "transfer" } : null;
     const edit = url.searchParams.get("edit");
-    return edit ? { kind: "edit", id: edit } : null;
-  }, [url.searchParams]);
+    return edit && canEdit ? { kind: "edit", id: edit } : null;
+  }, [url.searchParams, canCreate, canEdit]);
   const setPanel = (next: Panel) =>
     url.set({
       new: next?.kind === "new" ? "1" : null,
@@ -228,6 +239,7 @@ export function AccountsGrid({ accounts, transferAccounts }: { accounts: Account
               key={a.code}
               account={a}
               historyHref={historyHref(a.code)}
+              canEdit={canEdit}
               onEdit={() => a.id && setPanel({ kind: "edit", id: a.id })}
               onArchive={() => setArchiving(a)}
               onRestore={() => void archive(a, true)}
@@ -240,9 +252,11 @@ export function AccountsGrid({ accounts, transferAccounts }: { accounts: Account
           title="No bank accounts or cash boxes yet"
           description="Add each bank account and the cash box with the balance it held on a starting day. Balances then follow every expense, income and transfer recorded against them."
           action={
-            <Button onClick={() => setPanel({ kind: "new" })}>
-              <Plus /> Add account
-            </Button>
+            canCreate ? (
+              <Button onClick={() => setPanel({ kind: "new" })}>
+                <Plus /> Add account
+              </Button>
+            ) : undefined
           }
         />
       )}

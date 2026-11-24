@@ -182,7 +182,7 @@ export const manpowerInputsSchema = z
     requiredCount: z.number({ error: "Enter the number needed" }).int("Whole people").min(0, "Cannot be negative").max(10000),
     periodFrom: dateInput,
     periodTo: dateInput,
-    /** Monthly cost per person. Admins only: members never see or send it. */
+    /** Monthly cost per person. Only people who see salaries see or send it. */
     monthlyCost: optionalMoney,
     overtimeHours: z.number().finite().min(0).max(400, "At most 400 hours a month").optional(),
     overtimeRate: optionalMoney,
@@ -193,7 +193,7 @@ export const manpowerInputsSchema = z
     periodCheck(v.periodFrom, v.periodTo, ctx);
   });
 
-/** Input fields only admins see. A member's edit keeps whatever an admin entered there. */
+/** Salary input fields. An edit by someone who does not see salaries keeps whatever was entered there. */
 export const ADMIN_ONLY_INPUTS: Partial<Record<ScenarioType, string[]>> = {
   manpower: ["monthlyCost"],
 };

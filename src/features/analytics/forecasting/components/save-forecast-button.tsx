@@ -6,18 +6,19 @@ import { Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
+import { ANALYTICS } from "../../links";
 import { saveMonthForecastAction } from "../actions";
 
 /**
- * Admins: store this month's forecasts now, for Forecast vs actual. Stored rows are never changed,
+ * For people allowed to store forecasts: store this month's forecasts now, for Forecast vs actual. Stored rows are never changed,
  * so pressing it again only adds items or projects that had no forecast yet this month.
  */
 export function SaveForecastButton({ variant = "outline" }: { variant?: "outline" | "default" }) {
-  const isAdmin = useIsAdmin();
+  const maySave = useCan(ANALYTICS.forecasting.create);
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  if (!isAdmin) return null;
+  if (!maySave) return null;
 
   function save() {
     startTransition(async () => {

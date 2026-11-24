@@ -6,7 +6,7 @@ import { AppError, notFound } from "@/server/errors";
 import { Expense, FileModel, FixedAsset, Project } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
 import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
-import { getCurrentUser, type SessionUser } from "@/server/auth/session";
+import { can, getCurrentUser, type SessionUser } from "@/server/auth/session";
 import { assertExpenseCategoryAllowed } from "@/server/expense-categories";
 import { fromDateInput, toDateInput } from "@/lib/dates";
 import { formatCurrency, formatDate, round2 } from "@/lib/format";
@@ -132,10 +132,10 @@ async function assertReceiptFree(receiptId: string | undefined, user: SessionUse
   }
 }
 
-/** Removing or replacing a saved receipt deletes the stored file, and deletes are admin-only. */
+/** Removing or replacing a saved receipt deletes the stored file, so it needs the delete permission. */
 function assertMayDropReceipt(user: SessionUser, currentReceipt: unknown, receiptId: string | undefined) {
-  if (user.role !== "admin" && currentReceipt && String(currentReceipt) !== receiptId) {
-    throw new AppError("Only an admin can remove or replace a saved receipt.", "forbidden", { receiptId: ["Only an admin can change this receipt"] });
+  if (!can(user, "finance.expenses:delete") && currentReceipt && String(currentReceipt) !== receiptId) {
+    throw new AppError("You do not have permission to remove or replace a saved receipt.", "forbidden", { receiptId: ["You cannot change this receipt"] });
   }
 }
 
@@ -204,7 +204,7 @@ export const createExpense = defineAction(
     if (input.receiptId) await attachFiles([input.receiptId], { type: "expense", id: String(created._id) }, input.projectId);
     return { id: String(created._id), number };
   },
-  { revalidate: REVALIDATE, message: "Expense added" },
+  { revalidate: REVALIDATE, message: "Expense added", permission: "finance.expenses:create" },
 );
 
 export const updateExpense = defineAction(
@@ -224,8 +224,8 @@ export const updateExpense = defineAction(
     const bankMatched = !explicit && Boolean(existing.bankTransaction);
     if (bankMatched && Math.abs(round2(input.amount) - existing.amount) > HALF_PAISA) {
       const amount = formatCurrency(existing.amount, { exact: true });
-      // Only admins see statement lines, so only they get the way to unmatch it.
-      const hint = user.role === "admin" ? unmatchHint([String(existing.bankTransaction)]) : "";
+      // Only people who can open bank statements get the way to unmatch it.
+      const hint = can(user, "finance.bank_statements:view") ? unmatchHint([String(existing.bankTransaction)]) : "";
       throw new AppError(`This expense is matched to a bank statement line of ${amount}, so its amount can't change here.${hint}`, "conflict", {
         amount: [`Matched to a bank line of ${amount}`],
       });
@@ -244,14 +244,16 @@ export const updateExpense = defineAction(
     if (input.receiptId) await attachFiles([input.receiptId], { type: "expense", id: input.id }, input.projectId);
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Expense updated" },
+  { revalidate: REVALIDATE, message: "Expense updated", permission: "finance.expenses:edit" },
 );
 
 export const deleteExpense = defineAction(
   expenseIdSchema,
-  async ({ id }) => {
+  async ({ id }, user) => {
     const existing = await Expense.findById(id).lean();
     if (!existing) throw notFound("The expense");
+    // A salary expense is one person's pay: deleting it also needs the salaries data permission.
+    assertMaySalary(user, existing.category);
     // A stock purchase's receipt is the purchase's too, and the stock it paid for stays on hand; loan
     // interest is part of a repayment. Deleting either here would drop a cost the other record still holds.
     assertEditable(existing.source, "delete");
@@ -267,12 +269,13 @@ export const deleteExpense = defineAction(
     if (existing.receipt) await removeFile(String(existing.receipt));
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Expense deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Expense deleted", permission: "finance.expenses:delete" },
 );
 
 /** Loads one expense for the detail drawer / edit form. */
 export async function fetchExpense(id: string): Promise<ExpenseDetail | null> {
-  if (!(await getCurrentUser())) return null;
+  const user = await getCurrentUser();
+  if (!user || !can(user, "finance.expenses:view")) return null;
   return getExpense(id);
 }
 

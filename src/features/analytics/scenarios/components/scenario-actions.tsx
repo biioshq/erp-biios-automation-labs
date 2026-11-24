@@ -18,12 +18,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
+import { ANALYTICS } from "../../links";
 import { SCENARIO_STATUSES, labelOf, type ScenarioStatus } from "@/lib/constants";
 import { emitDataChanged } from "@/lib/events";
 import { changeScenarioStatus, deleteScenario, duplicateScenario, recalculateScenario } from "../actions";
 
-/** Edit, duplicate, status, update results, export, compare and (admins) delete. */
+/** Edit, duplicate, status, update results, export, compare and delete, each shown only with its permission. The server checks again. */
 export function ScenarioActions({
   id,
   code,
@@ -40,19 +41,28 @@ export function ScenarioActions({
   canExport: boolean;
   /** Saved results differ from today's, or there are none. */
   outdated: boolean;
-  /** False for a member when an admin's results (with salary and cash figures) are saved. */
+  /** False when the saved results hold salary or cash figures this person does not see. */
   canRecalculate?: boolean;
 }) {
   const router = useRouter();
-  const isAdmin = useIsAdmin();
+  const mayEdit = useCan(ANALYTICS.scenarios.edit);
+  const mayCreate = useCan(ANALYTICS.scenarios.create);
+  const mayDecide = useCan(ANALYTICS.scenarios.approve);
+  const mayDelete = useCan(ANALYTICS.scenarios.delete);
+  const mayExport = useCan(ANALYTICS.scenarios.export);
+  const mayCompare = useCan(ANALYTICS.compare.view);
   const [pending, startTransition] = useTransition();
   const [next, setNext] = useState<ScenarioStatus | null>(null);
   const [note, setNote] = useState("");
   const [deleting, setDeleting] = useState(false);
 
-  // Approve and reject are admin decisions, and only an admin moves a scenario out of one.
+  // Approve and reject need the approve permission, and so does moving a scenario out of a decision.
   const decided = status === "approved" || status === "rejected";
-  const choices = isAdmin ? SCENARIO_STATUSES.filter((s) => s.value !== status) : decided ? [] : SCENARIO_STATUSES.filter((s) => s.value !== status && s.value !== "approved" && s.value !== "rejected");
+  const choices = mayDecide
+    ? SCENARIO_STATUSES.filter((s) => s.value !== status)
+    : decided || !mayEdit
+      ? []
+      : SCENARIO_STATUSES.filter((s) => s.value !== status && s.value !== "approved" && s.value !== "rejected");
 
   const done = (message?: string) => {
     toast.success(message ?? "Done");
@@ -90,11 +100,13 @@ export function ScenarioActions({
 
   return (
     <>
-      <Button asChild variant="outline">
-        <Link href={`/analytics/scenarios/${id}/edit`}>
-          <Pencil /> Edit
-        </Link>
-      </Button>
+      {mayEdit ? (
+        <Button asChild variant="outline">
+          <Link href={`/analytics/scenarios/${id}/edit`}>
+            <Pencil /> Edit
+          </Link>
+        </Button>
+      ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline" disabled={pending}>
@@ -108,9 +120,13 @@ export function ScenarioActions({
               {c.label}
             </DropdownMenuItem>
           ))}
-          {!isAdmin ? (
+          {!mayDecide ? (
             <p className="px-2 py-1.5 text-xs text-muted-foreground">
-              {decided ? "Only admins change a decided scenario. Editing it sends it back to Saved." : "Only admins approve or reject."}
+              {!mayEdit && !decided
+                ? "Your role cannot change a scenario's status."
+                : decided
+                  ? `Your role cannot change a decided scenario.${mayEdit ? " Editing it sends it back to Saved." : ""}`
+                  : "Your role cannot approve or reject."}
             </p>
           ) : null}
         </DropdownMenuContent>
@@ -122,30 +138,40 @@ export function ScenarioActions({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-60">
-          <DropdownMenuItem onSelect={duplicate}>
-            <Copy /> Duplicate
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={recalculate} disabled={!outdated || !canRecalculate}>
-            <RefreshCw /> Update saved results
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href={`/analytics/compare?ids=${id}`}>
-              <Columns3 /> Compare with others
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-xs">Export with today&apos;s data</DropdownMenuLabel>
-          <DropdownMenuItem asChild disabled={!canExport}>
-            <a href={exportHref("xlsx", "today")}>
-              <Download /> Excel (.xlsx)
-            </a>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild disabled={!canExport}>
-            <a href={exportHref("pdf", "today")}>
-              <Download /> PDF
-            </a>
-          </DropdownMenuItem>
-          {hasSaved ? (
+          {mayCreate ? (
+            <DropdownMenuItem onSelect={duplicate}>
+              <Copy /> Duplicate
+            </DropdownMenuItem>
+          ) : null}
+          {mayEdit ? (
+            <DropdownMenuItem onSelect={recalculate} disabled={!outdated || !canRecalculate}>
+              <RefreshCw /> Update saved results
+            </DropdownMenuItem>
+          ) : null}
+          {mayCompare ? (
+            <DropdownMenuItem asChild>
+              <Link href={`/analytics/compare?ids=${id}`}>
+                <Columns3 /> Compare with others
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          {mayExport ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs">Export with today&apos;s data</DropdownMenuLabel>
+              <DropdownMenuItem asChild disabled={!canExport}>
+                <a href={exportHref("xlsx", "today")}>
+                  <Download /> Excel (.xlsx)
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild disabled={!canExport}>
+                <a href={exportHref("pdf", "today")}>
+                  <Download /> PDF
+                </a>
+              </DropdownMenuItem>
+            </>
+          ) : null}
+          {mayExport && hasSaved ? (
             <>
               <DropdownMenuLabel className="text-xs">Export as saved</DropdownMenuLabel>
               <DropdownMenuItem asChild>
@@ -160,7 +186,7 @@ export function ScenarioActions({
               </DropdownMenuItem>
             </>
           ) : null}
-          {isAdmin ? (
+          {mayDelete ? (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(true)}>

@@ -18,9 +18,10 @@ export async function ExpensesTabLoader({ project }: { project: ProjectDetail })
   return <ProjectExpensesTab projectId={project.id} projectName={project.name} rows={rows} projects={projects} vendors={vendors} categories={categories} />;
 }
 
-export async function DocumentsTabLoader({ project }: { project: ProjectDetail }) {
+/** `showReceipts`: the receipts of the project's expenses are listed only with the expenses view permission. */
+export async function DocumentsTabLoader({ project, showReceipts }: { project: ProjectDetail; showReceipts: boolean }) {
   const { documents, receipts } = await getProjectDocuments(project.id);
-  return <ProjectDocumentsTab projectId={project.id} documents={documents} receipts={receipts} />;
+  return <ProjectDocumentsTab projectId={project.id} documents={documents} receipts={showReceipts ? receipts : []} />;
 }
 
 export function TabSkeleton() {

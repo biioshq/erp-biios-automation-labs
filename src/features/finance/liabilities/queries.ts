@@ -6,6 +6,7 @@ import { BankAccount, Expense, FileModel, Liability, Project, type LiabilityDoc 
 import { descendantsOf, loadFinanceGroups } from "@/server/finance-groups";
 import { liabilitiesOverview, liabilityState, payablesSummary } from "@/server/finance/summaries";
 import { balanceSheet } from "@/server/accounting/statements";
+import { canSeeSalaries } from "@/server/auth/session";
 import { getExpenseCategories, getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { toFileDTO } from "@/features/files/server";
 import { isCurrentLiabilityGroup, builtInGroup } from "@/lib/finance-groups";
@@ -330,14 +331,36 @@ export async function groupSections(side: LiabilitySide, params: ListParams, now
 
 /* Accounts payable */
 
+/**
+ * A salary bill names the person and shows their pay. Without "data.salaries" it is left out of
+ * every list on the Liabilities pages; totals still count it, as the balance sheet does.
+ */
+const SALARY_CATEGORY = "salaries";
+const salaryBillFilter = (seesSalaries: boolean) => (r: { category: string }) => seesSalaries || r.category !== SALARY_CATEGORY;
+
+function vendorTotals(rows: { vendor: string; outstanding: number; status: string }[]) {
+  const byVendor = new Map<string, { vendor: string; outstanding: number; bills: number; overdue: number }>();
+  for (const r of rows) {
+    const v = byVendor.get(r.vendor) ?? { vendor: r.vendor, outstanding: 0, bills: 0, overdue: 0 };
+    v.outstanding = round2(v.outstanding + r.outstanding);
+    v.bills += 1;
+    if (r.status === "overdue") v.overdue = round2(v.overdue + r.outstanding);
+    byVendor.set(r.vendor, v);
+  }
+  return [...byVendor.values()].sort((a, b) => b.outstanding - a.outstanding);
+}
+
 export async function payablesPage(params: ListParams, now: Date = new Date()) {
   await connectDB();
-  const [summary, labelOfCategory] = await Promise.all([payablesSummary(now), getExpenseCategoryLabeler()]);
-  const projectIds = [...new Set(summary.rows.map((r) => r.project).filter(Boolean))] as string[];
+  const seesSalaries = await canSeeSalaries();
+  const [summary, labelOfCategory] = await Promise.all([payablesSummary(now, { includeSalaries: seesSalaries }), getExpenseCategoryLabeler()]);
+  const shown = summary.rows.filter(salaryBillFilter(seesSalaries));
+  const byVendor = seesSalaries ? summary.byVendor : vendorTotals(shown);
+  const projectIds = [...new Set(shown.map((r) => r.project).filter(Boolean))] as string[];
   const projects = projectIds.length ? await Project.find({ _id: { $in: projectIds.map((id) => new Types.ObjectId(id)) } }, { name: 1 }).lean() : [];
   const projectName = new Map(projects.map((p) => [String(p._id), p.name]));
 
-  const all: PayableListRow[] = summary.rows.map((r) => ({
+  const all: PayableListRow[] = shown.map((r) => ({
     id: r.id,
     number: r.number,
     vendor: r.vendor,
@@ -366,7 +389,7 @@ export async function payablesPage(params: ListParams, now: Date = new Date()) {
     return typeof v === "number" || typeof v === "string" ? v : null;
   });
 
-  const history = await billPayments(vendor);
+  const history = await billPayments(vendor, seesSalaries);
   return {
     ...paginate(sorted, params),
     summary: {
@@ -380,16 +403,23 @@ export async function payablesPage(params: ListParams, now: Date = new Date()) {
       filteredTotal: sum(filtered.map((r) => r.outstanding)),
       filteredCount: filtered.length,
     },
-    byVendor: summary.byVendor,
-    vendors: summary.byVendor.map((v) => v.vendor),
+    byVendor,
+    vendors: byVendor.map((v) => v.vendor),
     history,
   };
 }
 
 /** Payments recorded against bills, newest first. Older expenses paid on their own date have none to list. */
-async function billPayments(vendors: string[], limit = 40): Promise<BillPaymentRow[]> {
+async function billPayments(vendors: string[], seesSalaries: boolean, limit = 40): Promise<BillPaymentRow[]> {
   const rows = await Expense.aggregate<{ _id: Types.ObjectId; number: string; vendor: string; payment: { _id?: Types.ObjectId; date: Date; amount: number; paymentMethod: PaymentMethod; reference?: string } }>([
-    { $match: { countedAtPurchase: { $ne: true }, "payments.0": { $exists: true }, ...(vendors.length ? { vendor: { $in: vendors } } : {}) } },
+    {
+      $match: {
+        countedAtPurchase: { $ne: true },
+        "payments.0": { $exists: true },
+        ...(vendors.length ? { vendor: { $in: vendors } } : {}),
+        ...(seesSalaries ? {} : { category: { $ne: SALARY_CATEGORY } }),
+      },
+    },
     { $project: { number: 1, vendor: 1, payment: "$payments" } },
     { $unwind: "$payment" },
     { $sort: { "payment.date": -1, _id: -1 } },
@@ -421,7 +451,8 @@ export async function liabilitiesDashboard(now: Date = new Date()) {
   const today = toDateInput(now);
   const soon = toDateInput(addDays(now, 30));
 
-  // Same rules as liabilitiesOverview, so these lists add up to its overdue and upcoming totals.
+  // Same rules as liabilitiesOverview, so these lists add up to its overdue and upcoming totals
+  // (less any salary bills, which are left out of the lists without "data.salaries").
   // Loans open on the loans page; other obligations (TDS, salaries due) on their side's page.
   const loanItem = (l: (typeof overview.loans)[number], status: DueItem["status"]): DueItem => {
     const other = otherIds.has(l.id);
@@ -448,13 +479,14 @@ export async function liabilitiesDashboard(now: Date = new Date()) {
     status,
   });
   const byDue = (a: DueItem, b: DueItem) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "");
+  const bills = overview.payables.rows.filter(salaryBillFilter(await canSeeSalaries()));
   const overdue = [
     ...overview.loans.filter((l) => l.status === "overdue").map((l) => loanItem(l, "overdue")),
-    ...overview.payables.rows.filter((r) => r.status === "overdue").map((r) => billItem(r, "overdue")),
+    ...bills.filter((r) => r.status === "overdue").map((r) => billItem(r, "overdue")),
   ].sort(byDue);
   const upcoming = [
     ...overview.loans.filter((l) => l.status !== "overdue" && l.dueDate && l.dueDate >= today && l.dueDate <= soon).map((l) => loanItem(l, "upcoming")),
-    ...overview.payables.rows
+    ...bills
       .filter((r) => r.status !== "overdue" && r.dueDate && r.dueDate >= today && r.dueDate <= soon)
       .map((r) => billItem(r, "upcoming")),
   ].sort(byDue);

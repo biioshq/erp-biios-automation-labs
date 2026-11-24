@@ -30,7 +30,7 @@ import { incomeFormSchema, type IncomeFormInput, type IncomeFormValues } from ".
 import type { IncomeDetail } from "../types";
 import { MAX_UPLOAD_LABEL } from "@/features/files/prepare";
 import { formValidation } from "@/components/forms/form-options";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 
 /**
  * How money came in. "On credit" is not money received: an amount still to come goes on an invoice.
@@ -99,7 +99,7 @@ export function IncomeForm({
   onCancel: () => void;
 }) {
   const isEdit = Boolean(income);
-  const isAdmin = useIsAdmin();
+  const canDelete = useCan("finance.income:delete");
   const [pending, startTransition] = useTransition();
   const [receipt, setReceipt] = useState<FileDTO | null>(income?.receipt ?? null);
   // Confirmations asked before saving: no invoice linked although the client has open ones, or more than is outstanding.
@@ -338,8 +338,8 @@ export function IncomeForm({
 
         <FormSection title="Receipt" description={`Payment advice, bank credit or acknowledgement. Image or PDF up to ${MAX_UPLOAD_LABEL}.`} icon={<Paperclip />}>
           {receipt ? (
-            // Removing the saved receipt deletes the file, which only admins may do.
-            <FileTile file={receipt} onRemove={isAdmin || receipt.id !== income?.receipt?.id ? removeReceipt : undefined} />
+            // Removing the saved receipt deletes the file, which needs the delete permission.
+            <FileTile file={receipt} onRemove={canDelete || receipt.id !== income?.receipt?.id ? removeReceipt : undefined} />
           ) : (
             <FileDropzone
               meta={{ kind: "receipt", entityType: "income" }}

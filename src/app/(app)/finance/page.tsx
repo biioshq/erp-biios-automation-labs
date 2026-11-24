@@ -18,16 +18,19 @@ import { BudgetUsage } from "@/features/finance/dashboard/components/budget-usag
 import { RecentTransactions } from "@/features/finance/dashboard/components/recent-transactions";
 import { GstSummary, QuickActions, RecurringCommitmentsCard, ShortcutLinks } from "@/features/finance/dashboard/components/side-cards";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Finance" };
 
 export default async function FinanceDashboardPage({ searchParams }: PageProps<"/finance">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  const isAdmin = user.role === "admin";
+  if (!can(user, "finance.dashboard:view")) return <NoAccess title="Finance dashboard" />;
+  // Balance sheet, cash and loan figures need their own data permission.
+  const seesPosition = can(user, "data.financial_position");
   const selection = parsePeriodParams(await searchParams);
-  const data = await getFinanceDashboard(selection, { isAdmin });
+  const data = await getFinanceDashboard(selection, { financialPosition: seesPosition });
   const hasTrend = [...data.trends.month, ...data.trends.quarter, ...data.trends.year].some((m) => m.income > 0 || m.expenses > 0);
   const hasCategories = data.categories.total > 0;
 
@@ -38,7 +41,7 @@ export default async function FinanceDashboardPage({ searchParams }: PageProps<"
         title="Dashboard"
         description={
           <>
-            {isAdmin ? "Income, spending, cash, the balance sheet and project budgets" : "Income, spending and project budgets"} for{" "}
+            {seesPosition ? "Income, spending, cash, the balance sheet and project budgets" : "Income, spending and project budgets"} for{" "}
             {data.periodLabel.toLowerCase() === "all time" ? "all time" : data.periodLabel}.{" "}
             <span className="tabular">{formatNumber(data.kpis.activeProjects)}</span> active {data.kpis.activeProjects === 1 ? "project" : "projects"}.
           </>
@@ -88,7 +91,7 @@ export default async function FinanceDashboardPage({ searchParams }: PageProps<"
         </Section>
       </div>
 
-      <DuePaymentsSections due={data.due} isAdmin={isAdmin} />
+      <DuePaymentsSections due={data.due} seesPosition={seesPosition} />
 
       <Section
         title="Project-wise summary"
@@ -130,8 +133,8 @@ export default async function FinanceDashboardPage({ searchParams }: PageProps<"
         <div className="flex flex-col gap-4">
           <GstSummary data={data} />
           <RecurringCommitmentsCard data={data} />
-          <QuickActions />
-          <ShortcutLinks isAdmin={isAdmin} />
+          <QuickActions can={(p) => can(user, p)} />
+          <ShortcutLinks can={(p) => can(user, p)} />
         </div>
       </div>
 

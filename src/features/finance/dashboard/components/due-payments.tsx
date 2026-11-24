@@ -70,12 +70,12 @@ function Totals({ overdue, upcoming }: { overdue: number; upcoming: number }) {
 const more = (shown: number, count: number) => (count > shown ? `${formatNumber(count - shown)} more not shown.` : null);
 
 /** Money to pay and to receive that is overdue or due in the next 30 days. */
-export function DuePaymentsSections({ due, isAdmin }: { due: DuePayments; isAdmin: boolean }) {
+export function DuePaymentsSections({ due, seesPosition }: { due: DuePayments; seesPosition: boolean }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
       <Section
         title="Payments to make"
-        description={isAdmin ? "Supplier bills, loans, other dues and scheduled expenses" : "Supplier bills and scheduled expenses"}
+        description={seesPosition ? "Supplier bills, loans, other dues and scheduled expenses" : "Supplier bills and scheduled expenses"}
         actions={
           <Link href="/finance/payments" className="inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline">
             Payment tracking <ArrowUpRight className="size-3" aria-hidden />
@@ -91,8 +91,8 @@ export function DuePaymentsSections({ due, isAdmin }: { due: DuePayments; isAdmi
         ) : (
           <EmptyState compact icon={CalendarCheck} title="Nothing to pay soon" description="No unpaid bill is overdue or due in the next 30 days." />
         )}
-        {due.salariesHidden ? <p className="mt-2 text-xs text-muted-foreground">Salary bills and schedules are not listed: only admins see them.</p> : null}
-        {isAdmin ? <p className="mt-2 text-xs text-muted-foreground">Loans show by their final due date. Instalment dates are not recorded.</p> : null}
+        {due.salariesHidden ? <p className="mt-2 text-xs text-muted-foreground">Salary bills and schedules are not listed: your role does not include individual salaries.</p> : null}
+        {seesPosition ? <p className="mt-2 text-xs text-muted-foreground">Loans show by their final due date. Instalment dates are not recorded.</p> : null}
       </Section>
       <Section
         title="Payments to receive"

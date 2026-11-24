@@ -10,7 +10,8 @@ import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { financialYearIST, fromDateInput } from "@/lib/dates";
 import { formatDate, formatNumber, round2 } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { expenseSummaryRange, getExpenseSummary } from "@/features/finance/expenses/summary-queries";
 import { ExpenseSummaryRange } from "@/features/finance/expenses/components/summary-range";
 import { DailyExpenseChart, MonthlyExpenseChart } from "@/features/finance/expenses/components/summary-charts";
@@ -27,7 +28,8 @@ const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n
 
 export default async function ExpenseSummaryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.expenses:view")) return <NoAccess title="Expense summary" />;
   const sp = await searchParams;
   const from = dateParam(sp.from);
   const to = dateParam(sp.to);

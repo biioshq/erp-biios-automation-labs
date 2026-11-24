@@ -7,7 +7,10 @@ import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
 import { formatDate, formatNumber, round2 } from "@/lib/format";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { MAINTENANCE_LOOKAHEAD, WARRANTY_SOON_DAYS } from "@/features/analytics/forecasting/constants";
 import { equipmentOutlook } from "@/features/analytics/forecasting/server/maintenance";
 import { EquipmentTable } from "@/features/analytics/forecasting/components/equipment-table";
@@ -20,7 +23,10 @@ const [SOON, LATER] = MAINTENANCE_LOOKAHEAD;
 
 export default async function MaintenanceForecastPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.forecasting.view)) return <NoAccess eyebrow="Analytics & Planning" title="Equipment maintenance forecast" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const rows = await equipmentOutlook();
 
   const header = (
@@ -29,9 +35,11 @@ export default async function MaintenanceForecastPage() {
       title="Equipment maintenance"
       description="When each piece of equipment is next due for service, from the maintenance recorded in the fixed asset register, and what needs attention now."
       actions={
-        <Button asChild variant="outline">
-          <Link href="/finance/assets/fixed">Fixed assets</Link>
-        </Button>
+        open("/finance/assets/fixed") ? (
+          <Button asChild variant="outline">
+            <Link href="/finance/assets/fixed">Fixed assets</Link>
+          </Button>
+        ) : null
       }
     />
   );
@@ -45,9 +53,11 @@ export default async function MaintenanceForecastPage() {
           title="No equipment recorded"
           description="Equipment is a fixed asset marked as equipment, or filed under plant and machinery, computers and electronics, or vehicles. Add one with its maintenance history to see when service is due."
           action={
-            <Button asChild>
-              <Link href="/finance/assets/fixed?new=1">Add a fixed asset</Link>
-            </Button>
+            open("/finance/assets/fixed?new=1") ? (
+              <Button asChild>
+                <Link href="/finance/assets/fixed?new=1">Add a fixed asset</Link>
+              </Button>
+            ) : null
           }
         />
       </Page>

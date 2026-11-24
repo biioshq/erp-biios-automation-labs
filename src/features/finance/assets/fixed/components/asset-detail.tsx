@@ -147,12 +147,14 @@ function Schedule({ asset }: { asset: AssetDetail }) {
 function Maintenance({
   asset,
   accounts,
-  isAdmin,
+  canEdit,
+  canDelete,
   onChanged,
 }: {
   asset: AssetDetail;
   accounts: BankAccountOption[];
-  isAdmin: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
   onChanged: () => void;
 }) {
   const [editing, setEditing] = useState<MaintenanceEntryDTO | "new" | null>(null);
@@ -183,9 +185,11 @@ function Maintenance({
             "No maintenance recorded yet."
           )}
         </p>
-        <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
-          <Plus /> Add maintenance
-        </Button>
+        {canEdit ? (
+          <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
+            <Plus /> Add maintenance
+          </Button>
+        ) : null}
       </div>
       {asset.maintenance.length ? (
         <div className="divide-y rounded-xl border">
@@ -210,10 +214,12 @@ function Maintenance({
                   ) : (
                     <span className="text-[11px] text-muted-foreground">Not booked as an expense</span>
                   )}
-                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setEditing(m)}>
-                    Edit
-                  </Button>
-                  {isAdmin ? (
+                  {canEdit ? (
+                    <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setEditing(m)}>
+                      Edit
+                    </Button>
+                  ) : null}
+                  {canDelete ? (
                     <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-danger hover:text-danger" onClick={() => setRemoving(m)}>
                       Remove
                     </Button>
@@ -251,14 +257,20 @@ function Maintenance({
 export function AssetDetailView({
   asset,
   accounts,
-  isAdmin,
+  canEdit,
+  canDelete,
+  canDeleteBills,
   onEdit,
   onChanged,
   onDelete,
 }: {
   asset: AssetDetail;
   accounts: BankAccountOption[];
-  isAdmin: boolean;
+  /** These only hide controls; the actions check the same permissions on the server. */
+  canEdit: boolean;
+  canDelete: boolean;
+  /** Asset delete and expense delete: may also delete the unpaid bill the asset created. */
+  canDeleteBills: boolean;
   onEdit: () => void;
   onChanged: () => void;
   onDelete: (deleteBill: boolean) => Promise<boolean>;
@@ -399,12 +411,12 @@ export function AssetDetailView({
                     {asset.disposal.notes ? ` ${asset.disposal.notes}` : ""}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {!asset.archived ? (
+                    {canEdit && !asset.archived ? (
                       <Button size="sm" variant="outline" onClick={() => setDisposing(true)}>
                         <Pencil /> Edit disposal
                       </Button>
                     ) : null}
-                    {isAdmin && !asset.archived ? (
+                    {canDelete && !asset.archived ? (
                       <ConfirmDialog
                         title="Take this disposal back?"
                         description={`${asset.code} returns to the books and ${labels.chargeLower} continues as if it was never disposed.`}
@@ -423,9 +435,11 @@ export function AssetDetailView({
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-4 py-3">
                   <p className="text-sm text-muted-foreground">Still in use. Record a sale, scrapping or loss to take it off the books.</p>
-                  <Button size="sm" variant="outline" onClick={() => setDisposing(true)}>
-                    Record disposal
-                  </Button>
+                  {canEdit ? (
+                    <Button size="sm" variant="outline" onClick={() => setDisposing(true)}>
+                      Record disposal
+                    </Button>
+                  ) : null}
                 </div>
               )}
             </section>
@@ -454,13 +468,14 @@ export function AssetDetailView({
           </TabsContent>
 
           <TabsContent value="maintenance">
-            <Maintenance asset={asset} accounts={accounts} isAdmin={isAdmin} onChanged={onChanged} />
+            <Maintenance asset={asset} accounts={accounts} canEdit={canEdit} canDelete={canDelete} onChanged={onChanged} />
           </TabsContent>
 
           <TabsContent value="documents">
             <RecordDocuments
               documents={asset.documents}
-              canRemove={isAdmin}
+              canAttach={canEdit}
+              canRemove={canDelete}
               attach={(fileIds) => attachAssetDocuments({ id: asset.id, fileIds })}
               remove={(fileId) => removeAssetDocument({ id: asset.id, fileId })}
               onChanged={onChanged}
@@ -469,7 +484,7 @@ export function AssetDetailView({
         </Tabs>
       </FormSheetBody>
       <FormSheetFooter>
-        {isAdmin ? (
+        {canDelete ? (
           <ConfirmDialog
             title={`Delete ${asset.code}?`}
             description={
@@ -479,7 +494,7 @@ export function AssetDetailView({
                   {asset.funding.expense ? `${asset.funding.expense.number} stays in Expenses, unlinked. ` : ""}
                   Maintenance expenses stay in Expenses. Archiving after a disposal keeps the history instead.
                 </span>
-                {asset.deletableBill ? (
+                {asset.deletableBill && canDeleteBills ? (
                   <label className="flex items-center gap-2 text-foreground">
                     <input type="checkbox" checked={deleteBill} onChange={(e) => setDeleteBill(e.target.checked)} className="size-4 accent-current" />
                     Also delete the unpaid bill {asset.deletableBill.number} created with it
@@ -495,7 +510,7 @@ export function AssetDetailView({
             }
           />
         ) : null}
-        {asset.disposal ? (
+        {asset.disposal && canEdit ? (
           asset.archived ? (
             <Button variant="outline" disabled={busy} onClick={() => run(() => restoreFixedAsset({ id: asset.id }))}>
               <ArchiveRestore /> Restore
@@ -506,9 +521,11 @@ export function AssetDetailView({
             </Button>
           )
         ) : null}
-        <Button onClick={onEdit}>
-          <Pencil /> Edit
-        </Button>
+        {canEdit ? (
+          <Button onClick={onEdit}>
+            <Pencil /> Edit
+          </Button>
+        ) : null}
       </FormSheetFooter>
       {disposing ? <DisposalDialog asset={asset} accounts={accounts} open onOpenChange={setDisposing} onSaved={onChanged} /> : null}
     </>

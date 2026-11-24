@@ -131,19 +131,21 @@ export function StockRollForwardSection({ position, periods }: { position: Stock
 }
 
 const OPERATIONS = [
-  { href: "/inventory/purchase", title: "Stock in", text: "Purchase stock into storage", icon: PackagePlus, tone: "text-success bg-success/10" },
-  { href: "/inventory/assign", title: "Stock out", text: "Issue stock to a project", icon: ArrowUpFromLine, tone: "text-brand-ink bg-brand/10" },
-  { href: "/inventory/transfer", title: "Stock transfer", text: "Project to project, or a new location", icon: ArrowLeftRight, tone: "text-info bg-info/10" },
-  { href: "/inventory/return", title: "Stock return", text: "Take unused stock back from a project", icon: ArrowDownToLine, tone: "text-info bg-info/10" },
-  { href: "/inventory/wastage", title: "Record wastage", text: "Damaged, expired, lost or scrap", icon: Trash2, tone: "text-danger bg-danger/10" },
+  { href: "/inventory/purchase", permission: "inventory.purchase:create", title: "Stock in", text: "Purchase stock into storage", icon: PackagePlus, tone: "text-success bg-success/10" },
+  { href: "/inventory/assign", permission: "inventory.movement:create", title: "Stock out", text: "Issue stock to a project", icon: ArrowUpFromLine, tone: "text-brand-ink bg-brand/10" },
+  { href: "/inventory/transfer", permission: "inventory.movement:create", title: "Stock transfer", text: "Project to project, or a new location", icon: ArrowLeftRight, tone: "text-info bg-info/10" },
+  { href: "/inventory/return", permission: "inventory.movement:create", title: "Stock return", text: "Take unused stock back from a project", icon: ArrowDownToLine, tone: "text-info bg-info/10" },
+  { href: "/inventory/wastage", permission: "inventory.wastage:create", title: "Record wastage", text: "Damaged, expired, lost or scrap", icon: Trash2, tone: "text-danger bg-danger/10" },
 ] as const;
 
-/** The five stock operations, one tap each. */
-export function StockOperations() {
+/** The stock operations the person's role may carry out, one tap each. */
+export function StockOperations({ can }: { can: (permission: string) => boolean }) {
+  const operations = OPERATIONS.filter((op) => can(op.permission));
+  if (!operations.length) return null;
   return (
     <Section title="Stock operations" description="Every change to stock goes through one of these">
       <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
-        {OPERATIONS.map((op) => (
+        {operations.map((op) => (
           <li key={op.href}>
             <Link
               href={op.href}

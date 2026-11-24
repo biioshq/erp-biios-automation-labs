@@ -8,7 +8,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
 import { formatDate, formatNumber } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { HORIZONS, MIN_HISTORY_DAYS, MIN_MOVEMENTS } from "@/features/analytics/forecasting/constants";
 import { parseFilters, parseHorizon, resolveWindow, type SearchParams } from "@/features/analytics/forecasting/params";
 import { purchasePlan } from "@/features/analytics/forecasting/server/purchases";
@@ -30,7 +33,10 @@ const VIEWS = [
 
 export default async function PurchaseRequirementsPage({ searchParams }: Props) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.forecasting.view)) return <NoAccess eyebrow="Analytics & Planning" title="Purchase requirements" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const window = resolveWindow(sp);
   const filters = parseFilters(sp);
@@ -46,11 +52,13 @@ export default async function PurchaseRequirementsPage({ searchParams }: Props) 
         title="Purchase requirements"
         description="What to buy and by when, from the recent rate of use, lead times and minimum levels. These are recommendations: nothing is ordered or added to stock from this page."
         actions={
-          <Button asChild>
-            <Link href="/inventory/purchase">
-              <PackagePlus /> Record a purchase
-            </Link>
-          </Button>
+          open("/inventory/purchase") ? (
+            <Button asChild>
+              <Link href="/inventory/purchase">
+                <PackagePlus /> Record a purchase
+              </Link>
+            </Button>
+          ) : null
         }
       />
       <ForecastFilters materials={options.materials} categories={options.categories} projects={options.projects} window={window} />
@@ -74,9 +82,11 @@ export default async function PurchaseRequirementsPage({ searchParams }: Props) 
           title="No inventory items yet"
           description="Purchase requirements start once items are added and stock is assigned to projects."
           action={
-            <Button asChild>
-              <Link href="/inventory/items">Go to items</Link>
-            </Button>
+            open("/inventory/items") ? (
+              <Button asChild>
+                <Link href="/inventory/items">Go to items</Link>
+              </Button>
+            ) : null
           }
         />
       ) : plan.rows.length === 0 ? (
@@ -85,9 +95,11 @@ export default async function PurchaseRequirementsPage({ searchParams }: Props) 
           title="No materials match these filters"
           description="Clear a filter to see purchase requirements."
           action={
-            <Button asChild variant="outline">
-              <Link href="/analytics/forecasting/purchases">Clear filters</Link>
-            </Button>
+            open("/analytics/forecasting/purchases") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/forecasting/purchases">Clear filters</Link>
+              </Button>
+            ) : null
           }
         />
       ) : (

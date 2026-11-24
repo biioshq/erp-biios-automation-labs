@@ -7,7 +7,10 @@ import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
 import { EmptyState } from "@/components/shared/empty-state";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { intParam } from "@/features/analytics/inventory/params";
 import { LOW_USE_SHARE, getLevels } from "@/features/analytics/inventory/levels-queries";
 import { ALERT_BUFFER_DAYS } from "@/server/analytics/core";
@@ -22,7 +25,10 @@ const COVERS = [60, 90, 120, 180, 270, 365] as const;
 
 export default async function LevelsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.inventory)) return <NoAccess eyebrow="Analytics & Planning" title="Overstock and understock" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const windowDays = intParam(sp, "window", { fallback: 90, allowed: WINDOWS });
   const coverDays = intParam(sp, "cover", { fallback: 180, allowed: COVERS });
@@ -36,16 +42,20 @@ export default async function LevelsPage({ searchParams }: { searchParams: Promi
         description={`Stock held against how fast it was used in the last ${windowDays} days: too much, too little, and bought but not used.`}
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/inventory/low-stock">
-                <CircleAlert /> Low stock
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/analytics/inventory/shortages">
-                <TriangleAlert /> Shortage risk
-              </Link>
-            </Button>
+            {open("/inventory/low-stock") ? (
+              <Button asChild variant="outline">
+                <Link href="/inventory/low-stock">
+                  <CircleAlert /> Low stock
+                </Link>
+              </Button>
+            ) : null}
+            {open("/analytics/inventory/shortages") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/inventory/shortages">
+                  <TriangleAlert /> Shortage risk
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

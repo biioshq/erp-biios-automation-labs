@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Types } from "mongoose";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 import { connectDB } from "@/server/db";
 import { FixedAsset } from "@/server/models";
 import type { SearchParams } from "@/lib/list-params";
@@ -12,7 +13,8 @@ export const metadata: Metadata = { title: "Fixed assets" };
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function FixedAssetsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.fixed_assets:view")) return <NoAccess title="Fixed assets" eyebrow="Finance · Assets" />;
   const sp = await searchParams;
   // The books link every asset here (?view=<id>); intangible ones open on their own page.
   const id = first(sp.view) ?? first(sp.edit);

@@ -18,6 +18,7 @@ import type { BankAccountOption } from "@/server/lookups";
 import { recordExpensePayment } from "../payment-actions";
 import { PAYING_METHODS, expensePaymentSchema, type ExpensePaymentInput } from "../schemas";
 import type { z } from "zod";
+import { useCan } from "@/components/current-user";
 
 type Values = z.output<typeof expensePaymentSchema>;
 
@@ -31,7 +32,15 @@ export function accountChoices(accounts: BankAccountOption[]) {
  * method, account and reference. The server refuses more than is owed, so two people paying the
  * same bill at once cannot pay it twice.
  */
-export function RecordPaymentButton({
+type RecordPaymentButtonProps = Parameters<typeof RecordPaymentDialogButton>[0];
+
+/** Shown only with the payments create permission (recordExpensePayment refuses anyone else too). */
+export function RecordPaymentButton(props: RecordPaymentButtonProps) {
+  const canRecord = useCan("finance.payments:create");
+  return canRecord ? <RecordPaymentDialogButton {...props} /> : null;
+}
+
+function RecordPaymentDialogButton({
   expense,
   accounts,
   variant = "default",

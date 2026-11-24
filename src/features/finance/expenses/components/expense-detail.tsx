@@ -19,6 +19,7 @@ import type { ExpenseDetail } from "../types";
 import { ExpenseSourceBadge, NatureBadge } from "./expense-badges";
 import { PaymentsPanel } from "./payments-panel";
 import { BankLineLink } from "@/features/finance/bank-statements/components/bank-line-link";
+import { useCan } from "@/components/current-user";
 
 function Row({ icon: Icon, label, children }: { icon: typeof Tag; label: string; children: React.ReactNode }) {
   return (
@@ -72,11 +73,12 @@ export function ExpenseDetailView({
   expense: ExpenseDetail;
   onEdit: () => void;
   onDelete: () => Promise<boolean>;
-  /** Only admins may delete; the server enforces it too. */
+  /** Needs the expenses delete permission; the server enforces it too. */
   canDelete?: boolean;
   /** Open bank and cash accounts, for Record payment. */
   accounts?: BankAccountOption[];
 }) {
+  const canEdit = useCan("finance.expenses:edit");
   const generated = isGeneratedExpense(expense.source);
   const link = sourceLink(expense);
   const g = expense.gst;
@@ -191,7 +193,7 @@ export function ExpenseDetailView({
           ) : null}
         </div>
 
-        <PaymentsPanel expense={expense} accounts={accounts} isAdmin={canDelete} />
+        <PaymentsPanel expense={expense} accounts={accounts} />
 
         <section className="space-y-3">
           <div className="flex items-center justify-between">
@@ -280,9 +282,11 @@ export function ExpenseDetailView({
                 }
               />
             ) : null}
-            <Button onClick={onEdit}>
-              <Pencil /> Edit
-            </Button>
+            {canEdit ? (
+              <Button onClick={onEdit}>
+                <Pencil /> Edit
+              </Button>
+            ) : null}
           </>
         )}
       </FormSheetFooter>

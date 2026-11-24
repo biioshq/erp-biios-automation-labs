@@ -21,7 +21,7 @@ import { FormSheet } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { INCOME_CATEGORIES, PAYMENT_METHODS, labelOf } from "@/lib/constants";
 import { INCOME_INVOICE_FILTER } from "../schemas";
@@ -51,7 +51,8 @@ export function IncomeView({
   clients: string[];
   accounts: BankAccountOption[];
 }) {
-  const isAdmin = useIsAdmin();
+  const canDelete = useCan("finance.income:delete");
+  const canEdit = useCan("finance.income:edit");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -260,10 +261,12 @@ export function IncomeView({
                 <DropdownMenuItem onSelect={() => setPanel({ kind: "view", id: row.original.id })}>
                   <Eye /> View
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
-                  <Pencil /> Edit
-                </DropdownMenuItem>
-                {isAdmin ? (
+                {canEdit ? (
+                  <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
+                    <Pencil /> Edit
+                  </DropdownMenuItem>
+                ) : null}
+                {canDelete ? (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(row.original)}>
@@ -278,7 +281,7 @@ export function IncomeView({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchParams, isAdmin],
+    [searchParams, canDelete, canEdit],
   );
 
   const filters: FilterDef[] = useMemo(
@@ -415,7 +418,7 @@ export function IncomeView({
             onCancel={() => setPanel({ kind: "view", id: detail.id })}
           />
         ) : panel?.kind === "view" && detail ? (
-          <IncomeDetailView income={detail} onEdit={() => setPanel({ kind: "edit", id: detail.id })} onDelete={() => remove(detail)} canDelete={isAdmin} />
+          <IncomeDetailView income={detail} onEdit={() => setPanel({ kind: "edit", id: detail.id })} onDelete={() => remove(detail)} canDelete={canDelete} />
         ) : null}
       </FormSheet>
 

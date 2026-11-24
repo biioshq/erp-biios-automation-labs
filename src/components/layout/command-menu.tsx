@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { useIsAdmin } from "@/components/current-user";
+import { useCanFn } from "@/components/current-user";
 import { useTheme } from "next-themes";
 import { Boxes, FolderKanban, ListTodo, Moon, Receipt, BadgeIndianRupee, Search, Sun, Zap } from "lucide-react";
 import {
@@ -18,21 +18,26 @@ import {
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
-import { MODULES, QUICK_ACTIONS, modulePages } from "@/config/navigation";
+import { QUICK_ACTIONS, SETTINGS_PAGES, canOpen, modulePages, visibleModules } from "@/config/navigation";
 import { globalSearch, type SearchGroups } from "@/features/search/actions";
 
-const GROUPS: { key: keyof SearchGroups; heading: string; icon: typeof Receipt }[] = [
-  { key: "projects", heading: "Projects", icon: FolderKanban },
-  { key: "expenses", heading: "Expenses", icon: Receipt },
-  { key: "income", heading: "Income", icon: BadgeIndianRupee },
-  { key: "inventory", heading: "Inventory", icon: Boxes },
-  { key: "tasks", heading: "Tasks", icon: ListTodo },
+/** Search result groups, each shown only to people who may view that kind of record. */
+const GROUPS: { key: keyof SearchGroups; heading: string; icon: typeof Receipt; permission: string }[] = [
+  { key: "projects", heading: "Projects", icon: FolderKanban, permission: "finance.projects:view" },
+  { key: "expenses", heading: "Expenses", icon: Receipt, permission: "finance.expenses:view" },
+  { key: "income", heading: "Income", icon: BadgeIndianRupee, permission: "finance.income:view" },
+  { key: "inventory", heading: "Inventory", icon: Boxes, permission: "inventory.items:view" },
+  { key: "tasks", heading: "Tasks", icon: ListTodo, permission: "tasks.tasks:view" },
 ];
 
 /** ⌘K / Ctrl+K: jump to any page, run a quick action, or search records across modules. */
 export function CommandMenu() {
   const router = useRouter();
-  const isAdmin = useIsAdmin();
+  const can = useCanFn();
+  const groups = useMemo(() => GROUPS.filter((g) => can(g.permission)), [can]);
+  const quickActions = useMemo(() => QUICK_ACTIONS.filter((a) => canOpen(a, can)), [can]);
+  const modules = useMemo(() => visibleModules(can), [can]);
+  const settingsPages = useMemo(() => SETTINGS_PAGES.filter((p) => canOpen(p, can)), [can]);
   const { resolvedTheme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -67,7 +72,7 @@ export function CommandMenu() {
     router.push(href);
   };
 
-  const hasHits = useMemo(() => results && GROUPS.some((g) => results[g.key].length > 0), [results]);
+  const hasHits = useMemo(() => results && groups.some((g) => results[g.key]?.length > 0), [results, groups]);
 
   return (
     <>
@@ -96,8 +101,8 @@ export function CommandMenu() {
           ) : null}
 
           {results && hasHits
-            ? GROUPS.map(({ key, heading, icon: Icon }) =>
-                results[key].length ? (
+            ? groups.map(({ key, heading, icon: Icon }) =>
+                results[key]?.length ? (
                   <CommandGroup key={key} heading={heading}>
                     {results[key].map((hit) => (
                       <CommandItem key={hit.id} value={`${heading} ${hit.title} ${hit.subtitle}`} onSelect={() => go(hit.href)}>
@@ -113,20 +118,20 @@ export function CommandMenu() {
               )
             : null}
 
+          {quickActions.length ? (
           <CommandGroup heading="Quick actions">
-            {QUICK_ACTIONS.map((a) => (
+            {quickActions.map((a) => (
               <CommandItem key={a.href} value={`${a.title} ${(a.keywords ?? []).join(" ")}`} onSelect={() => go(a.href)}>
                 <Zap className="text-brand-ink" />
                 {a.title}
               </CommandItem>
             ))}
           </CommandGroup>
+          ) : null}
           <CommandSeparator />
-          {MODULES.map((m) => (
+          {modules.map((m) => (
             <CommandGroup key={m.id} heading={m.title}>
-              {modulePages(m)
-                .filter((item) => isAdmin || !item.adminOnly)
-                .map((item) => (
+              {modulePages(m).map((item) => (
                 <CommandItem
                   key={item.href}
                   value={`${m.title} ${item.title} ${(item.keywords ?? []).join(" ")}`}
@@ -139,6 +144,17 @@ export function CommandMenu() {
                 ))}
             </CommandGroup>
           ))}
+          {settingsPages.length ? (
+            <CommandGroup heading="Settings">
+              {settingsPages.map((item) => (
+                <CommandItem key={item.href} value={`Settings ${item.title} ${(item.keywords ?? []).join(" ")}`} onSelect={() => go(item.href)}>
+                  <item.icon />
+                  {item.title}
+                  <CommandShortcut>Settings</CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
           <CommandSeparator />
           <CommandGroup heading="Preferences">
             <CommandItem

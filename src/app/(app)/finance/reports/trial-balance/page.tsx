@@ -4,14 +4,14 @@ import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { DownloadButtons } from "@/features/reports/components/download-buttons";
 import { ReportFilterBar } from "@/features/reports/components/report-filters";
 import { CheckBadge, RelatedStatements, StatementMatrix } from "@/features/reports/components/statements/statement-view";
 import { filtersForReport, parseReportFilters } from "@/features/reports/schemas";
 import type { ReportColumn, ReportRow } from "@/features/reports/types";
 import { trialBalance } from "@/server/accounting/statements";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import type { AccountType, TrialBalanceRow } from "@/lib/accounting";
 import { fromDateInput } from "@/lib/dates";
 import { formatDate, formatNumber, round2 } from "@/lib/format";
@@ -55,7 +55,7 @@ function tableRows(rows: TrialBalanceRow[], debit: number, credit: number): Repo
 
 export default async function TrialBalancePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Trial balance" />;
+  if (!can(user, "finance.statements:view")) return <NoAccess title="Trial balance" />;
   const filters = filtersForReport("trial_balance", parseReportFilters(await searchParams));
   const tb = await trialBalance(filters.to ? fromDateInput(filters.to) : null);
   const day = formatDate(fromDateInput(tb.asOf));
@@ -66,7 +66,7 @@ export default async function TrialBalancePage({ searchParams }: { searchParams:
         eyebrow="Reports"
         title="Trial balance"
         description={`The balance of every ledger account on ${day}. Each record is read as a debit and an equal credit, so the two columns must add up to the same figure.`}
-        actions={<DownloadButtons type="trial_balance" filters={filters} refreshOnDownload={false} />}
+        actions={can(user, "finance.statements:export") ? <DownloadButtons type="trial_balance" filters={filters} refreshOnDownload={false} /> : undefined}
       />
       <ReportFilterBar meta={{ type: "trial_balance", filters: ["asOf"] }} filters={filters} options={NO_OPTIONS} />
 

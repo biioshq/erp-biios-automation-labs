@@ -7,7 +7,7 @@ import { Camera, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { uploadFile } from "@/features/files/upload";
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/features/files/prepare";
 import { ACCEPT_PHOTOS, PHOTO_MAX_EDGE } from "@/features/files/types";
@@ -20,12 +20,13 @@ const SHRINKABLE_MAX_BYTES = 40 * 1024 * 1024;
 const PHOTO_TYPES = new Set(ACCEPT_PHOTOS.split(","));
 
 /**
- * The item page's photo: anyone signed in can add or change it; only an admin can remove it,
- * which deletes the stored file.
+ * The item page's photo: people who may edit items can add or change it; removing it (which
+ * deletes the stored file) needs the items delete permission.
  */
 export function ItemPhotoPanel({ itemId, name, photoFileId, photoUrl }: { itemId: string; name: string; photoFileId: string | null; photoUrl: string | null }) {
   const router = useRouter();
-  const isAdmin = useIsAdmin();
+  const canEdit = useCan("inventory.items:edit");
+  const canDelete = useCan("inventory.items:delete");
   const inputRef = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [removing, setRemoving] = useState(false);
@@ -96,10 +97,12 @@ export function ItemPhotoPanel({ itemId, name, photoFileId, photoUrl }: { itemId
         onChange={(e) => void handleFile(e.target.files?.[0])}
       />
       <div className="flex flex-wrap items-center gap-1.5">
-        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
-          <Camera /> {photoUrl ? "Change photo" : "Add photo"}
-        </Button>
-        {isAdmin && photoUrl ? (
+        {canEdit ? (
+          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
+            <Camera /> {photoUrl ? "Change photo" : "Add photo"}
+          </Button>
+        ) : null}
+        {canDelete && photoUrl ? (
           <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setRemoving(true)} className="text-muted-foreground">
             <Trash2 /> Remove
           </Button>

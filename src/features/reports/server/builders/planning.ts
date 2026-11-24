@@ -1,7 +1,7 @@
 import "server-only";
 
 import { connectDB } from "@/server/db";
-import { salaryScope } from "@/server/auth/session";
+import { canSeeSalaries, salaryScope } from "@/server/auth/session";
 import { Expense, Invoice, Project } from "@/server/models";
 import { budgetUsage, projectSpend } from "@/server/services/metrics";
 import { cashFlow, periodFromInputs } from "@/server/accounting/statements";
@@ -176,7 +176,7 @@ export async function buildCashBudgetReport(f: ReportFilters): Promise<ReportDat
   const period = periodFromInputs(f.from, f.to);
   const [cf, payables, receivables, loans, usage] = await Promise.all([
     cashFlow(period.from, period.to),
-    payablesSummary(now),
+    payablesSummary(now, { includeSalaries: await canSeeSalaries() }),
     receivablesSummary(now),
     liabilityRows(now),
     budgetUsage(),

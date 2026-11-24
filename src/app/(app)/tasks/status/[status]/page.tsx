@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { TasksPage } from "@/features/tasks/components/tasks-page";
 import { TASK_PAGE_STATUSES, type TaskPageStatus } from "@/features/tasks/schemas";
 import { TASK_STATUSES, labelOf, type TaskStatus } from "@/lib/constants";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 
 const COPY: Record<TaskPageStatus, string> = {
   pending: "Tasks that have not been started.",
@@ -23,7 +24,8 @@ export async function generateMetadata({ params }: PageProps<"/tasks/status/[sta
 
 export default async function TasksByStatusPage({ params, searchParams }: PageProps<"/tasks/status/[status]">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "tasks.tasks:view")) return <NoAccess eyebrow="Tasks" title="Tasks" />;
   const { status } = await params;
   if (!(TASK_PAGE_STATUSES as readonly string[]).includes(status)) notFound();
   const page = status as TaskPageStatus;

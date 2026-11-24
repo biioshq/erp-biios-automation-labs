@@ -16,7 +16,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { emitDataChanged } from "@/lib/events";
 import { removeItem } from "../actions";
 import type { ItemDetail } from "../types";
@@ -40,8 +40,13 @@ export function ItemActions({
   const searchParams = useSearchParams();
   const [adjusting, setAdjusting] = useState(false);
   const [archiving, setArchiving] = useState(false);
-  // Archiving and deleting are admin-only (the action refuses members too).
-  const isAdmin = useIsAdmin();
+  // These only hide controls: every action checks the same permission on the server.
+  const canBuy = useCan("inventory.purchase:create");
+  const canMove = useCan("inventory.movement:create");
+  const canWaste = useCan("inventory.wastage:create");
+  const canEdit = useCan("inventory.items:edit");
+  const canCreate = useCan("inventory.items:create");
+  const canDelete = useCan("inventory.items:delete");
 
   const outOfStock = item.status === "out_of_stock";
   // Units wasted on a project stay in `allocated` but can no longer come back.
@@ -71,13 +76,15 @@ export function ItemActions({
 
   return (
     <>
-      <Button asChild>
-        <Link href={`/inventory/purchase?item=${item.id}`}>
-          <PackagePlus /> Buy more
-        </Link>
-      </Button>
+      {canBuy ? (
+        <Button asChild>
+          <Link href={`/inventory/purchase?item=${item.id}`}>
+            <PackagePlus /> Buy more
+          </Link>
+        </Button>
+      ) : null}
 
-      {outOfStock ? (
+      {!canMove ? null : outOfStock ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <span tabIndex={0}>
@@ -96,7 +103,7 @@ export function ItemActions({
         </Button>
       )}
 
-      {noAllocation ? (
+      {!canMove ? null : noAllocation ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <span tabIndex={0}>
@@ -122,36 +129,46 @@ export function ItemActions({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem onSelect={() => setAdjusting(true)}>
-            <SlidersHorizontal /> Adjust stock
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href={`/inventory/wastage?item=${item.id}`}>
-              <Trash /> Record wastage
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href={`/inventory/transfer?mode=location&item=${item.id}`}>
-              <MapPin /> Move location
-            </Link>
-          </DropdownMenuItem>
-          {noAllocation ? null : (
+          {canEdit ? (
+            <DropdownMenuItem onSelect={() => setAdjusting(true)}>
+              <SlidersHorizontal /> Adjust stock
+            </DropdownMenuItem>
+          ) : null}
+          {canWaste ? (
+            <DropdownMenuItem asChild>
+              <Link href={`/inventory/wastage?item=${item.id}`}>
+                <Trash /> Record wastage
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          {canMove ? (
+            <DropdownMenuItem asChild>
+              <Link href={`/inventory/transfer?mode=location&item=${item.id}`}>
+                <MapPin /> Move location
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          {noAllocation || !canMove ? null : (
             <DropdownMenuItem asChild>
               <Link href={`/inventory/transfer?item=${item.id}`}>
                 <ArrowLeftRight /> Move between projects
               </Link>
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onSelect={() => setEditing(true)}>
-            <Pencil /> Edit item
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            {/* A new item with these details: name, stock and history start fresh. */}
-            <Link href={`/inventory/items?new=1&copy=${item.id}`}>
-              <Copy /> Duplicate
-            </Link>
-          </DropdownMenuItem>
-          {isAdmin ? (
+          {canEdit ? (
+            <DropdownMenuItem onSelect={() => setEditing(true)}>
+              <Pencil /> Edit item
+            </DropdownMenuItem>
+          ) : null}
+          {canCreate ? (
+            <DropdownMenuItem asChild>
+              {/* A new item with these details: name, stock and history start fresh. */}
+              <Link href={`/inventory/items?new=1&copy=${item.id}`}>
+                <Copy /> Duplicate
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          {canDelete ? (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onSelect={() => setArchiving(true)}>
@@ -162,10 +179,10 @@ export function ItemActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <AdjustStockDialog item={item} open={adjusting} onOpenChange={setAdjusting} />
+      <AdjustStockDialog item={item} open={canEdit && adjusting} onOpenChange={setAdjusting} />
 
-      <FormSheet open={editing} onOpenChange={setEditing} title="Edit item" description={item.sku}>
-        {editing ? (
+      <FormSheet open={canEdit && editing} onOpenChange={setEditing} title="Edit item" description={item.sku}>
+        {canEdit && editing ? (
           // Keyed by id only: someone else's stock movement bumps updatedAt, and the live refresh
           // that follows must not remount an open form and drop what is being typed. The open form
           // keeps the values it was filled with; updateItem leaves a vendor or purchase date that a
@@ -183,7 +200,7 @@ export function ItemActions({
       </FormSheet>
 
       <ConfirmDialog
-        open={isAdmin && archiving}
+        open={canDelete && archiving}
         onOpenChange={setArchiving}
         title={hasHistory ? `Archive ${item.name}?` : `Delete ${item.name}?`}
         description={

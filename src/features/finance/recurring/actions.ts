@@ -6,7 +6,7 @@ import { AppError, notFound } from "@/server/errors";
 import { Expense, RecurringExpense } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
 import { occurrenceKey, postNextOccurrenceNow } from "@/server/services/recurring";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { assertExpenseCategoryAllowed } from "@/server/expense-categories";
 import { addDays, fromDateInput, startOfDayIST, startOfMonthIST, toDateInput } from "@/lib/dates";
 import { iso } from "@/server/serialize";
@@ -15,6 +15,7 @@ import { firstOccurrence, nextOccurrence } from "@/lib/recurrence";
 import type { RecurringFrequency } from "@/lib/constants";
 import { recurringFormSchema, recurringIdSchema, recurringStatusSchema, type RecurringFormValues } from "./schemas";
 import { getRecurring } from "./queries";
+import { assertMaySalary } from "@/features/finance/expenses/server";
 import type { PostedResult, RecurringDetail } from "./types";
 
 const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
@@ -93,6 +94,8 @@ const endedBeforeNext = () =>
 export const createRecurring = defineAction(
   recurringFormSchema,
   async (input, user) => {
+    // A salary schedule is one person's pay, so it also needs the salaries data permission.
+    assertMaySalary(user, input.category);
     await assertExpenseCategoryAllowed(input.category);
     const doc = toDocument(input);
     const nextRunDate = firstOccurrence(doc.startDate, doc.frequency, doc.dayOfMonth);
@@ -109,14 +112,15 @@ export const createRecurring = defineAction(
     });
     return { id: String(created._id), code };
   },
-  { revalidate: REVALIDATE, message: "Schedule created", role: "admin" },
+  { revalidate: REVALIDATE, message: "Schedule created", permission: "finance.recurring:create" },
 );
 
 export const updateRecurring = defineAction(
   recurringFormSchema.and(recurringIdSchema),
-  async (input) => {
+  async (input, user) => {
     const existing = await RecurringExpense.findById(input.id).lean();
     if (!existing) throw notFound("The schedule");
+    assertMaySalary(user, existing.category, input.category);
     // Keeping the current category always saves, even if it was hidden since.
     await assertExpenseCategoryAllowed(input.category, existing.category);
     const doc = toDocument(input);
@@ -155,15 +159,16 @@ export const updateRecurring = defineAction(
     await RecurringExpense.updateOne({ _id: existing._id }, { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Schedule updated", role: "admin" },
+  { revalidate: REVALIDATE, message: "Schedule updated", permission: "finance.recurring:edit" },
 );
 
 /** Pause, resume or end a schedule. Ending is final. */
 export const setRecurringStatus = defineAction(
   recurringStatusSchema,
-  async ({ id, action }) => {
+  async ({ id, action }, user) => {
     const existing = await RecurringExpense.findById(id).lean();
     if (!existing) throw notFound("The schedule");
+    assertMaySalary(user, existing.category);
     const wrongState = () => new AppError("This schedule changed in the meantime. Reload and try again.", "conflict");
 
     if (action === "pause") {
@@ -197,15 +202,16 @@ export const setRecurringStatus = defineAction(
     if (!res.matchedCount) throw wrongState();
     return { id, status: "active" as const };
   },
-  { revalidate: REVALIDATE, message: "Schedule updated", role: "admin" },
+  { revalidate: REVALIDATE, message: "Schedule updated", permission: "finance.recurring:edit" },
 );
 
 /** Posts the next occurrence now, even before its due date. */
 export const postRecurringNow = defineAction(
   recurringIdSchema,
-  async ({ id }): Promise<PostedResult> => {
+  async ({ id }, user): Promise<PostedResult> => {
     const existing = await RecurringExpense.findById(id).lean();
     if (!existing) throw notFound("The schedule");
+    assertMaySalary(user, existing.category);
     if (existing.status !== "active") throw new AppError("Only an active schedule can post. Resume it first.", "conflict");
     // A second active salary schedule for the same person (made before duplicates were refused) would pay them twice.
     // A paused or ended one does not block this.
@@ -215,15 +221,16 @@ export const postRecurringNow = defineAction(
     const expense = await Expense.findById(expenseId, { number: 1, date: 1, amount: 1 }).lean();
     return { expenseId, number: expense?.number ?? "", date: iso(expense?.date) ?? iso(existing.nextRunDate)!, amount: expense?.amount ?? existing.amount };
   },
-  { revalidate: REVALIDATE, message: "Expense posted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Expense posted", permission: "finance.recurring:edit" },
 );
 
 /** Only a schedule that never posted can be deleted. Otherwise end it, and the history stays. */
 export const deleteRecurring = defineAction(
   recurringIdSchema,
-  async ({ id }) => {
+  async ({ id }, user) => {
     const existing = await RecurringExpense.findById(id).lean();
     if (!existing) throw notFound("The schedule");
+    assertMaySalary(user, existing.category);
     const posted = await Expense.exists({ recurring: existing._id });
     if (posted || (existing.occurrences ?? 0) > 0) {
       throw new AppError("This schedule has posted expenses. End it instead, and its history stays in Expenses.", "conflict");
@@ -231,11 +238,12 @@ export const deleteRecurring = defineAction(
     await RecurringExpense.deleteOne({ _id: existing._id });
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Schedule deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Schedule deleted", permission: "finance.recurring:delete" },
 );
 
 /** Loads one schedule for the detail drawer / edit form. */
 export async function fetchRecurring(id: string): Promise<RecurringDetail | null> {
-  if (!(await getCurrentUser())) return null;
+  const user = await getCurrentUser();
+  if (!user || !can(user, "finance.recurring:view")) return null;
   return getRecurring(id);
 }

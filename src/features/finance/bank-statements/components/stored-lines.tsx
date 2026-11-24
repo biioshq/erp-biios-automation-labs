@@ -14,6 +14,7 @@ import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatDate, formatDateShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/components/current-user";
 import type { AddLinesInput } from "../schemas";
 import type { LineDecision, StoredLine, StoredLineReview } from "../types";
 import { addStatementBatch, reviewStoredLine, unmatchStatementLine } from "../actions";
@@ -27,12 +28,15 @@ export type StatementHeader = AddLinesInput["statement"] & { id: string };
 type Loaded = { review: StoredLineReview; decision: LineDecision };
 
 /**
- * The lines a past statement added, each with the record it became. An admin can unmatch a line
- * from its record, and review and add again a line that is unmatched or whose record was deleted.
+ * The lines a past statement added, each with the record it became. People with the edit permission
+ * can unmatch a line from its record; with create, review and add again a line that is unmatched or
+ * whose record was deleted.
  * `focus` is the line opened by a link (?line=<id>): scrolled to and highlighted.
  */
 export function StoredLinesTable({ lines, statement, focus }: { lines: StoredLine[]; statement: StatementHeader; focus?: string | null }) {
   const router = useRouter();
+  const canUnmatch = useCan("finance.bank_statements:edit");
+  const canAdd = useCan("finance.bank_statements:create");
   const [unmatching, setUnmatching] = useState<StoredLine | null>(null);
   const [checking, setChecking] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -104,11 +108,11 @@ export function StoredLinesTable({ lines, statement, focus }: { lines: StoredLin
                 <TableCell className="text-right">{l.balance === null ? <span className="text-muted-foreground">-</span> : <Money value={l.balance} exact />}</TableCell>
                 <TableCell className="space-y-1.5">
                   <LineState line={l} />
-                  {l.state === "linked" ? (
+                  {l.state === "linked" && canUnmatch ? (
                     <Button type="button" size="sm" variant="outline" className="max-md:h-10" onClick={() => setUnmatching(l)}>
                       <Unlink /> Unmatch
                     </Button>
-                  ) : l.state === "deleted" || l.state === "review" ? (
+                  ) : (l.state === "deleted" || l.state === "review") && canAdd ? (
                     <Button type="button" size="sm" variant="outline" className="max-md:h-10" onClick={() => void review(l)} disabled={checking !== null}>
                       {checking === l.id ? <Spinner /> : <RotateCcw />} Review and add again
                     </Button>

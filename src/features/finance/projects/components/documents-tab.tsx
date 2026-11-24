@@ -12,7 +12,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Section } from "@/components/shared/page";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { FileDropzone } from "@/features/files/components/file-dropzone";
 import { FilePreviewDialog, FileTile, FileTypeIcon } from "@/features/files/components/file-preview";
@@ -37,8 +37,8 @@ export function ProjectDocumentsTab({
   receipts: ExpenseReceipt[];
 }) {
   const router = useRouter();
-  // Deletes are admin-only; the server refuses them for members too.
-  const isAdmin = useIsAdmin();
+  // Deletes need the projects delete permission; the server refuses them otherwise too.
+  const canDelete = useCan("finance.projects:delete");
   const [docs, apply] = useOptimistic(documents, (state, change: Change) =>
     change.kind === "remove" ? state.filter((d) => d.id !== change.id) : state.map((d) => (d.id === change.id ? { ...d, documentType: change.documentType } : d)),
   );
@@ -195,7 +195,7 @@ export function ProjectDocumentsTab({
                         {(file.documentType ?? "other") === t.value ? <Check className="ml-auto" /> : null}
                       </DropdownMenuItem>
                     ))}
-                    {isAdmin ? (
+                    {canDelete ? (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(file)}>

@@ -5,7 +5,7 @@ import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { DownloadButtons } from "@/features/reports/components/download-buttons";
 import { ReportFilterBar } from "@/features/reports/components/report-filters";
 import { InvertedPeriod, RelatedStatements, StatementMatrix } from "@/features/reports/components/statements/statement-view";
@@ -14,7 +14,7 @@ import { PL_NOTES, plColumnsOf, plRows } from "@/features/reports/server/builder
 import { plColumns } from "@/features/reports/server/pl-columns";
 import type { PlColumns } from "@/features/reports/types";
 import { periodFromInputs } from "@/server/accounting/statements";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import { fromDateInput } from "@/lib/dates";
 import { formatDate, formatPercent } from "@/lib/format";
 
@@ -26,7 +26,7 @@ const LAYOUT_WORDS: Record<PlColumns, string> = { total: "one total", month: "mo
 
 export default async function ProfitLossPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Profit & loss" />;
+  if (!can(user, "finance.statements:view")) return <NoAccess title="Profit & loss" />;
   const filters = filtersForReport("profit_loss", parseReportFilters(await searchParams));
   // A hand-edited link can put the start after the end: the downloads refuse it, so the page says so too.
   if (filters.from && filters.to && filters.from > filters.to) return <InvertedPeriod title="Profit & loss" filters={filters} />;
@@ -45,7 +45,7 @@ export default async function ProfitLossPage({ searchParams }: { searchParams: P
         eyebrow="Reports"
         title="Profit & loss"
         description={`Income earned against costs incurred from ${periodWords}, on the accrual basis. Every figure is computed from the records in Project Manager.`}
-        actions={<DownloadButtons type="profit_loss" filters={filters} refreshOnDownload={false} />}
+        actions={can(user, "finance.statements:export") ? <DownloadButtons type="profit_loss" filters={filters} refreshOnDownload={false} /> : undefined}
       />
       <ReportFilterBar meta={{ type: "profit_loss", filters: ["date", "columns"] }} filters={filters} options={NO_OPTIONS} />
 

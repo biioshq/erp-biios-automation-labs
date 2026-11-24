@@ -7,7 +7,8 @@ import { Money } from "@/components/shared/money";
 import { formatNumber } from "@/lib/format";
 import { parseListParams, type SearchParams } from "@/lib/list-params";
 import { getEmployeeOptions, getInventoryItemOptions, getProjectOptions } from "@/server/lookups";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 import { getLedgerItems, getLedgerProjects } from "@/features/inventory/ledger/queries";
 import { getStorageLocations, listWastage, wastageToDate } from "@/features/inventory/wastage/queries";
 import { WASTAGE_FILTER_KEYS, WASTAGE_SORT_KEYS } from "@/features/inventory/wastage/schemas";
@@ -21,7 +22,8 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 // Typed by hand: the generated route types only list routes that existed at the last build.
 export default async function WastagePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "inventory.wastage:view")) return <NoAccess eyebrow="Inventory" title="Record wastage" />;
   const sp = await searchParams;
   const params = parseListParams(sp, { filterKeys: WASTAGE_FILTER_KEYS, sortable: WASTAGE_SORT_KEYS, defaultSort: { id: "date", desc: true } });
   const [items, projects, data, toDate, locations, employees, projectOptions, itemOptions] = await Promise.all([

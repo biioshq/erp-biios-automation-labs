@@ -4,7 +4,8 @@ import { FolderKanban, MapPin } from "lucide-react";
 import { Page, PageHeader } from "@/components/shared/page";
 import { cn } from "@/lib/utils";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 import { getLedgerProjects } from "@/features/inventory/ledger/queries";
 import { getStorageLocations } from "@/features/inventory/wastage/queries";
 import { getLocatedItems, getRecentProjectMoves, getRecentRelocations } from "@/features/inventory/transfer/queries";
@@ -20,7 +21,8 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 // Typed by hand: the generated route types only list routes that existed at the last build.
 export default async function TransferPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "inventory.movement:view")) return <NoAccess eyebrow="Inventory" title="Stock transfer" />;
   const sp = await searchParams;
   const mode: TransferMode = one(sp.mode) === "location" ? "location" : "project";
 

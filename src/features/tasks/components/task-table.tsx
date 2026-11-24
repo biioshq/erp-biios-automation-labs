@@ -25,9 +25,11 @@ import { setTaskStatus } from "../actions";
 import type { TaskRow } from "../types";
 import { DueDate, PersonAvatar, PersonName, ProjectChip, TaskCounts, dueLabel } from "./task-bits";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/components/current-user";
 
 /** A status badge that opens a menu to change the status in place. */
-function StatusMenu({ task, onChange }: { task: TaskRow; onChange: (status: TaskStatus) => void }) {
+function StatusMenu({ task, onChange, canEdit }: { task: TaskRow; onChange: (status: TaskStatus) => void; canEdit: boolean }) {
+  if (!canEdit) return <TaskStatusBadge status={task.status} overdue={task.overdue} />;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -89,11 +91,14 @@ export function TaskTable({
   filters: FilterDef[];
   onOpen: (id: string) => void;
   onEdit: (id: string) => void;
-  /** Left out for members: only admins can delete tasks. */
+  /** Left out for people without the tasks delete permission. */
   onDelete?: (task: TaskRow) => void;
   onNew: () => void;
   toolbarActions?: React.ReactNode;
 }) {
+  // These only hide controls: the server checks the same permissions.
+  const canEdit = useCan("tasks.tasks:edit");
+  const canCreate = useCan("tasks.tasks:create");
   const [rows, setRowStatus] = useOptimistic(data.rows, (state, change: { id: string; status: TaskStatus }) =>
     state.map((r) =>
       r.id === change.id
@@ -182,7 +187,7 @@ export function TaskTable({
         header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
         cell: ({ row }) => (
           <div onClick={(e) => e.stopPropagation()}>
-            <StatusMenu task={row.original} onChange={(s) => changeStatus(row.original, s)} />
+            <StatusMenu task={row.original} onChange={(s) => changeStatus(row.original, s)} canEdit={canEdit} />
           </div>
         ),
         enableHiding: false,
@@ -221,9 +226,11 @@ export function TaskTable({
                 <DropdownMenuItem onSelect={() => onOpen(row.original.id)}>
                   <Eye /> Open
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onEdit(row.original.id)}>
-                  <Pencil /> Edit
-                </DropdownMenuItem>
+                {canEdit ? (
+                  <DropdownMenuItem onSelect={() => onEdit(row.original.id)}>
+                    <Pencil /> Edit
+                  </DropdownMenuItem>
+                ) : null}
                 {onDelete ? (
                   <>
                     <DropdownMenuSeparator />
@@ -238,7 +245,7 @@ export function TaskTable({
         ),
       },
     ],
-    [changeStatus, onOpen, onEdit, onDelete],
+    [changeStatus, onOpen, onEdit, onDelete, canEdit],
   );
 
   return (
@@ -265,9 +272,11 @@ export function TaskTable({
           title="No tasks yet"
           description="Create the first task, assign it to a teammate and give it a due date."
           action={
-            <Button onClick={onNew}>
-              <Plus /> New task
-            </Button>
+            canCreate ? (
+              <Button onClick={onNew}>
+                <Plus /> New task
+              </Button>
+            ) : undefined
           }
         />
       }

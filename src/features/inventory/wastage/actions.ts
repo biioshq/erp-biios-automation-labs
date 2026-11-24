@@ -14,7 +14,7 @@ const REVALIDATE: [string, "layout"][] = [
   ["/analytics", "layout"],
 ];
 
-/** Any signed-in person may record wastage: it is a fact from the floor, recorded with who and why. */
+/** Recording wastage needs the wastage create permission (members have it): a fact from the floor, recorded with who and why. */
 export const recordWastageAction = defineAction(
   wastageFormSchema,
   async (input, user): Promise<WastageResult> => {
@@ -46,5 +46,5 @@ export const recordWastageAction = defineAction(
       available: result.item.available,
     };
   },
-  { revalidate: REVALIDATE },
+  { permission: "inventory.wastage:create", revalidate: REVALIDATE },
 );

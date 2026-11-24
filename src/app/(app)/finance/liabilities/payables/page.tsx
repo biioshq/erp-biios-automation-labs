@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { formatNumber } from "@/lib/format";
 import { parseListParams, type SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import { getBankAccountOptions } from "@/server/lookups";
 import { payablesPage } from "@/features/finance/liabilities/queries";
 import { PAYABLE_FILTER_KEYS, PAYABLE_SORT_KEYS } from "@/features/finance/liabilities/schemas";
@@ -18,7 +18,7 @@ export const metadata: Metadata = { title: "Accounts payable" };
 
 export default async function PayablesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Accounts payable" />;
+  if (!can(user, "finance.liabilities:view")) return <NoAccess title="Accounts payable" />;
   const params = parseListParams(await searchParams, { filterKeys: PAYABLE_FILTER_KEYS, sortable: PAYABLE_SORT_KEYS, defaultSort: { id: "dueDate", desc: false } });
   const [data, accounts] = await Promise.all([payablesPage(params), getBankAccountOptions()]);
   const s = data.summary;
@@ -43,11 +43,13 @@ export default async function PayablesPage({ searchParams }: { searchParams: Pro
           </>
         }
         actions={
-          <Button asChild variant="outline">
-            <Link href="/finance/expenses?new=1">
-              <Receipt /> Add expense
-            </Link>
-          </Button>
+          can(user, "finance.expenses:create") ? (
+            <Button asChild variant="outline">
+              <Link href="/finance/expenses?new=1">
+                <Receipt /> Add expense
+              </Link>
+            </Button>
+          ) : undefined
         }
       />
       <StatGrid>

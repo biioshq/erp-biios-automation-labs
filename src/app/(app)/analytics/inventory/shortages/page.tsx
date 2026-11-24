@@ -7,7 +7,10 @@ import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
 import { EmptyState } from "@/components/shared/empty-state";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { ALERT_BUFFER_DAYS } from "@/server/analytics/core";
 import { intParam } from "@/features/analytics/inventory/params";
 import { getShortages, suggestedOrderValue } from "@/features/analytics/inventory/shortage-queries";
@@ -22,7 +25,10 @@ const HORIZONS = [30, 60, 90, 180] as const;
 
 export default async function ShortagesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.inventory)) return <NoAccess eyebrow="Analytics & Planning" title="Shortage risk" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const windowDays = intParam(sp, "window", { fallback: 90, allowed: WINDOWS });
   const horizon = intParam(sp, "horizon", { fallback: 60, allowed: HORIZONS });
@@ -36,16 +42,20 @@ export default async function ShortagesPage({ searchParams }: { searchParams: Pr
         description={`Materials likely to run out at the rate they were used in the last ${windowDays} days, when, and which projects use them.`}
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/analytics/forecasting/purchases">
-                <LineChart /> Purchase requirements
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/inventory/low-stock">
-                <CircleAlert /> Low stock
-              </Link>
-            </Button>
+            {open("/analytics/forecasting/purchases") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/forecasting/purchases">
+                  <LineChart /> Purchase requirements
+                </Link>
+              </Button>
+            ) : null}
+            {open("/inventory/low-stock") ? (
+              <Button asChild variant="outline">
+                <Link href="/inventory/low-stock">
+                  <CircleAlert /> Low stock
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

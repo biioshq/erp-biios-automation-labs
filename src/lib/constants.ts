@@ -245,11 +245,17 @@ export type EmployeeStatus = (typeof EMPLOYEE_STATUSES)[number]["value"];
 
 /* Users */
 
+/**
+ * The two built-in roles. Admins can add custom roles (stored in the roles collection), so a
+ * person's role is any role key: use UserRole for it, and src/lib/permissions for what a role may do.
+ */
 export const USER_ROLES = options([
   { value: "admin", label: "Admin" },
   { value: "member", label: "Member" },
 ] as const);
-export type UserRole = (typeof USER_ROLES)[number]["value"];
+export type BuiltInRole = (typeof USER_ROLES)[number]["value"];
+/** A role key: "admin", "member" or a custom role's key. */
+export type UserRole = string;
 
 /* Finance: payments, accounts, balance sheet */
 

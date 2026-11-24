@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { Types } from "mongoose";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { rateLimit } from "@/server/rate-limit";
 import { connectDB } from "@/server/db";
 import { UploadError, readStoredFile } from "@/server/storage";
@@ -24,6 +24,10 @@ type FileDTO = ReturnType<typeof toFileDTO>;
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Your session has ended. Sign in again." }, { status: 401 });
+  // The expense form reads receipts, so adding or editing expenses is enough.
+  if (!can(user, "finance.expenses:create") && !can(user, "finance.expenses:edit")) {
+    return NextResponse.json({ error: "You do not have permission to do this." }, { status: 403 });
+  }
   const limited = rateLimit(`receipts:${user.id}`, 20, 60_000);
   if (!limited.ok) {
     return NextResponse.json(

@@ -3,7 +3,7 @@ import "server-only";
 import { Types, type QueryFilter } from "mongoose";
 import { connectDB } from "@/server/db";
 import { Employee, Expense, ProjectMember, RecurringExpense, Task, User, type EmployeeDoc, type RecurringExpenseDoc } from "@/server/models";
-import { getCurrentUser } from "@/server/auth/session";
+import { canSeeSalaries } from "@/server/auth/session";
 import { listTeamMembers } from "@/server/services/users";
 import { iso } from "@/server/serialize";
 import { financialYearIST } from "@/lib/dates";
@@ -25,8 +25,9 @@ const FALLBACK_COLOR = "#4a82cc";
 
 type PopulatedProject = { _id: Types.ObjectId; name: string; code: string; color?: string; status: string };
 
-export async function isAdminViewer(): Promise<boolean> {
-  return (await getCurrentUser())?.role === "admin";
+/** Pay, payroll and salary history need the salaries data permission. */
+export async function viewerSeesSalaries(): Promise<boolean> {
+  return canSeeSalaries();
 }
 
 /** Open memberships grouped by employee, as chips with the project's colour. */
@@ -47,7 +48,7 @@ async function currentProjectsFor(employeeIds: Types.ObjectId[]): Promise<Map<st
   return out;
 }
 
-function toRow(e: EmployeeDoc, projects: EmployeeProjectChip[], isAdmin: boolean): EmployeeRow {
+function toRow(e: EmployeeDoc, projects: EmployeeProjectChip[], seesSalaries: boolean): EmployeeRow {
   return {
     id: String(e._id),
     code: e.code,
@@ -61,7 +62,7 @@ function toRow(e: EmployeeDoc, projects: EmployeeProjectChip[], isAdmin: boolean
     joinDate: iso(e.joinDate),
     exitDate: iso(e.exitDate),
     // Members never receive salary figures.
-    monthlySalary: isAdmin ? (e.monthlySalary ?? 0) : null,
+    monthlySalary: seesSalaries ? (e.monthlySalary ?? 0) : null,
     skills: e.skills ?? [],
     hasAccount: Boolean(e.user),
     projects,
@@ -85,18 +86,18 @@ function employeeFilter(params: Pick<ListParams, "q" | "filters">): QueryFilter<
 
 export async function listEmployees(params: ListParams): Promise<EmployeeRow[]> {
   await connectDB();
-  const isAdmin = await isAdminViewer();
+  const seesSalaries = await viewerSeesSalaries();
   const docs = await Employee.find(employeeFilter(params)).sort({ name: 1 }).limit(500).lean();
   const chips = await currentProjectsFor(docs.map((d) => d._id));
   return docs
-    .map((d) => toRow(d, chips.get(String(d._id)) ?? [], isAdmin))
+    .map((d) => toRow(d, chips.get(String(d._id)) ?? [], seesSalaries))
     .sort((a, b) => (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3) || a.name.localeCompare(b.name));
 }
 
 /** KPI strip: whole company, not the filtered list. */
 export async function getEmployeeSummary(): Promise<EmployeeSummary> {
   await connectDB();
-  const isAdmin = await isAdminViewer();
+  const seesSalaries = await viewerSeesSalaries();
   const [byStatus, departments, onProjects, payroll] = await Promise.all([
     Employee.aggregate<{ _id: string; n: number }>([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
     Employee.distinct("department", { status: { $ne: "exited" } }),
@@ -107,7 +108,7 @@ export async function getEmployeeSummary(): Promise<EmployeeSummary> {
       { $match: { "e.status": { $in: ["active", "on_leave"] } } },
       { $count: "n" },
     ]),
-    isAdmin
+    seesSalaries
       ? Employee.aggregate<{ total: number }>([
           { $match: { status: { $ne: "exited" } } },
           { $group: { _id: null, total: { $sum: "$monthlySalary" } } },
@@ -119,7 +120,7 @@ export async function getEmployeeSummary(): Promise<EmployeeSummary> {
     headcount: count("active") + count("on_leave"),
     onLeave: count("on_leave"),
     onProjects: onProjects[0]?.n ?? 0,
-    payroll: isAdmin ? (payroll?.[0]?.total ?? 0) : null,
+    payroll: seesSalaries ? (payroll?.[0]?.total ?? 0) : null,
     departments: departments.length,
   };
 }
@@ -157,14 +158,14 @@ export function primarySalarySchedule<T extends { status?: string | null }>(sche
 export async function getEmployee(id: string): Promise<EmployeeDetail | null> {
   if (!Types.ObjectId.isValid(id)) return null;
   await connectDB();
-  const isAdmin = await isAdminViewer();
+  const seesSalaries = await viewerSeesSalaries();
   const e = await Employee.findById(id).lean();
   if (!e) return null;
   const chips = await currentProjectsFor([e._id]);
   // A schedule made on the Recurring page for this person counts too, so "Pay salary" shows it and no second one is made.
-  const schedule = isAdmin ? primarySalarySchedule(await salarySchedulesFor(e._id, e.salaryRecurring)) : null;
+  const schedule = seesSalaries ? primarySalarySchedule(await salarySchedulesFor(e._id, e.salaryRecurring)) : null;
   return {
-    ...toRow(e, chips.get(String(e._id)) ?? [], isAdmin),
+    ...toRow(e, chips.get(String(e._id)) ?? [], seesSalaries),
     notes: e.notes ?? null,
     userId: e.user ? String(e.user) : null,
     salaryRecurringId: schedule ? String(schedule._id) : null,
@@ -201,19 +202,19 @@ function toMembership(m: {
   };
 }
 
-/** The detail page: employee, projects, salary (admins), linked account and tasks. */
+/** The detail page: employee, projects, salary (salaries data permission), linked account and tasks. */
 export async function getEmployeePage(id: string): Promise<EmployeePageData | null> {
   const employee = await getEmployee(id);
   if (!employee) return null;
-  const isAdmin = await isAdminViewer();
+  const seesSalaries = await viewerSeesSalaries();
   const oid = new Types.ObjectId(id);
   const fy = financialYearIST();
 
   const [memberships, schedule, payments, paidAgg, user] = await Promise.all([
     ProjectMember.find({ employee: oid }).populate("project", "name code color status").sort({ startDate: -1 }).lean(),
-    isAdmin && employee.salaryRecurringId ? RecurringExpense.findById(employee.salaryRecurringId).lean() : null,
-    isAdmin ? Expense.find({ employee: oid }).sort({ date: -1 }).limit(12).lean() : [],
-    isAdmin
+    seesSalaries && employee.salaryRecurringId ? RecurringExpense.findById(employee.salaryRecurringId).lean() : null,
+    seesSalaries ? Expense.find({ employee: oid }).sort({ date: -1 }).limit(12).lean() : [],
+    seesSalaries
       ? Expense.aggregate<{ total: number }>([
           { $match: { employee: oid, date: { $gte: fy.start, $lte: fy.end } } },
           { $group: { _id: null, total: { $sum: "$amount" } } },
@@ -239,7 +240,7 @@ export async function getEmployeePage(id: string): Promise<EmployeePageData | nu
     employee,
     current,
     past,
-    salary: isAdmin
+    salary: seesSalaries
       ? {
           monthlySalary: employee.monthlySalary ?? 0,
           scheduleId: schedule ? String(schedule._id) : null,

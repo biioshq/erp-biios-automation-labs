@@ -6,17 +6,21 @@ import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { reportQueryString } from "@/features/reports/schemas";
 import type { FinanceDashboardData } from "../types";
 
+/** Each quick action shows only with the permission its form needs. */
 const ACTIONS = [
-  { title: "Add expense", href: "/finance/expenses?new=1", icon: Receipt, hint: "Bills and receipts" },
-  { title: "Record income", href: "/finance/income?new=1", icon: BadgeIndianRupee, hint: "Client payments" },
-  { title: "New project", href: "/finance/projects?new=1", icon: FolderKanban, hint: "Budget and stages" },
-  { title: "Purchase stock", href: "/inventory/purchase", icon: PackagePlus, hint: "Add to inventory" },
+  { title: "Add expense", href: "/finance/expenses?new=1", icon: Receipt, hint: "Bills and receipts", permission: "finance.expenses:create" },
+  { title: "Record income", href: "/finance/income?new=1", icon: BadgeIndianRupee, hint: "Client payments", permission: "finance.income:create" },
+  { title: "New project", href: "/finance/projects?new=1", icon: FolderKanban, hint: "Budget and stages", permission: "finance.projects:create" },
+  { title: "Purchase stock", href: "/inventory/purchase", icon: PackagePlus, hint: "Add to inventory", permission: "inventory.purchase:create" },
 ] as const;
 
-export function QuickActions() {
+/** `can` is the viewer's permission check from the server (can(user, p)), so the Admin role passes every one. */
+export function QuickActions({ can }: { can: (permission: string) => boolean }) {
+  const actions = ACTIONS.filter((a) => can(a.permission));
+  if (!actions.length) return null;
   return (
     <Section title="Quick actions" contentClassName="grid grid-cols-2 gap-2.5 p-3 sm:p-4">
-      {ACTIONS.map((a) => (
+      {actions.map((a) => (
         <Link
           key={a.href}
           href={a.href}
@@ -35,25 +39,28 @@ export function QuickActions() {
   );
 }
 
-const SHORTCUTS: { title: string; href: string; adminOnly?: boolean }[] = [
-  { title: "Income summary", href: "/finance/income/summary" },
-  { title: "Expense summary", href: "/finance/expenses/summary" },
-  { title: "Invoices & receivables", href: "/finance/invoices" },
-  { title: "Payment tracking", href: "/finance/payments" },
-  { title: "Project profitability", href: "/finance/projects/profitability" },
-  { title: "Budget tracking", href: "/finance/projects/budgets" },
-  { title: "Balance sheet", href: "/finance/reports/balance-sheet", adminOnly: true },
-  { title: "Profit & loss", href: "/finance/reports/profit-loss", adminOnly: true },
-  { title: "Cash flow", href: "/finance/reports/cash-flow", adminOnly: true },
-  { title: "All reports", href: "/finance/reports" },
+/** Each link shows only with the view permission of the page it opens. */
+const SHORTCUTS: { title: string; href: string; permission: string }[] = [
+  { title: "Income summary", href: "/finance/income/summary", permission: "finance.income:view" },
+  { title: "Expense summary", href: "/finance/expenses/summary", permission: "finance.expenses:view" },
+  { title: "Invoices & receivables", href: "/finance/invoices", permission: "finance.invoices:view" },
+  { title: "Payment tracking", href: "/finance/payments", permission: "finance.payments:view" },
+  { title: "Project profitability", href: "/finance/projects/profitability", permission: "finance.project_finance:view" },
+  { title: "Budget tracking", href: "/finance/projects/budgets", permission: "finance.project_finance:view" },
+  { title: "Balance sheet", href: "/finance/reports/balance-sheet", permission: "finance.statements:view" },
+  { title: "Profit & loss", href: "/finance/reports/profit-loss", permission: "finance.statements:view" },
+  { title: "Cash flow", href: "/finance/reports/cash-flow", permission: "finance.statements:view" },
+  { title: "All reports", href: "/finance/reports", permission: "finance.reports:view" },
 ];
 
 /** Links to the detailed Finance pages behind the dashboard's figures. */
-export function ShortcutLinks({ isAdmin }: { isAdmin: boolean }) {
+export function ShortcutLinks({ can }: { can: (permission: string) => boolean }) {
+  const links = SHORTCUTS.filter((s) => can(s.permission));
+  if (!links.length) return null;
   return (
     <Section title="Detailed pages" contentClassName="p-2 sm:p-3">
       <ul className="grid grid-cols-2 gap-1">
-        {SHORTCUTS.filter((s) => isAdmin || !s.adminOnly).map((s) => (
+        {links.map((s) => (
           <li key={s.href}>
             <Link
               href={s.href}

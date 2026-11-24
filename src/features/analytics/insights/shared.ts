@@ -7,15 +7,16 @@ import { NO_VENDOR, vendorKey } from "../dashboard/rules";
 import type { OpenItems, PartyBalance } from "./types";
 
 /**
- * Open payables and receivables for the insights pages. Admins get the shared summaries as they
- * are. Members get supplier bills without salary bills: a salary bill names the person paid.
+ * Open payables and receivables for the insights pages. People who see salaries get the shared
+ * summaries as they are. Others get supplier bills without salary bills: a salary bill names the
+ * person paid.
  */
 
 type Payables = Awaited<ReturnType<typeof payablesSummary>>;
 
-export async function viewerPayables(isAdmin: boolean, now: Date = new Date()): Promise<{ totals: OpenItems & { salariesLeftOut: boolean }; byVendor: PartyBalance[]; rows: Payables["rows"] }> {
+export async function viewerPayables(seesSalaries: boolean, now: Date = new Date()): Promise<{ totals: OpenItems & { salariesLeftOut: boolean }; byVendor: PartyBalance[]; rows: Payables["rows"] }> {
   const summary = await payablesSummary(now);
-  if (isAdmin) {
+  if (seesSalaries) {
     return {
       totals: { total: summary.total, count: summary.count, overdue: summary.overdue, overdueCount: summary.overdueCount, dueSoon: summary.dueSoon, salariesLeftOut: false },
       byVendor: summary.byVendor.map((v) => ({ name: v.vendor, outstanding: v.outstanding, count: v.bills, overdue: v.overdue })),

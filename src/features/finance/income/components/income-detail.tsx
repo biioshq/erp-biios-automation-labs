@@ -13,6 +13,7 @@ import { INCOME_CATEGORIES, PAYMENT_METHODS, labelOf } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { BankLineLink } from "@/features/finance/bank-statements/components/bank-line-link";
 import type { IncomeDetail } from "../types";
+import { useCan } from "@/components/current-user";
 
 function Row({ icon: Icon, label, children }: { icon: typeof User; label: string; children: React.ReactNode }) {
   return (
@@ -45,9 +46,10 @@ export function IncomeDetailView({
   income: IncomeDetail;
   onEdit: () => void;
   onDelete: () => Promise<boolean>;
-  /** Only admins may delete; the server enforces it too. */
+  /** Needs the income delete permission; the server enforces it too. */
   canDelete?: boolean;
 }) {
+  const canEdit = useCan("finance.income:edit");
   return (
     <>
       <FormSheetBody className="space-y-6">
@@ -149,9 +151,11 @@ export function IncomeDetailView({
             }
           />
         ) : null}
-        <Button onClick={onEdit}>
-          <Pencil /> Edit
-        </Button>
+        {canEdit ? (
+          <Button onClick={onEdit}>
+            <Pencil /> Edit
+          </Button>
+        ) : null}
       </FormSheetFooter>
     </>
   );

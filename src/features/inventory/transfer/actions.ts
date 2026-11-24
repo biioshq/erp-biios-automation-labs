@@ -30,7 +30,7 @@ export const moveStockAction = defineAction(
     );
     return { itemName: r.item.name, unit: r.item.unit ?? "pcs", quantity: r.quantity, fromName: r.source.name, toName: r.target.name, value: r.credited };
   },
-  { revalidate: REVALIDATE },
+  { permission: "inventory.movement:create", revalidate: REVALIDATE },
 );
 
 export const relocateItemAction = defineAction(
@@ -39,5 +39,5 @@ export const relocateItemAction = defineAction(
     const r = await relocateItem({ itemId: input.itemId, to: input.to, date: fromDateInput(input.date), note: input.note }, user.id);
     return { itemName: r.item.name, from: r.from, to: r.to };
   },
-  { revalidate: [["/inventory", "layout"]] },
+  { permission: "inventory.movement:create", revalidate: [["/inventory", "layout"]] },
 );

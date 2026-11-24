@@ -17,6 +17,7 @@ import type { ActionResult } from "@/lib/action-result";
  */
 export function RecordDocuments({
   documents,
+  canAttach = true,
   canRemove,
   attach,
   remove,
@@ -24,7 +25,9 @@ export function RecordDocuments({
   hint = "Invoice, warranty card, photos or any other paper",
 }: {
   documents: FileDTO[];
-  /** Only admins delete files. */
+  /** False hides the upload area (the record's edit permission). */
+  canAttach?: boolean;
+  /** The record's delete permission. */
   canRemove: boolean;
   attach: (fileIds: string[]) => Promise<ActionResult<unknown>>;
   remove: (fileId: string) => Promise<ActionResult<unknown>>;
@@ -70,14 +73,16 @@ export function RecordDocuments({
           <FileText className="size-4" /> No documents yet.
         </p>
       )}
-      <FileDropzone
-        meta={{ kind: "document" }}
-        accept={ACCEPT_DOCUMENTS}
-        compact
-        title="Drop documents or click to browse"
-        hint={`${hint}. Up to ${MAX_UPLOAD_LABEL} each.`}
-        onUploaded={uploaded}
-      />
+      {canAttach ? (
+        <FileDropzone
+          meta={{ kind: "document" }}
+          accept={ACCEPT_DOCUMENTS}
+          compact
+          title="Drop documents or click to browse"
+          hint={`${hint}. Up to ${MAX_UPLOAD_LABEL} each.`}
+          onUploaded={uploaded}
+        />
+      ) : null}
       <ConfirmDialog
         open={removing !== null}
         onOpenChange={(o) => !o && setRemoving(null)}

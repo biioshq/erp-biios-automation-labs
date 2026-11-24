@@ -5,7 +5,7 @@ import { defineAction } from "@/server/action";
 import { AppError, notFound } from "@/server/errors";
 import { CapitalEntry, EquityHolder, FileModel } from "@/server/models";
 import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { fromDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import type { EquityHolderKind } from "@/lib/constants";
@@ -14,9 +14,11 @@ import { createCapitalEntry, updateCapitalEntry, type CapitalEntryInput } from "
 import { getEntry, getHolder } from "./queries";
 import type { EntryDetail, HolderDetail } from "./types";
 
-/** Capital / Equity is admin-only: every action here is too. */
+/** Capital / Equity: members have none of these permissions by default. */
 const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
-const ADMIN = { revalidate: REVALIDATE, role: "admin" as const };
+const CREATE = { revalidate: REVALIDATE, permission: "finance.equity:create" };
+const EDIT = { revalidate: REVALIDATE, permission: "finance.equity:edit" };
+const DELETE = { revalidate: REVALIDATE, permission: "finance.equity:delete" };
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -66,7 +68,7 @@ export const createHolder = defineAction(
     const created = await EquityHolder.create({ ...holderFields(input), createdBy: new Types.ObjectId(user.id) });
     return { id: String(created._id), name: created.name };
   },
-  { ...ADMIN, message: "Added" },
+  { ...CREATE, message: "Added" },
 );
 
 export const updateHolder = defineAction(
@@ -91,7 +93,7 @@ export const updateHolder = defineAction(
     await EquityHolder.updateOne({ _id: existing._id }, { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
     return { id: input.id };
   },
-  { ...ADMIN, message: "Saved" },
+  { ...EDIT, message: "Saved" },
 );
 
 /** Hides a holder from pickers. Their entries stay and keep counting. */
@@ -102,7 +104,7 @@ export const archiveHolder = defineAction(
     if (!res.matchedCount) throw notFound("That owner or investor");
     return { id };
   },
-  { ...ADMIN, message: "Archived" },
+  { ...EDIT, message: "Archived" },
 );
 
 export const restoreHolder = defineAction(
@@ -115,7 +117,7 @@ export const restoreHolder = defineAction(
     await EquityHolder.updateOne({ _id: existing._id }, { $set: { archivedAt: null } });
     return { id };
   },
-  { ...ADMIN, message: "Restored" },
+  { ...EDIT, message: "Restored" },
 );
 
 /** Only someone with no entries at all can be deleted; anyone else is archived instead. */
@@ -131,7 +133,7 @@ export const deleteHolder = defineAction(
     await EquityHolder.deleteOne({ _id: existing._id });
     return { id };
   },
-  { ...ADMIN, message: "Deleted" },
+  { ...DELETE, message: "Deleted" },
 );
 
 /* Capital entries */
@@ -192,7 +194,7 @@ export const recordEntry = defineAction(
     }
     return { ...created, holderId: holderId ?? null };
   },
-  { ...ADMIN, message: "Recorded" },
+  { ...CREATE, message: "Recorded" },
 );
 
 export const updateEntry = defineAction(
@@ -206,12 +208,12 @@ export const updateEntry = defineAction(
     await updateCapitalEntry(input.id, toInput(input, input.holderId));
     await CapitalEntry.updateOne({ _id: existing._id }, { $set: { documents: documentIds.map((d) => new Types.ObjectId(d)) } });
     if (documentIds.length) await attachFiles(documentIds, { type: "capital", id: input.id });
-    // A document taken off the entry is deleted from storage (this page is admin-only).
+    // A document taken off the entry is deleted from storage (only people who can edit equity get here).
     const kept = new Set(documentIds);
     for (const old of existing.documents ?? []) if (!kept.has(String(old))) await removeFile(String(old));
     return { id: input.id };
   },
-  { ...ADMIN, message: "Saved" },
+  { ...EDIT, message: "Saved" },
 );
 
 export const deleteEntry = defineAction(
@@ -223,20 +225,20 @@ export const deleteEntry = defineAction(
     for (const file of existing.documents ?? []) await removeFile(String(file));
     return { id };
   },
-  { ...ADMIN, message: "Deleted" },
+  { ...DELETE, message: "Deleted" },
 );
 
 /* Reads for the drawers */
 
 export async function fetchEntry(id: string): Promise<EntryDetail | null> {
   const user = await getCurrentUser();
-  if (user?.role !== "admin") return null;
+  if (!user || !can(user, "finance.equity:view")) return null;
   return getEntry(id);
 }
 
 export async function fetchHolder(id: string): Promise<HolderDetail | null> {
   const user = await getCurrentUser();
-  if (user?.role !== "admin") return null;
+  if (!user || !can(user, "finance.equity:view")) return null;
   return getHolder(id);
 }
 

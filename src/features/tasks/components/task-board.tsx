@@ -29,6 +29,7 @@ import { TASK_STATUSES, labelOf, valuesOf, type TaskStatus } from "@/lib/constan
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format";
 import { emitDataChanged } from "@/lib/events";
+import { useCan } from "@/components/current-user";
 import { moveTask } from "../actions";
 import type { TaskRow } from "../types";
 import { DueDate, PRIORITY_RULE, PersonAvatar, ProjectChip, TaskCounts, daysUntil } from "./task-bits";
@@ -155,7 +156,9 @@ function Card({ task, onOpen, onMove, overlay }: { task: TaskRow; onOpen?: () =>
 }
 
 function SortableCard({ task, onOpen, onMove }: { task: TaskRow; onOpen: () => void; onMove: (status: TaskStatus) => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
+  // Moving a task needs the tasks edit permission (moveTask checks it again on the server).
+  const canEdit = useCan("tasks.tasks:edit");
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id, disabled: !canEdit });
   return (
     <div
       ref={setNodeRef}
@@ -171,7 +174,7 @@ function SortableCard({ task, onOpen, onMove }: { task: TaskRow; onOpen: () => v
         listeners?.onKeyDown?.(e);
       }}
     >
-      <Card task={task} onOpen={onOpen} onMove={onMove} />
+      <Card task={task} onOpen={onOpen} onMove={canEdit ? onMove : undefined} />
     </div>
   );
 }
@@ -195,7 +198,8 @@ function Column({
   onToggle?: () => void;
   onOpen: (id: string) => void;
   onMove: (id: string, status: TaskStatus) => void;
-  onAdd: (status: TaskStatus) => void;
+  /** Left out for people who may not create tasks. */
+  onAdd?: (status: TaskStatus) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: columnKey(status) });
   const label = labelOf(TASK_STATUSES, status);
@@ -218,9 +222,11 @@ function Column({
         <span className={cn("size-2 rounded-full", DOT[status])} aria-hidden />
         <h3 className="text-sm font-semibold">{label}</h3>
         <span className="tabular rounded-full bg-muted px-1.5 text-xs font-medium text-muted-foreground">{formatNumber(ids.length)}</span>
-        <Button variant="ghost" size="icon-sm" className="ml-auto md:size-6" onClick={() => onAdd(status)} aria-label={`Add a task to ${label}`}>
-          <Plus />
-        </Button>
+        {onAdd ? (
+          <Button variant="ghost" size="icon-sm" className="ml-auto md:size-6" onClick={() => onAdd(status)} aria-label={`Add a task to ${label}`}>
+            <Plus />
+          </Button>
+        ) : null}
       </header>
       {collapsed ? null : (
         <SortableContext items={ids} strategy={verticalListSortingStrategy}>
@@ -258,6 +264,7 @@ export function TaskBoard({
   onOpen: (id: string) => void;
   onNew: (status?: TaskStatus) => void;
 }) {
+  const canCreate = useCan("tasks.tasks:create");
   const [source, setSource] = useState(rows);
   const [tasks, setTasks] = useState<Tasks>(() => toRecord(rows));
   const [columns, setColumns] = useState<Columns>(() => group(rows));
@@ -472,9 +479,11 @@ export function TaskBoard({
         title={filtered ? "No tasks match these filters" : "No tasks on the board yet"}
         description={filtered ? "Clear a filter or the search to see more tasks." : "Create a task and drag it across the columns as work moves on."}
         action={
-          <Button onClick={() => onNew()}>
-            <Plus /> New task
-          </Button>
+          canCreate ? (
+            <Button onClick={() => onNew()}>
+              <Plus /> New task
+            </Button>
+          ) : undefined
         }
       />
     );
@@ -541,7 +550,7 @@ export function TaskBoard({
               onToggle={() => setShowCancelled((v) => !v)}
               onOpen={onOpen}
               onMove={moveTo}
-              onAdd={onNew}
+              onAdd={canCreate ? onNew : undefined}
             />
           ))}
         </div>

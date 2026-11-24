@@ -8,7 +8,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { formatPercent } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { statusesParam } from "@/features/analytics/projects/model";
 import { loadProjectCosts } from "@/features/analytics/projects/queries";
 import { getPerformance } from "@/features/analytics/projects/performance-queries";
@@ -21,7 +24,10 @@ export const metadata: Metadata = { title: "Project performance" };
 
 export default async function PerformancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.projects)) return <NoAccess eyebrow="Analytics & Planning" title="Project performance" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const statuses = statusesParam(await searchParams);
   const { rows: costs, total, salariesHidden } = await loadProjectCosts(statuses);
   const { rows, overdue, noProjectTasks } = await getPerformance(costs);
@@ -40,11 +46,13 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         actions={
           <>
             <ProjectStatusSelect statuses={statuses} />
-            <Button asChild variant="outline">
-              <Link href="/tasks/all">
-                <ListChecks /> All tasks
-              </Link>
-            </Button>
+            {open("/tasks/all") ? (
+              <Button asChild variant="outline">
+                <Link href="/tasks/all">
+                  <ListChecks /> All tasks
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

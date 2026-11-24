@@ -4,40 +4,46 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { connectDB } from "@/server/db";
 import { AppError, isDuplicateKeyError } from "@/server/errors";
-import { assertUser, type SessionUser } from "@/server/auth/session";
+import { assertUser, can, type SessionUser } from "@/server/auth/session";
 import type { ActionResult } from "@/lib/action-result";
 import { bumpChanges } from "@/server/changes";
 
 type ActionOptions = {
+  /**
+   * Required. The permission the action needs, for example "finance.expenses:create". With a list,
+   * any one of them is enough. null means any signed-in person, and must be written out.
+   */
+  permission: string | string[] | null;
   /** Paths to refresh after success. Use the layout form to refresh a whole section: ["/finance", "layout"]. */
   revalidate?: (string | [string, "layout" | "page"])[];
   /** Success message for the toast. */
   message?: string;
-  /** "admin" limits the action to admins (deletes, team, salaries). */
-  role?: "admin";
   /** True for actions that only read (suggestions): they do not refresh other people's pages. */
   readOnly?: boolean;
 };
 
 /**
- * Wraps a server action: checks the session, validates input with Zod,
- * connects to the database, maps errors to an ActionResult and refreshes
- * the given paths. Use in "use server" files:
+ * Wraps a server action: checks the session and the permission, validates input with Zod,
+ * connects to the database, maps errors to an ActionResult and refreshes the given paths.
+ * Use in "use server" files:
  *
  *   export const createExpense = defineAction(expenseSchema, async (input, user) => { ... }, {
- *     revalidate: [["/finance", "layout"]], message: "Expense added",
+ *     permission: "finance.expenses:create", revalidate: [["/finance", "layout"]], message: "Expense added",
  *   });
  */
 export function defineAction<S extends z.ZodType, R>(
   schema: S,
   handler: (input: z.output<S>, user: SessionUser) => Promise<R>,
-  options: ActionOptions = {},
+  options: ActionOptions,
 ) {
   return async function action(raw: z.input<S>): Promise<ActionResult<R>> {
     try {
       const user = await assertUser();
-      if (options.role === "admin" && user.role !== "admin") {
-        return { ok: false, error: "Only an admin can do this. Ask an admin on your team." };
+      if (options.permission !== null) {
+        const list = Array.isArray(options.permission) ? options.permission : [options.permission];
+        if (!list.some((p) => can(user, p))) {
+          return { ok: false, error: "You do not have permission to do this. Ask an admin if you need it." };
+        }
       }
       const parsed = schema.safeParse(raw);
       if (!parsed.success) {

@@ -22,7 +22,8 @@ import {
 } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { BiiosStacked, BiiosSymbol, PRODUCT_NAME } from "@/components/brand/logo";
-import { MODULES, findActive, visibleItems, type NavItem } from "@/config/navigation";
+import { findActive, visibleModules, type NavItem } from "@/config/navigation";
+import { useCanFn } from "@/components/current-user";
 import { UserMenu } from "./user-menu";
 import type { SessionUser } from "@/server/auth/session";
 
@@ -32,6 +33,9 @@ export function AppSidebar({ user }: { user: SessionUser }) {
   const closeOnMobile = () => isMobile && setOpenMobile(false);
   // One entry lights up: the one the page belongs to, including its tab pages and detail pages.
   const { item: activeItem, child: activeChild } = findActive(pathname);
+  // Only the modules and pages the person's role opens; a module with none is left out.
+  const can = useCanFn();
+  const modules = React.useMemo(() => visibleModules(can), [can]);
 
   // The drawer (phones and tablets) closes on every navigation, however it was triggered.
   React.useEffect(() => {
@@ -42,9 +46,9 @@ export function AppSidebar({ user }: { user: SessionUser }) {
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="gap-0 px-3 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
         <Link
-          href="/finance"
+          href="/"
           onClick={closeOnMobile}
-          aria-label="Biios Project Manager, go to Finance"
+          aria-label="Biios Project Manager, go to the start page"
           className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
         >
           {/* Expanded: stacked lockup at its 72px minimum. Collapsed: the symbol. */}
@@ -66,10 +70,10 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         <SidebarGroup>
           <SidebarGroupLabel className="text-[11.5px] font-medium tracking-[0.14em] text-sidebar-foreground/55 uppercase">Workspace</SidebarGroupLabel>
           <SidebarMenu className="gap-1">
-            {MODULES.map((mod) => {
+            {modules.map((mod, index) => {
               const inModule = pathname === mod.href || pathname.startsWith(`${mod.href}/`);
               return (
-                <Collapsible key={mod.id} asChild defaultOpen={inModule || mod.id === "finance"} className="group/collapsible">
+                <Collapsible key={mod.id} asChild defaultOpen={inModule || index === 0} className="group/collapsible">
                   <SidebarMenuItem>
                     <CollapsibleTrigger asChild>
                       <SidebarMenuButton tooltip={mod.title} isActive={inModule} className="h-9 font-medium max-lg:h-11">
@@ -80,7 +84,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
                     </CollapsibleTrigger>
                     <CollapsibleContent className="data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down overflow-hidden">
                       <SidebarMenuSub className="mr-0 gap-0.5 py-1 pr-0">
-                        {visibleItems(mod.items, user.role === "admin").map((item) =>
+                        {mod.items.map((item) =>
                           item.children?.length ? (
                             <SubGroup key={item.title} item={item} active={item.href === activeItem?.href} activeChild={item.href === activeItem?.href ? activeChild : null} onNavigate={closeOnMobile} />
                           ) : (

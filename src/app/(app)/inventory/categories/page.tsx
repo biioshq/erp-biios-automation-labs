@@ -5,13 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { listCategories } from "@/features/inventory/categories/queries";
 import { CategoriesView } from "@/features/inventory/categories/components/categories-view";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 
 export const metadata: Metadata = { title: "Categories" };
 
 export default async function CategoriesPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "inventory.categories:view")) return <NoAccess eyebrow="Inventory" title="Categories" />;
   const { rows, uncategorized } = await listCategories();
   return (
     <Page>
@@ -20,11 +22,13 @@ export default async function CategoriesPage() {
         title="Categories"
         description="Group items so lists, filters and value reports stay readable. A category can be deleted only when no item uses it."
         actions={
-          <Button asChild>
-            <Link href="?new=1" scroll={false}>
-              <Plus /> New category
-            </Link>
-          </Button>
+          can(user, "inventory.categories:create") ? (
+            <Button asChild>
+              <Link href="?new=1" scroll={false}>
+                <Plus /> New category
+              </Link>
+            </Button>
+          ) : null
         }
       />
       <CategoriesView rows={rows} uncategorized={uncategorized} />

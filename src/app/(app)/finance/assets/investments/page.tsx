@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { getBankAccountOptions } from "@/server/lookups";
 import { descendantsOf, loadFinanceGroups } from "@/server/finance-groups";
 import { parseListParams, type SearchParams } from "@/lib/list-params";
@@ -32,7 +32,7 @@ function maturingSoon(rows: InvestmentRow[], now = new Date()): InvestmentRow[] 
 
 export default async function InvestmentsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Long-term investments" eyebrow="Finance · Assets" />;
+  if (!can(user, "finance.investments:view")) return <NoAccess title="Long-term investments" eyebrow="Finance · Assets" />;
   const sp = await searchParams;
   const params = parseListParams(sp, { filterKeys: INVESTMENT_FILTER_KEYS });
   const [list, allGroups, accounts] = await Promise.all([listInvestments({ q: params.q, filters: params.filters }), loadFinanceGroups("asset"), getBankAccountOptions()]);
@@ -52,16 +52,20 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
         description="Fixed deposits, funds, shares, bonds and property held for more than a year. The balance sheet carries them at cost; current values are shown beside it."
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link href="/finance/assets">
-                <Landmark /> Assets overview
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="?new=1" scroll={false}>
-                <Plus /> Add investment
-              </Link>
-            </Button>
+            {can(user, "finance.assets_overview:view") ? (
+              <Button variant="outline" asChild>
+                <Link href="/finance/assets">
+                  <Landmark /> Assets overview
+                </Link>
+              </Button>
+            ) : null}
+            {can(user, "finance.investments:create") ? (
+              <Button asChild>
+                <Link href="?new=1" scroll={false}>
+                  <Plus /> Add investment
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

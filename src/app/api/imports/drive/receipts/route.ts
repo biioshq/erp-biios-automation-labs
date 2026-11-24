@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { Types } from "mongoose";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { connectDB } from "@/server/db";
 import { rateLimit } from "@/server/rate-limit";
 import { importDriveReceipt, rereadDraft } from "@/features/imports/drive/receipts/server";
@@ -12,7 +12,7 @@ export const maxDuration = 60;
 
 /**
  * Imports one Google Drive bill as a draft expense, one file per request, so the browser shows
- * progress and can stop between files. Admins only.
+ * progress and can stop between files. Needs the Finance import permission.
  *
  *   POST { driveFileId, folderId?, includeDiscarded?, resourceKey?, folderResourceKey? }
  *                                                         download, store, read, save a draft
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Your session has ended. Sign in again." }, { status: 401 });
-  if (user.role !== "admin") return NextResponse.json({ error: "Only an admin can import bills." }, { status: 403 });
+  if (!can(user, "finance.import:create")) return NextResponse.json({ error: "You do not have permission to import bills." }, { status: 403 });
   const limited = rateLimit(`drive-receipts:${user.id}`, 40, 60_000);
   if (!limited.ok) {
     return NextResponse.json(

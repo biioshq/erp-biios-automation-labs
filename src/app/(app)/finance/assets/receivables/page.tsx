@@ -8,7 +8,8 @@ import { Money } from "@/components/shared/money";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatDate, formatNumber } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 import { getReceivables } from "@/features/finance/assets/receivables/queries";
 import { ReceivablesTable } from "@/features/finance/assets/receivables/components/receivables-table";
 import { OverpaidInvoices } from "@/features/finance/assets/receivables/components/overpaid-invoices";
@@ -18,6 +19,7 @@ export const metadata: Metadata = { title: "Receivables" };
 export default async function ReceivablesPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
+  if (!can(user, "finance.receivables:view")) return <NoAccess title="Accounts receivable" eyebrow="Finance · Assets" />;
   const data = await getReceivables();
   const asOf = formatDate(fromDateInput(data.asOf));
   const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`;
@@ -30,16 +32,20 @@ export default async function ReceivablesPage() {
         description={<>What customers still owe on issued invoices on {asOf}. Payments count once the income record is linked to its invoice.</>}
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link href="/finance/invoices">
-                <FileText /> All invoices
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="/finance/invoices?new=1">
-                <Plus /> New invoice
-              </Link>
-            </Button>
+            {can(user, "finance.invoices:view") ? (
+              <Button variant="outline" asChild>
+                <Link href="/finance/invoices">
+                  <FileText /> All invoices
+                </Link>
+              </Button>
+            ) : null}
+            {can(user, "finance.invoices:create") ? (
+              <Button asChild>
+                <Link href="/finance/invoices?new=1">
+                  <Plus /> New invoice
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -103,8 +109,8 @@ export default async function ReceivablesPage() {
             <OverpaidInvoices rows={data.overpaid} />
           </Section>
 
-          {/* The balance sheet is for admins; members see the invoice figures only. */}
-          {user.role === "admin" && Math.abs(data.sheetReceivables - data.total) >= 0.01 ? (
+          {/* A balance sheet figure: it needs the financial position permission (members see the invoice figures only). */}
+          {can(user, "data.financial_position") && Math.abs(data.sheetReceivables - data.total) >= 0.01 ? (
             <Section title="On the balance sheet" contentClassName="space-y-2 text-sm">
               <Money value={data.sheetReceivables} className="text-xl font-semibold" />
               <p className="flex gap-2 text-xs text-muted-foreground">

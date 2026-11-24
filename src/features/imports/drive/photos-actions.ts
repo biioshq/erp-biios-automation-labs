@@ -5,11 +5,11 @@ import { defineAction } from "@/server/action";
 import { objectId } from "@/lib/zod";
 import { importDrivePhoto, planDrivePhotos } from "./photos-server";
 
-/** Lists a shared Drive folder's images and their matching items, for review. Admin-only, writes nothing. */
+/** Lists a shared Drive folder's images and their matching items, for review. Writes nothing. Item photos belong to Inventory import. */
 export const listDrivePhotos = defineAction(
   z.object({ link: z.string().trim().min(1, "Paste a Google Drive folder link").max(2000) }),
   async ({ link }) => planDrivePhotos(link),
-  { role: "admin", readOnly: true },
+  { permission: "inventory.import:create", readOnly: true },
 );
 
 /** Imports one reviewed Drive image as an item's photo. One file per request keeps each call short. */
@@ -22,5 +22,5 @@ export const addDrivePhoto = defineAction(
   }),
   async (input, user) => importDrivePhoto(input, user.id),
   // The import screen refreshes once at the end instead of after every file.
-  { role: "admin" },
+  { permission: "inventory.import:create" },
 );

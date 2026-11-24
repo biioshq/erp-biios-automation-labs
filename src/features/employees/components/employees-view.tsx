@@ -14,7 +14,7 @@ import { FacetedFilter } from "@/components/data-table/faceted-filter";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { DEPARTMENTS, EMPLOYEE_STATUSES, EMPLOYMENT_TYPES } from "@/lib/constants";
 import { dateOrNotSet } from "../format";
 import { emitDataChanged } from "@/lib/events";
@@ -50,7 +50,9 @@ function ProjectChips({ projects }: { projects: EmployeeRow["projects"] }) {
 /** The employees list: toolbar, cards or table, and the create / edit drawer. */
 export function EmployeesView({ rows, users, hasAny }: { rows: EmployeeRow[]; users: UserLinkOption[]; hasAny: boolean }) {
   const router = useRouter();
-  const isAdmin = useIsAdmin();
+  const canDelete = useCan("finance.employees:delete");
+  const canEdit = useCan("finance.employees:edit");
+  const seesSalaries = useCan("data.salaries");
   const url = useTableUrl();
   const layout = url.get("layout") === "table" ? "table" : "cards";
   const [people, removePerson] = useOptimistic(rows, (state, id: string) => state.filter((r) => r.id !== id));
@@ -95,12 +97,14 @@ export function EmployeesView({ rows, users, hasAny }: { rows: EmployeeRow[]; us
             <UserRound /> View profile
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href={`?edit=${row.id}`} scroll={false}>
-            <Pencil /> Edit
-          </Link>
-        </DropdownMenuItem>
-        {isAdmin ? (
+        {canEdit ? (
+          <DropdownMenuItem asChild>
+            <Link href={`?edit=${row.id}`} scroll={false}>
+              <Pencil /> Edit
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
+        {canDelete ? (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(row)}>
@@ -165,7 +169,7 @@ export function EmployeesView({ rows, users, hasAny }: { rows: EmployeeRow[]; us
         header: ({ column }) => <DataTableColumnHeader column={column} title="Allocation" />,
         cell: ({ row }) => <AllocationBar value={row.original.allocationTotal} className="w-28" />,
       },
-      ...(isAdmin
+      ...(seesSalaries
         ? ([
             {
               id: "monthlySalary",
@@ -197,7 +201,7 @@ export function EmployeesView({ rows, users, hasAny }: { rows: EmployeeRow[]; us
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isAdmin],
+    [canDelete, canEdit, seesSalaries],
   );
 
   const addButton = (

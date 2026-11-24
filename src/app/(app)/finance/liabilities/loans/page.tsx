@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { formatNumber } from "@/lib/format";
 import { parseListParams, type SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import { getBankAccountOptions } from "@/server/lookups";
 import { accruedCategoryOptions, listLoans, loadLiabilityGroups } from "@/features/finance/liabilities/queries";
 import { LOAN_FILTER_KEYS, LOAN_SORT_KEYS } from "@/features/finance/liabilities/schemas";
@@ -18,7 +18,7 @@ export const metadata: Metadata = { title: "Loans & borrowings" };
 
 export default async function LoansPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Loans & borrowings" />;
+  if (!can(user, "finance.liabilities:view")) return <NoAccess title="Loans & borrowings" />;
   const params = parseListParams(await searchParams, { filterKeys: LOAN_FILTER_KEYS, sortable: LOAN_SORT_KEYS, defaultSort: { id: "date", desc: true } });
   const [data, groups, accounts, categories] = await Promise.all([listLoans(params), loadLiabilityGroups(), getBankAccountOptions(), accruedCategoryOptions()]);
   const s = data.summary;
@@ -39,11 +39,13 @@ export default async function LoansPage({ searchParams }: { searchParams: Promis
           </>
         }
         actions={
-          <Button asChild>
-            <Link href="?new=1" scroll={false}>
-              <Plus /> Add loan
-            </Link>
-          </Button>
+          can(user, "finance.liabilities:create") ? (
+            <Button asChild>
+              <Link href="?new=1" scroll={false}>
+                <Plus /> Add loan
+              </Link>
+            </Button>
+          ) : undefined
         }
       />
       <StatGrid>

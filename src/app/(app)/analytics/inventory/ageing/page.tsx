@@ -8,7 +8,10 @@ import { Money } from "@/components/shared/money";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatCompactCurrency, formatPercent } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { DEFAULT_AGE_EDGES, ageEdgesParam } from "@/features/analytics/inventory/params";
 import { getAgeing } from "@/features/analytics/inventory/ageing-queries";
 import { AgeEdgesInput } from "@/features/analytics/inventory/components/controls";
@@ -20,7 +23,10 @@ export const metadata: Metadata = { title: "Inventory ageing" };
 
 export default async function AgeingPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.inventory)) return <NoAccess eyebrow="Analytics & Planning" title="Inventory ageing" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const edges = ageEdgesParam(await searchParams);
   const isDefault = edges.join(",") === DEFAULT_AGE_EDGES.join(",");
   const data = await getAgeing(edges);
@@ -35,11 +41,13 @@ export default async function AgeingPage({ searchParams }: { searchParams: Promi
         title="Inventory ageing"
         description="How long the stock in storage has been held, by the dates it was purchased, with its value in each age band."
         actions={
-          <Button asChild variant="outline">
-            <Link href="/analytics/inventory/velocity">
-              <Boxes /> Fast and slow moving
-            </Link>
-          </Button>
+          open("/analytics/inventory/velocity") ? (
+            <Button asChild variant="outline">
+              <Link href="/analytics/inventory/velocity">
+                <Boxes /> Fast and slow moving
+              </Link>
+            </Button>
+          ) : null
         }
       />
       <AgeEdgesInput key={edges.join(",")} edges={edges} isDefault={isDefault} />

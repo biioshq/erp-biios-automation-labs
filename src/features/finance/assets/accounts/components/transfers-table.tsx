@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { formatDate } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import { emitDataChanged } from "@/lib/events";
+import { useCan } from "@/components/current-user";
 import { deleteTransfer } from "../actions";
 import type { TransferRow } from "../types";
 import { bankLineHref } from "@/features/finance/bank-statements/line-href";
@@ -28,9 +29,10 @@ function Route({ row }: { row: TransferRow }) {
   );
 }
 
-/** Transfers between own accounts, with an admin delete (confirmed). */
+/** Transfers between own accounts, with a confirmed delete for people with Cash & bank delete. */
 export function TransfersTable({ rows, canAdd }: { rows: TransferRow[]; canAdd: boolean }) {
   const [deleting, setDeleting] = useState<TransferRow | null>(null);
+  const canDelete = useCan("finance.cash_bank:delete");
 
   async function remove(row: TransferRow) {
     const result = await deleteTransfer({ id: row.id });
@@ -92,14 +94,14 @@ export function TransfersTable({ rows, canAdd }: { rows: TransferRow[]; canAdd: 
                 </Tooltip>
               ))}
             </span>
-          ) : (
+          ) : canDelete ? (
             <Button variant="ghost" size="icon-sm" aria-label="Delete transfer" onClick={() => setDeleting(row.original)}>
               <Trash2 />
             </Button>
-          ),
+          ) : null,
       },
     ],
-    [],
+    [canDelete],
   );
 
   return (
@@ -133,11 +135,11 @@ export function TransfersTable({ rows, canAdd }: { rows: TransferRow[]; canAdd: 
                     </Link>
                   ))}
                 </span>
-              ) : (
+              ) : canDelete ? (
                 <Button variant="ghost" size="icon-sm" className="-my-1 shrink-0" aria-label="Delete transfer" onClick={() => setDeleting(r)}>
                   <Trash2 />
                 </Button>
-              )}
+              ) : null}
             </div>
           </div>
         )}

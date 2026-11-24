@@ -6,7 +6,8 @@ import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 import { formatDate } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import type { SearchParams } from "@/lib/list-params";
@@ -20,7 +21,8 @@ export const metadata: Metadata = { title: "Depreciation summary" };
 const CHARGE_LABEL = { all: "Charged in period", tangible: "Depreciation in period", intangible: "Amortisation in period" } as const;
 
 export default async function DepreciationPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.fixed_assets:view")) return <NoAccess title="Depreciation summary" eyebrow="Finance · Assets" />;
   const sp = await searchParams;
   const period = parseDepreciationPeriod(sp);
   const kind = parseKind(sp.kind);
@@ -101,9 +103,11 @@ export default async function DepreciationPage({ searchParams }: { searchParams:
           title="No assets in this period"
           description="Nothing was held or charged between these dates. Add assets with their useful life on the Fixed assets or Intangible assets page to see their depreciation here."
           action={
-            <Button asChild>
-              <Link href="/finance/assets/fixed?new=1">Add a fixed asset</Link>
-            </Button>
+            can(user, "finance.fixed_assets:create") ? (
+              <Button asChild>
+                <Link href="/finance/assets/fixed?new=1">Add a fixed asset</Link>
+              </Button>
+            ) : undefined
           }
         />
       )}

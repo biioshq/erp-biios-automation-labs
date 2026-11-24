@@ -10,7 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { ComboboxField, DateField, FormSection, NumberField, SelectField, TextareaField, TextField } from "@/components/forms/fields";
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { applyFieldErrors } from "@/lib/action-result";
 import { DEPARTMENTS, EMPLOYEE_STATUSES, EMPLOYMENT_TYPES } from "@/lib/constants";
 import { toDateInput } from "@/lib/dates";
@@ -39,7 +39,7 @@ function defaultsFrom(employee?: EmployeeDetail | null): EmployeeFormInput {
   };
 }
 
-/** Create or edit an employee. Salary controls only render for admins; the server ignores them for members. */
+/** Create or edit an employee. Salary controls render only with the salaries data permission; the server ignores them otherwise. */
 export function EmployeeForm({
   employee,
   users,
@@ -52,7 +52,7 @@ export function EmployeeForm({
   onCancel: () => void;
 }) {
   const isEdit = Boolean(employee);
-  const isAdmin = useIsAdmin();
+  const seesSalaries = useCan("data.salaries");
   const [pending, startTransition] = useTransition();
   const form = useForm<EmployeeFormInput, unknown, EmployeeFormValues>({
     resolver: zodResolver(employeeFormSchema),
@@ -127,8 +127,8 @@ export function EmployeeForm({
             </div>
           </FormSection>
 
-          {isAdmin ? (
-            <FormSection title="Salary" icon={<Wallet />} description="Only admins can see and change this.">
+          {seesSalaries ? (
+            <FormSection title="Salary" icon={<Wallet />} description="Only people who may see individual salaries can see and change this.">
               <div className="grid gap-4">
                 <NumberField control={control} name="monthlySalary" label="Monthly salary" currency placeholder="0" description="Cost to company per month." />
                 <Controller

@@ -322,6 +322,8 @@ function previewAssign(item: LedgerItem, quantity: number, impact: ProjectImpact
     spentAfter: round2(spent + cost),
     stageSpent: stage ? (impact?.byStage[stage] ?? 0) : 0,
     salariesHidden: impact?.salariesHidden ?? false,
+    // No figures come back for people who may not see project budgets and spend.
+    hasImpact: impact !== null,
     remainingBefore,
     remainingAfter,
     hasBudget: budget > 0,
@@ -358,7 +360,7 @@ function ImpactPanel({
         {hasProject ? (
           loading ? (
             <p className="py-2 text-sm text-muted-foreground">Loading project budget…</p>
-          ) : (
+          ) : !preview.hasImpact ? null : (
             <>
               <ImpactRow
                 label={`${projectName} spend${stage ? ` (${labelOf(PROJECT_STAGES, stage)})` : ""}`}
@@ -378,7 +380,7 @@ function ImpactPanel({
                 <p className="py-2 text-sm text-muted-foreground">This project has no budget set.</p>
               )}
               {preview.salariesHidden ? (
-                <p className="py-2 text-xs text-muted-foreground">Spend excludes salaries, which only admins can see.</p>
+                <p className="py-2 text-xs text-muted-foreground">Spend excludes salaries, which your role cannot see.</p>
               ) : null}
             </>
           )

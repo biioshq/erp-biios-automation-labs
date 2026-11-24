@@ -17,6 +17,7 @@ import { RecordPaymentButton } from "@/features/finance/expenses/components/reco
 import { DUE_BUCKETS } from "../schemas";
 import type { BillPaymentRow, PayableListRow } from "../types";
 import { BillStatusBadge } from "./liability-badges";
+import { useCan } from "@/components/current-user";
 
 type VendorRow = { vendor: string; outstanding: number; bills: number; overdue: number };
 
@@ -25,6 +26,9 @@ const expenseHref = (id: string) => `/finance/expenses?view=${id}`;
 /** Unpaid and part-paid bills, with a payment button on each, as a URL-filtered table. */
 export function PayablesTable({ data, vendors, accounts }: { data: Paginated<PayableListRow>; vendors: string[]; accounts: BankAccountOption[] }) {
   const router = useRouter();
+  // These only hide controls: recording a payment checks the same permission on the server.
+  const canPay = useCan("finance.payments:create");
+  const canSeeExpenses = useCan("finance.expenses:view");
   const columns = useMemo<ColumnDef<PayableListRow>[]>(
     () => [
       {
@@ -92,20 +96,21 @@ export function PayablesTable({ data, vendors, accounts }: { data: Paginated<Pay
         header: () => <span className="sr-only">Pay</span>,
         enableHiding: false,
         enableSorting: false,
-        cell: ({ row }) => (
-          <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-            <RecordPaymentButton
-              expense={{ id: row.original.id, number: row.original.number, vendor: row.original.vendor, outstanding: row.original.outstanding }}
-              accounts={accounts}
-              variant="outline"
-              size="sm"
-              label="Record payment"
-            />
-          </div>
-        ),
+        cell: ({ row }) =>
+          canPay ? (
+            <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+              <RecordPaymentButton
+                expense={{ id: row.original.id, number: row.original.number, vendor: row.original.vendor, outstanding: row.original.outstanding }}
+                accounts={accounts}
+                variant="outline"
+                size="sm"
+                label="Record payment"
+              />
+            </div>
+          ) : null,
       },
     ],
-    [accounts],
+    [accounts, canPay],
   );
 
   const filters: FilterDef[] = useMemo(
@@ -144,9 +149,11 @@ export function PayablesTable({ data, vendors, accounts }: { data: Paginated<Pay
             <BillStatusBadge status={r.status} className="h-5 px-2 text-[11px]" />
             {r.dueDate ? <span>Due {formatDate(r.dueDate)}</span> : null}
             {/* The dialog renders in a portal, but its clicks still bubble to this card through React. */}
-            <div onClick={(e) => e.stopPropagation()}>
-              <RecordPaymentButton expense={{ id: r.id, number: r.number, vendor: r.vendor, outstanding: r.outstanding }} accounts={accounts} variant="outline" size="sm" label="Pay" />
-            </div>
+            {canPay ? (
+              <div onClick={(e) => e.stopPropagation()}>
+                <RecordPaymentButton expense={{ id: r.id, number: r.number, vendor: r.vendor, outstanding: r.outstanding }} accounts={accounts} variant="outline" size="sm" label="Pay" />
+              </div>
+            ) : null}
           </div>
         </div>
       )}
@@ -156,9 +163,11 @@ export function PayablesTable({ data, vendors, accounts }: { data: Paginated<Pay
           title="Nothing owed to suppliers"
           description="Every expense is paid. Expenses saved as On credit, or paid in part, show here until they are paid in full."
           action={
-            <Button asChild variant="outline">
-              <Link href="/finance/expenses">Go to expenses</Link>
-            </Button>
+            canSeeExpenses ? (
+              <Button asChild variant="outline">
+                <Link href="/finance/expenses">Go to expenses</Link>
+              </Button>
+            ) : undefined
           }
         />
       }

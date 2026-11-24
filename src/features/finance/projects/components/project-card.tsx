@@ -21,8 +21,9 @@ export function ProjectCard({
 }: {
   project: ProjectFinanceRow;
   index: number;
-  onEdit: () => void;
-  /** Omit for non-admins: the delete item is then hidden. */
+  /** Omit without the projects edit permission: the edit item is then hidden. */
+  onEdit?: () => void;
+  /** Omit without the projects delete permission: the delete item is then hidden. */
   onDelete?: () => void;
 }) {
   const tone = budgetTone(project.usage, project.budget);
@@ -64,9 +65,11 @@ export function ProjectCard({
                     <Eye /> Open
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={onEdit}>
-                  <Pencil /> Edit
-                </DropdownMenuItem>
+                {onEdit ? (
+                  <DropdownMenuItem onSelect={onEdit}>
+                    <Pencil /> Edit
+                  </DropdownMenuItem>
+                ) : null}
                 {onDelete ? (
                   <>
                     <DropdownMenuSeparator />

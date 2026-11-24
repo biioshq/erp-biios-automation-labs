@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Page, PageHeader } from "@/components/shared/page";
 import { SCENARIO_TYPES, labelOf } from "@/lib/constants";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { analyticsViewer } from "@/features/analytics/viewer";
 import { getScenarioDetail, getScenarioFormOptions } from "@/features/analytics/scenarios/queries";
 import { ScenarioForm } from "@/features/analytics/scenarios/components/form/scenario-form";
 
@@ -11,7 +14,8 @@ export const metadata: Metadata = { title: "Edit scenario" };
 export default async function EditScenarioPage({ params }: { params: Promise<{ id: string }> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  const viewer = { admin: user.role === "admin" };
+  if (!can(user, ANALYTICS.scenarios.edit)) return <NoAccess eyebrow="Analytics & Planning" title="Edit scenario" />;
+  const viewer = analyticsViewer(user);
   const { id } = await params;
   const [scenario, options] = await Promise.all([getScenarioDetail(id, viewer), getScenarioFormOptions(viewer)]);
   if (!scenario) notFound();
@@ -28,7 +32,7 @@ export default async function EditScenarioPage({ params }: { params: Promise<{ i
       <ScenarioForm
         type={scenario.type}
         options={options}
-        isAdmin={viewer.admin}
+        seesSalaries={viewer.salaries}
         initial={{ id: scenario.id, name: scenario.name, description: scenario.description, assumptions: scenario.assumptions, inputs: scenario.inputs, updatedAt: scenario.updatedAt }}
       />
     </Page>

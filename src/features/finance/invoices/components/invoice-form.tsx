@@ -15,7 +15,7 @@ import { ComboboxField, DateField, FormSection, NumberField, TextField, Textarea
 import { formValidation } from "@/components/forms/form-options";
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { applyFieldErrors } from "@/lib/action-result";
 import { toDateInput } from "@/lib/dates";
 import { emitDataChanged } from "@/lib/events";
@@ -93,7 +93,7 @@ export function InvoiceForm({
   onCancel: () => void;
 }) {
   const isEdit = Boolean(invoice);
-  const isAdmin = useIsAdmin();
+  const canDelete = useCan("finance.invoices:delete");
   const [pending, startTransition] = useTransition();
   const [file, setFile] = useState<FileDTO | null>(invoice?.file ?? null);
   // Once the person sets the supply type themselves, a typed GSTIN no longer changes it.
@@ -338,8 +338,8 @@ export function InvoiceForm({
 
         <FormSection title="Invoice file" description={`The invoice as sent, PDF or image up to ${MAX_UPLOAD_LABEL}.`} icon={<Paperclip />}>
           {file ? (
-            // Removing a saved file deletes it, which only admins may do.
-            <FileTile file={file} onRemove={isAdmin || file.id !== invoice?.file?.id ? removeFile : undefined} />
+            // Removing a saved file deletes it, which needs the delete permission.
+            <FileTile file={file} onRemove={canDelete || file.id !== invoice?.file?.id ? removeFile : undefined} />
           ) : (
             <FileDropzone
               meta={{ kind: "attachment" }}

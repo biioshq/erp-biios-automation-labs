@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
+import { ANALYTICS } from "@/features/analytics/links";
+import { analyticsViewer } from "@/features/analytics/viewer";
 import { renderPdf } from "@/features/reports/server/render-pdf";
 import { renderXlsx } from "@/features/reports/server/render-xlsx";
 import { getComparison } from "@/features/analytics/scenarios/queries";
@@ -18,13 +20,16 @@ const CONTENT_TYPES = {
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!can(user, ANALYTICS.compare.view) || !can(user, ANALYTICS.compare.export) || !can(user, ANALYTICS.scenarios.view)) {
+    return NextResponse.json({ error: "You do not have permission to do this." }, { status: 403 });
+  }
   const sp = request.nextUrl.searchParams;
   const format = sp.get("format") === "pdf" ? "pdf" : "xlsx";
   const ids = (sp.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!ids.length) return NextResponse.json({ error: "Pick at least one scenario." }, { status: 400 });
 
   try {
-    const data = await getComparison(ids, sp.get("basis") === "saved" ? "saved" : "today", { admin: user.role === "admin" });
+    const data = await getComparison(ids, sp.get("basis") === "saved" ? "saved" : "today", analyticsViewer(user));
     if (!data.columns.length) return NextResponse.json({ error: "None of those scenarios exists." }, { status: 404 });
     const report = comparisonReport(data.columns, data.rows);
     const body = format === "pdf" ? renderPdf(report) : await renderXlsx(report);

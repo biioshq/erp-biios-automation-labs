@@ -47,7 +47,7 @@ export const createProject = defineAction(
     const created = await Project.create({ ...toDocument(input), code, createdBy: new Types.ObjectId(user.id) });
     return { id: String(created._id), code };
   },
-  { revalidate: REVALIDATE, message: "Project created" },
+  { revalidate: REVALIDATE, message: "Project created", permission: "finance.projects:create" },
 );
 
 /**
@@ -91,7 +91,7 @@ export const updateProject = defineAction(
     }
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Project updated" },
+  { revalidate: REVALIDATE, message: "Project updated", permission: "finance.projects:edit" },
 );
 
 export const setProjectStatus = defineAction(
@@ -101,7 +101,7 @@ export const setProjectStatus = defineAction(
     if (!result.matchedCount) throw notFound("The project");
     return { id, status };
   },
-  { revalidate: REVALIDATE, message: "Status updated" },
+  { revalidate: REVALIDATE, message: "Status updated", permission: "finance.projects:edit" },
 );
 
 /** Deletes a project that nothing refers to. Its uploaded documents and its team list go with it. */
@@ -152,7 +152,7 @@ export const deleteProject = defineAction(
     for (const f of files) await removeFile(String(f._id));
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Project deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Project deleted", permission: "finance.projects:delete" },
 );
 
 async function projectDocument(projectId: string, fileId: string) {
@@ -168,7 +168,7 @@ export const removeProjectDocument = defineAction(
     await removeFile(fileId);
     return { fileId };
   },
-  { revalidate: REVALIDATE, message: "Document deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Document deleted", permission: "finance.projects:delete" },
 );
 
 export const setProjectDocumentType = defineAction(
@@ -178,5 +178,5 @@ export const setProjectDocumentType = defineAction(
     await FileModel.updateOne({ _id: fileId }, { $set: { documentType } });
     return { fileId, documentType };
   },
-  { revalidate: REVALIDATE, message: "Document type changed" },
+  { revalidate: REVALIDATE, message: "Document type changed", permission: "finance.projects:edit" },
 );

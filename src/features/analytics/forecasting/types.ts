@@ -221,7 +221,7 @@ export type PersonLoad = {
   /** Highest allocation % at any one time from now to the end of the timeline (current work included). */
   peak: number;
   projects: { id: string; name: string; role: string; allocation: number; upcoming: boolean }[];
-  /** Admins only: monthly cost of the allocation above 100%, at this person's pay. Missing for members. */
+  /** Only for people who see salaries: monthly cost of the allocation above 100%, at this person's pay. Missing otherwise. */
   excessMonthlyCost?: number;
 };
 

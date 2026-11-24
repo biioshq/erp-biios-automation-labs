@@ -3,7 +3,8 @@ import { Page, PageHeader } from "@/components/shared/page";
 import { getLedgerItems, getLedgerProjects, getRecentOperations } from "@/features/inventory/ledger/queries";
 import { AssignView } from "@/features/inventory/ledger/components/assign-view";
 import { RecentOperations } from "@/features/inventory/ledger/components/recent-operations";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 
 export const metadata: Metadata = { title: "Assign to Project" };
 
@@ -11,7 +12,8 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function AssignStockPage({ searchParams }: PageProps<"/inventory/assign">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "inventory.movement:view")) return <NoAccess eyebrow="Inventory" title="Assign to project" />;
   const sp = await searchParams;
   const [items, projects, recent] = await Promise.all([getLedgerItems(), getLedgerProjects(), getRecentOperations("assign")]);
 

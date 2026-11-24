@@ -23,7 +23,8 @@ import { formatDate, formatNumber } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 import { getInventoryValuation } from "@/features/finance/assets/inventory/queries";
 import { StockTables } from "@/features/finance/assets/inventory/components/stock-tables";
 import { PeriodItemsTable, PeriodPicker } from "@/features/finance/assets/inventory/components/period-items-table";
@@ -63,12 +64,19 @@ function FlowRow({ label, sign, flow, strong, hint }: { label: string; sign?: "+
 
 export default async function InventoryValuationPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.inventory_valuation:view")) return <NoAccess title="Inventory valuation" eyebrow="Finance · Assets" />;
   const params = await searchParams;
   const data = await getInventoryValuation(isDay(one(params.from)), isDay(one(params.to)));
   const { storage, inUse, wasted, period, alerts } = data;
   const held = storage.value + inUse.value;
   const bookGap = Math.round((data.bookValue - storage.value) * 100) / 100;
+  // Links into Inventory and Projects show only for people who can open them.
+  const canStockIn = can(user, "inventory.purchase:create");
+  const canMove = can(user, "inventory.movement:create");
+  const canLowStock = can(user, "inventory.low_stock:view");
+  const canItems = can(user, "inventory.items:view");
+  const canProjects = can(user, "finance.projects:view");
   const empty = storage.items === 0 && inUse.rows.length === 0 && wasted.rows.length === 0;
 
   return (
@@ -79,36 +87,44 @@ export default async function InventoryValuationPage({ searchParams }: { searchP
         description="Stock as an asset: what is in storage, what is in use on projects and what was wasted. Valued at weighted average cost. Stock is entered and moved on the Inventory pages; this page only reads it."
         actions={
           <>
-            <Button asChild>
-              <Link href="/inventory/purchase">
-                <PackagePlus /> Stock in
-              </Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/inventory/assign">
-                <ArrowUpFromLine /> Stock out
-              </Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/inventory/transfer">
-                <ArrowLeftRight /> Transfer
-              </Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/inventory/return">
-                <ArrowDownToLine /> Return
-              </Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/inventory/wastage">
-                <Trash2 /> Record wastage
-              </Link>
-            </Button>
+            {canStockIn ? (
+              <Button asChild>
+                <Link href="/inventory/purchase">
+                  <PackagePlus /> Stock in
+                </Link>
+              </Button>
+            ) : null}
+            {canMove ? (
+              <>
+                <Button variant="outline" asChild>
+                  <Link href="/inventory/assign">
+                    <ArrowUpFromLine /> Stock out
+                  </Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/inventory/transfer">
+                    <ArrowLeftRight /> Transfer
+                  </Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/inventory/return">
+                    <ArrowDownToLine /> Return
+                  </Link>
+                </Button>
+              </>
+            ) : null}
+            {can(user, "inventory.wastage:create") ? (
+              <Button variant="outline" asChild>
+                <Link href="/inventory/wastage">
+                  <Trash2 /> Record wastage
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
 
-      {alerts.length ? (
+      {alerts.length && canLowStock ? (
         <Link
           href="/inventory/low-stock"
           role="status"
@@ -136,11 +152,13 @@ export default async function InventoryValuationPage({ searchParams }: { searchP
           title="No stock recorded yet"
           description="Add items and record purchases in Inventory. Their value, use on projects and wastage then show here."
           action={
-            <Button asChild>
-              <Link href="/inventory/purchase">
-                <PackagePlus /> Stock in
-              </Link>
-            </Button>
+            canStockIn ? (
+              <Button asChild>
+                <Link href="/inventory/purchase">
+                  <PackagePlus /> Stock in
+                </Link>
+              </Button>
+            ) : undefined
           }
         />
       ) : null}
@@ -221,9 +239,11 @@ export default async function InventoryValuationPage({ searchParams }: { searchP
             </>
           ) : null}{" "}
           {formatNumber(period.movementCount)} stock movements in the period.{" "}
-          <Link href="/inventory/movements" className="font-medium text-brand-ink hover:underline">
-            All movements
-          </Link>
+          {can(user, "inventory.movements:view") ? (
+            <Link href="/inventory/movements" className="font-medium text-brand-ink hover:underline">
+              All movements
+            </Link>
+          ) : null}
         </p>
         <PeriodItemsTable rows={data.periodItems} />
       </Section>
@@ -235,7 +255,7 @@ export default async function InventoryValuationPage({ searchParams }: { searchP
               {inUse.projects.map((p) => (
                 <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
                   <div className="min-w-0">
-                    {p.id !== "none" ? (
+                    {p.id !== "none" && canProjects ? (
                       <Link href={`/finance/projects/${p.id}`} className="flex items-center gap-1.5 truncate text-sm font-medium hover:underline">
                         <span className="size-2 shrink-0 rounded-full" style={{ background: p.color }} />
                         {p.name}
@@ -263,9 +283,11 @@ export default async function InventoryValuationPage({ searchParams }: { searchP
           title="Low stock and early alerts"
           description="Out of stock, at or below the minimum level, or running out within the lead time plus a week at the recent rate of use"
           actions={
-            <Link href="/inventory/low-stock" className="text-xs font-medium text-brand-ink hover:underline">
-              Low stock
-            </Link>
+            canLowStock ? (
+              <Link href="/inventory/low-stock" className="text-xs font-medium text-brand-ink hover:underline">
+                Low stock
+              </Link>
+            ) : undefined
           }
           contentClassName="px-4 py-2 sm:px-5"
         >
@@ -274,9 +296,13 @@ export default async function InventoryValuationPage({ searchParams }: { searchP
               {alerts.slice(0, 8).map((a) => (
                 <li key={a.id} className="flex items-start justify-between gap-3 py-2.5">
                   <div className="min-w-0">
-                    <Link href={`/inventory/items/${a.id}`} className="block truncate text-sm font-medium hover:underline">
-                      {a.name}
-                    </Link>
+                    {canItems ? (
+                      <Link href={`/inventory/items/${a.id}`} className="block truncate text-sm font-medium hover:underline">
+                        {a.name}
+                      </Link>
+                    ) : (
+                      <span className="block truncate text-sm font-medium">{a.name}</span>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       {formatNumber(a.available)} available, minimum {formatNumber(a.minStock)}
                       {a.orderBy ? ` · order by ${formatDate(fromDateInput(a.orderBy))}` : ""}
@@ -290,7 +316,7 @@ export default async function InventoryValuationPage({ searchParams }: { searchP
           ) : (
             <EmptyState compact icon={AlertTriangle} title="Nothing to reorder" description="No item is out of stock, at its minimum, or expected to run out within its lead time plus a week." />
           )}
-          {alerts.length > 8 ? (
+          {alerts.length > 8 && canLowStock ? (
             <Link href="/inventory/low-stock" className="mt-1 block py-2 text-xs font-medium text-brand-ink hover:underline">
               {formatNumber(alerts.length - 8)} more on Low stock
             </Link>
@@ -304,9 +330,11 @@ export default async function InventoryValuationPage({ searchParams }: { searchP
           <p className="mt-3 text-xs text-muted-foreground">
             {formatNumber(storage.outOfStock)} {storage.outOfStock === 1 ? "item has" : "items have"} nothing in storage and {storage.outOfStock === 1 ? "is" : "are"} not
             listed.{" "}
-            <Link href="/inventory/items?status=out_of_stock" className="font-medium text-brand-ink hover:underline">
-              Out of stock items
-            </Link>
+            {canItems ? (
+              <Link href="/inventory/items?status=out_of_stock" className="font-medium text-brand-ink hover:underline">
+                Out of stock items
+              </Link>
+            ) : null}
           </p>
         ) : null}
       </Section>

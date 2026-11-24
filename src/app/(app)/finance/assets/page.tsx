@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { formatDate } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import { descendantsOf, loadFinanceGroups } from "@/server/finance-groups";
 import { getAssetsOverview } from "@/features/finance/assets/overview/queries";
 import { AssetLines } from "@/features/finance/assets/overview/components/asset-lines";
@@ -25,12 +25,12 @@ function StatLink({ href, children }: { href: string; children: React.ReactNode 
 }
 
 const PAGES = [
-  { href: "/finance/assets/cash", label: "Cash & bank", icon: Landmark, hint: "Accounts, balances, transfers" },
-  { href: "/finance/assets/receivables", label: "Receivables", icon: HandCoins, hint: "What customers owe on invoices" },
-  { href: "/finance/assets/prepaid", label: "Prepaid expenses", icon: CalendarRange, hint: "Paid in advance, not used yet" },
-  { href: "/finance/assets/inventory", label: "Inventory valuation", icon: Boxes, hint: "Storage, in use, wasted" },
-  { href: "/finance/assets/fixed", label: "Fixed assets", icon: Armchair, hint: "Register and book values" },
-  { href: "/finance/assets/investments", label: "Investments", icon: PiggyBank, hint: "Deposits, funds, shares" },
+  { href: "/finance/assets/cash", label: "Cash & bank", icon: Landmark, hint: "Accounts, balances, transfers", permission: "finance.cash_bank:view" },
+  { href: "/finance/assets/receivables", label: "Receivables", icon: HandCoins, hint: "What customers owe on invoices", permission: "finance.receivables:view" },
+  { href: "/finance/assets/prepaid", label: "Prepaid expenses", icon: CalendarRange, hint: "Paid in advance, not used yet", permission: "finance.prepaid:view" },
+  { href: "/finance/assets/inventory", label: "Inventory valuation", icon: Boxes, hint: "Storage, in use, wasted", permission: "finance.inventory_valuation:view" },
+  { href: "/finance/assets/fixed", label: "Fixed assets", icon: Armchair, hint: "Register and book values", permission: "finance.fixed_assets:view" },
+  { href: "/finance/assets/investments", label: "Investments", icon: PiggyBank, hint: "Deposits, funds, shares", permission: "finance.investments:view" },
 ] as const;
 
 /**
@@ -51,7 +51,7 @@ function subgroupParents(groups: GroupOption[], root: keyof typeof HOLDS_RECORDS
 export default async function AssetsOverviewPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Assets overview" />;
+  if (!can(user, "finance.assets_overview:view")) return <NoAccess title="Assets overview" />;
   const [data, groups] = await Promise.all([getAssetsOverview(), loadFinanceGroups("asset")]);
   const asOf = formatDate(fromDateInput(data.asOf));
 
@@ -62,11 +62,13 @@ export default async function AssetsOverviewPage() {
         title="Assets overview"
         description={<>What the company owns on {asOf}, from the same books as the balance sheet. Each line opens the page that holds its records.</>}
         actions={
-          <Button variant="outline" asChild>
-            <Link href="/finance/reports/balance-sheet">
-              <Scale /> Balance sheet
-            </Link>
-          </Button>
+          can(user, "finance.statements:view") ? (
+            <Button variant="outline" asChild>
+              <Link href="/finance/reports/balance-sheet">
+                <Scale /> Balance sheet
+              </Link>
+            </Button>
+          ) : undefined
         }
       />
 
@@ -121,7 +123,7 @@ export default async function AssetsOverviewPage() {
       </div>
 
       <Section title="Asset pages" description="Records behind each line" contentClassName="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {PAGES.map((p) => (
+        {PAGES.filter((p) => can(user, p.permission)).map((p) => (
           <Link key={p.href} href={p.href} className="flex items-center gap-3 rounded-lg border bg-surface/40 px-3 py-2.5 transition-colors hover:border-foreground/20 hover:bg-muted/40">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/12 text-brand-ink">
               <p.icon className="size-4" />

@@ -5,11 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { formatDate } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import { getAccountHistory, getCashOverview, listTransfers, transferOptions } from "@/features/finance/assets/accounts/queries";
 import { AccountsGrid } from "@/features/finance/assets/accounts/components/accounts-grid";
 import { AccountHistoryPanel } from "@/features/finance/assets/accounts/components/account-history";
@@ -29,7 +29,7 @@ const ROUTE_REASON = {
 export default async function CashAndBankPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Cash & bank" />;
+  if (!can(user, "finance.cash_bank:view")) return <NoAccess title="Cash & bank" />;
 
   const params = await searchParams;
   const overview = await getCashOverview();
@@ -41,6 +41,7 @@ export default async function CashAndBankPage({ searchParams }: { searchParams: 
   ]);
   const transferAccounts = transferOptions(overview.accounts);
   const open = overview.accounts.filter((a) => a.id && !a.archived);
+  const canCreate = can(user, "finance.cash_bank:create");
 
   return (
     <Page>
@@ -54,18 +55,20 @@ export default async function CashAndBankPage({ searchParams }: { searchParams: 
           </>
         }
         actions={
-          <>
-            <Button variant="outline" asChild>
-              <Link href="?transfer=1" scroll={false}>
-                <ArrowLeftRight /> Record transfer
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="?new=1" scroll={false}>
-                <Plus /> Add account
-              </Link>
-            </Button>
-          </>
+          canCreate ? (
+            <>
+              <Button variant="outline" asChild>
+                <Link href="?transfer=1" scroll={false}>
+                  <ArrowLeftRight /> Record transfer
+                </Link>
+              </Button>
+              <Button asChild>
+                <Link href="?new=1" scroll={false}>
+                  <Plus /> Add account
+                </Link>
+              </Button>
+            </>
+          ) : undefined
         }
       />
 
@@ -97,15 +100,21 @@ export default async function CashAndBankPage({ searchParams }: { searchParams: 
         description="Balance today in each bank account and cash box. Archived accounts still count while they hold money."
         actions={
           <div className="flex items-center gap-3 text-xs font-medium">
-            <Link href="/finance/bank-statements" className="text-brand-ink hover:underline">
-              Bank statements
-            </Link>
-            <Link href="/finance/reports/cash-flow" className="text-brand-ink hover:underline">
-              Cash flow
-            </Link>
-            <Link href="/finance/assets" className="text-brand-ink hover:underline">
-              Assets overview
-            </Link>
+            {can(user, "finance.bank_statements:view") ? (
+              <Link href="/finance/bank-statements" className="text-brand-ink hover:underline">
+                Bank statements
+              </Link>
+            ) : null}
+            {can(user, "finance.statements:view") ? (
+              <Link href="/finance/reports/cash-flow" className="text-brand-ink hover:underline">
+                Cash flow
+              </Link>
+            ) : null}
+            {can(user, "finance.assets_overview:view") ? (
+              <Link href="/finance/assets" className="text-brand-ink hover:underline">
+                Assets overview
+              </Link>
+            ) : null}
           </div>
         }
       >
@@ -147,7 +156,7 @@ export default async function CashAndBankPage({ searchParams }: { searchParams: 
         title="Transfers between own accounts"
         description={open.length < 2 ? "Add at least two accounts to record a transfer." : "Neither income nor expense: money leaves one account and arrives in the other on the same day."}
         actions={
-          open.length >= 2 ? (
+          open.length >= 2 && canCreate ? (
             <Button variant="outline" size="sm" asChild>
               <Link href="?transfer=1" scroll={false}>
                 <Plus /> Record transfer
@@ -156,7 +165,7 @@ export default async function CashAndBankPage({ searchParams }: { searchParams: 
           ) : null
         }
       >
-        <TransfersTable rows={transfers.rows} canAdd={open.length >= 2} />
+        <TransfersTable rows={transfers.rows} canAdd={open.length >= 2 && canCreate} />
         {transfers.total > transfers.rows.length ? (
           <p className="mt-3 text-xs text-muted-foreground">Showing the latest {transfers.rows.length} of {transfers.total} transfers. Each account&apos;s transactions above list every one.</p>
         ) : null}

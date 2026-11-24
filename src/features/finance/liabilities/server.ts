@@ -33,8 +33,8 @@ const rupees = (n: number) => formatCurrency(n, { exact: true });
 
 /**
  * A record matched to a bank statement line keeps what the line shows; the statement holds the
- * money movement. The message ends with the line's page, where it can be unmatched (Liabilities
- * are admin-only, like statement lines).
+ * money movement. The message ends with the line's page, where it can be unmatched (by people who
+ * can edit bank statements).
  */
 const bankMatched = (line: Types.ObjectId) =>
   `It is matched to a bank statement line, so its amount, account and existence follow that line.${unmatchHint([String(line)])}`;

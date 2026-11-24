@@ -7,6 +7,7 @@ import { Money } from "@/components/shared/money";
 import { formatDate, formatNumber } from "@/lib/format";
 import { parseListParams, type SearchParams } from "@/lib/list-params";
 import { getBankAccountOptions } from "@/server/lookups";
+import { can, requireUser } from "@/server/auth/session";
 import { AddSubgroupButton } from "@/features/finance/groups/components/add-subgroup-button";
 import { accruedCategoryOptions, groupSections, loadLiabilityGroups } from "../queries";
 import { GROUP_FILTER_KEYS } from "../schemas";
@@ -26,8 +27,9 @@ const COPY: Record<LiabilitySide, { title: string; description: string; other: {
   },
 };
 
-/** The Current or Non-current liabilities page (both routes render this). Admin check is done by the route. */
+/** The Current or Non-current liabilities page (both routes render this). The route checks Liabilities view. */
 export async function LiabilitySidePage({ side, searchParams }: { side: LiabilitySide; searchParams: SearchParams }) {
+  const user = await requireUser();
   const params = parseListParams(searchParams, { filterKeys: GROUP_FILTER_KEYS });
   const [data, groups, accounts, categories] = await Promise.all([groupSections(side, params), loadLiabilityGroups(), getBankAccountOptions(), accruedCategoryOptions()]);
   const copy = COPY[side];
@@ -45,11 +47,13 @@ export async function LiabilitySidePage({ side, searchParams }: { side: Liabilit
         actions={
           <>
             <AddSubgroupButton parents={parents} defaultParent={side} label="Add new subgroup" size="default" />
-            <Button asChild>
-              <Link href={firstEntry ? `?new=1&newGroup=${firstEntry}` : "?new=1"} scroll={false}>
-                <Plus /> Add liability
-              </Link>
-            </Button>
+            {can(user, "finance.liabilities:create") ? (
+              <Button asChild>
+                <Link href={firstEntry ? `?new=1&newGroup=${firstEntry}` : "?new=1"} scroll={false}>
+                  <Plus /> Add liability
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

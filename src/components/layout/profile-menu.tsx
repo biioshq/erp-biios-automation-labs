@@ -40,7 +40,7 @@ export function ProfileMenu() {
               <span className="block truncate text-sm font-medium text-foreground">{user.name}</span>
               <span className="block truncate text-xs text-muted-foreground">{user.email}</span>
               <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                {user.role === "admin" ? "Admin" : "Member"}
+                {user.roleName}
               </span>
               <SignInMethodsLine methods={account.methods} />
             </span>

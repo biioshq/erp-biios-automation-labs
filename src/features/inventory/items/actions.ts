@@ -6,7 +6,7 @@ import { AppError, notFound } from "@/server/errors";
 import { InventoryAllocation, InventoryCategory, InventoryItem, InventoryMovement } from "@/server/models";
 import { adjustStock, recordOpeningStock, roundQty } from "@/server/services/inventory-ledger";
 import { notifyStockLevel } from "@/server/services/notifications";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { connectDB } from "@/server/db";
 import { fromDateInput } from "@/lib/dates";
 import { formatNumber } from "@/lib/format";
@@ -125,7 +125,7 @@ export const createItem = defineAction(
     }
     return { id: String(created._id) };
   },
-  { revalidate: REVALIDATE, message: "Item added" },
+  { permission: "inventory.items:create", revalidate: REVALIDATE, message: "Item added" },
 );
 
 export const updateItem = defineAction(
@@ -189,7 +189,7 @@ export const updateItem = defineAction(
     }
     return { id: input.id, status: getStockStatus(roundQty(existing.available), fields.minStock) };
   },
-  { revalidate: REVALIDATE, message: "Item updated" },
+  { permission: "inventory.items:edit", revalidate: REVALIDATE, message: "Item updated" },
 );
 
 /** Stock below this is float drift from older writes, not real units. */
@@ -206,7 +206,7 @@ async function stockInUse(itemId: Types.ObjectId) {
 
 /**
  * Items with history are archived so their movements and project costs stay
- * traceable. Items that were never used are deleted. Admin-only, like every delete.
+ * traceable. Items that were never used are deleted. Needs the items delete permission.
  *
  * Only an empty item can go: stock still on hand would drop out of the
  * inventory value with no record, so it has to be written off with an
@@ -248,7 +248,7 @@ export const removeItem = defineAction(
     if (item.photoFileId) await removeFile(String(item.photoFileId)).catch(() => undefined);
     return { id, archived: false };
   },
-  { role: "admin", revalidate: REVALIDATE },
+  { permission: "inventory.items:delete", revalidate: REVALIDATE },
 );
 
 export const adjustItemStock = defineAction(
@@ -257,7 +257,7 @@ export const adjustItemStock = defineAction(
     const { item } = await adjustStock({ itemId: input.id, delta: input.delta, reason: input.reason, date: new Date() }, user.id);
     return { id: input.id, available: item.available, status: getStockStatus(item.available, item.minStock) };
   },
-  { revalidate: REVALIDATE, message: "Stock adjusted" },
+  { permission: "inventory.items:edit", revalidate: REVALIDATE, message: "Stock adjusted" },
 );
 
 /** A SKU proposal from the item name and category, made unique against existing SKUs. */
@@ -272,7 +272,7 @@ export const suggestSku = defineAction(suggestSkuSchema, async ({ name, category
     if (!(await InventoryItem.exists({ sku: candidate }))) return { sku: candidate };
   }
   return { sku: base };
-}, { readOnly: true });
+}, { permission: ["inventory.items:create", "inventory.items:edit"], readOnly: true });
 
 /**
  * Duplicate: a name for the new item that no active item has yet, "<name> (copy)" or the first free
@@ -287,7 +287,7 @@ export const suggestCopyName = defineAction(copyNameSchema, async ({ name }) => 
     if (!taken.has(normalizeItemName(candidate))) return { name: candidate };
   }
   return { name: copyName(base, 1) };
-}, { readOnly: true });
+}, { permission: "inventory.items:create", readOnly: true });
 
 const MATCH_ORDER: Record<SimilarItem["match"], number> = { exact: 0, sku: 1, similar: 2 };
 
@@ -310,12 +310,13 @@ export const findSimilarItems = defineAction(
     }
     return found.sort((a, b) => MATCH_ORDER[a.match] - MATCH_ORDER[b.match] || a.name.localeCompare(b.name)).slice(0, 3);
   },
-  { readOnly: true },
+  { permission: ["inventory.items:create", "inventory.items:edit"], readOnly: true },
 );
 
 /** Loads one item for the edit form. */
 export async function fetchItem(id: string): Promise<ItemFormRecord | null> {
-  if (!(await getCurrentUser())) return null;
+  const user = await getCurrentUser();
+  if (!user || !can(user, "inventory.items:view")) return null;
   await connectDB();
   return getItemForm(id);
 }

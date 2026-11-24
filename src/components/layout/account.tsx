@@ -4,14 +4,14 @@ import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { KeyRound, LogOut, Users } from "lucide-react";
+import { KeyRound, LogOut, ShieldCheck, Users } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { authClient, signOut } from "@/lib/auth-client";
 import { initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { CurrentUser } from "@/components/current-user";
+import { useCan, type CurrentUser } from "@/components/current-user";
 
 /** Profile picture (from Google when linked) with initials as the fallback. */
 export function UserAvatar({ user, className }: { user: Pick<CurrentUser, "name" | "image">; className?: string }) {
@@ -70,7 +70,7 @@ export function SignInMethodsLine({ methods }: { methods: SignInMethods }) {
   return <span className="block text-[11px] text-muted-foreground">Signs in with {parts.join(" and ")}</span>;
 }
 
-/** Team members, change password (only for accounts that have one) and log out. */
+/** Team members and roles (for those whose role opens them), change password (only for accounts that have one) and log out. */
 export function AccountMenuItems({
   account,
   onChangePassword,
@@ -80,15 +80,27 @@ export function AccountMenuItems({
 }) {
   // While methods are loading, keep the item; hide it once we know the account has no password (Google only).
   const canChangePassword = account.methods?.password !== false;
+  const canSeeTeam = useCan("settings.team:view");
+  const canSeeRoles = useCan("settings.roles:view");
   return (
     <>
       <DropdownMenuGroup>
-        <DropdownMenuItem asChild>
-          <Link href="/settings/team">
-            <Users />
-            Team members
-          </Link>
-        </DropdownMenuItem>
+        {canSeeTeam ? (
+          <DropdownMenuItem asChild>
+            <Link href="/settings/team">
+              <Users />
+              Team members
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
+        {canSeeRoles ? (
+          <DropdownMenuItem asChild>
+            <Link href="/settings/roles">
+              <ShieldCheck />
+              Roles and permissions
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         {canChangePassword ? (
           <DropdownMenuItem onSelect={onChangePassword}>
             <KeyRound />

@@ -3,7 +3,7 @@ import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import type { ManpowerInputs } from "../schemas";
 import type { ResultTable, ScenarioResults } from "../types";
 import type { ComputeContext, EmployeeFact, MembershipFact, ProjectFact } from "./facts";
-import { budgetImpactTable, compareRow, emptyMetrics, periodMonths, round2, stat } from "./common";
+import { budgetImpactTable, compareRow, emptyMetrics, periodMonths, round2, stat, viewOf } from "./common";
 import { averageSalary, departmentCapacity, personLoads } from "./capacity";
 
 export type ManpowerFacts = {
@@ -51,7 +51,7 @@ export function computeManpower(inputs: ManpowerInputs, facts: ManpowerFacts, ct
   const internal = project ? Math.min(additional, Math.floor(poolFree)) : 0;
   const hiring = Math.max(0, additional - internal);
 
-  const monthly = ctx.admin ? (inputs.monthlyCost ?? (poolDept ? averageSalary(facts.employees, poolDept) : null)) : null;
+  const monthly = ctx.salaries ? (inputs.monthlyCost ?? (poolDept ? averageSalary(facts.employees, poolDept) : null)) : null;
   const overtime = inputs.overtimeHours && inputs.overtimeRate ? round2(inputs.overtimeHours * inputs.overtimeRate * months) : 0;
   const additionalCost = monthly !== null ? round2(additional * monthly * months + overtime) : overtime || null;
   const hiringCost = monthly !== null ? round2(hiring * monthly * months) : null;
@@ -152,7 +152,7 @@ export function computeManpower(inputs: ManpowerInputs, facts: ManpowerFacts, ct
       ? "People already on the team count once each, whatever share of their time they give it. Others can join without hiring only up to their free time, in whole people."
       : "A department's headcount is its active people. More heads there means hiring, since its free time is already its own people's.",
   ];
-  if (ctx.admin) {
+  if (ctx.salaries) {
     notes.push(
       inputs.monthlyCost !== undefined
         ? `Costed at ${formatCurrency(inputs.monthlyCost)} a person a month, as entered.`
@@ -160,7 +160,7 @@ export function computeManpower(inputs: ManpowerInputs, facts: ManpowerFacts, ct
           ? `Costed at the department's average monthly salary, ${formatCurrency(monthly)}.`
           : "No monthly cost was entered, so salary costs are not estimated.",
     );
-  } else notes.push("Salary figures are shown to admins only.");
+  } else notes.push("Salary figures are left out: your role does not show salaries.");
   if (overtime) notes.push(`Overtime: ${formatNumber(inputs.overtimeHours ?? 0)} hours a month for the team at ${formatCurrency(inputs.overtimeRate ?? 0)} an hour.`);
 
   const comparison = [
@@ -174,7 +174,7 @@ export function computeManpower(inputs: ManpowerInputs, facts: ManpowerFacts, ct
     version: 1,
     type: "manpower",
     computedAt: new Date().toISOString(),
-    view: ctx.admin ? "admin" : "member",
+    view: viewOf(ctx),
     headline: `${scopeName} needs ${required} ${required === 1 ? "person" : "people"}${inputs.role ? ` (${inputs.role})` : ""} and has ${current}. ${
       additional > 0
         ? `${additional} more: ${internal ? `${internal} could come from people with free time, ` : ""}${hiring} to hire.`
@@ -189,7 +189,7 @@ export function computeManpower(inputs: ManpowerInputs, facts: ManpowerFacts, ct
         tone: hiring > 0 ? "danger" : "success",
         hint: [project ? `${formatNumber(poolFree)} FTE free elsewhere` : null, hiringCost ? `hires cost ${formatCurrency(hiringCost)}` : null].filter(Boolean).join(", ") || undefined,
       }),
-      stat("cost", "Estimated additional cost", "money", additionalCost, { hint: monthly === null && !overtime ? (ctx.admin ? "enter a monthly cost" : "admins only") : undefined }),
+      stat("cost", "Estimated additional cost", "money", additionalCost, { hint: monthly === null && !overtime ? (ctx.salaries ? "enter a monthly cost" : "salaries not shown") : undefined }),
     ],
     comparison,
     tables,

@@ -23,7 +23,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { SPEND_TYPES } from "@/lib/project-cost-types";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { analyticsViewer, userCanOpen } from "@/features/analytics/viewer";
 import { getAnalyticsDashboard } from "@/features/analytics/dashboard/queries";
 import { RULES } from "@/features/analytics/dashboard/rules";
 import { DetailsLink, Footnote, InsightCard, RuleList } from "@/features/analytics/dashboard/components/bits";
@@ -46,8 +49,10 @@ const COST_SERIES: ChartSeries[] = SPEND_TYPES.map((t) => ({ key: t.key, label: 
 export default async function AnalyticsDashboardPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  const isAdmin = user.role === "admin";
-  const data = await getAnalyticsDashboard({ isAdmin });
+  if (!can(user, ANALYTICS.dashboard)) return <NoAccess eyebrow="Analytics & Planning" title="Analytics dashboard" />;
+  const data = await getAnalyticsDashboard({ salaries: analyticsViewer(user).salaries });
+  // A card or chart shows only when its page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const c = data.cards;
 
   const hasConsumption = data.months.some((m) => m.consumed > 0 || m.wasted > 0);
@@ -65,250 +70,286 @@ export default async function AnalyticsDashboardPage() {
         description="Risks and trends across stock, projects, equipment and people, from what is recorded in the ERP. Open any card or chart for the details behind it."
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/analytics/insights">
-                <Lightbulb /> Management insights
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="/analytics/scenarios/new">
-                <FlaskConical /> New what-if scenario
-              </Link>
-            </Button>
+            {open("/analytics/insights") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/insights">
+                  <Lightbulb /> Management insights
+                </Link>
+              </Button>
+            ) : null}
+            {open("/analytics/scenarios/new") ? (
+              <Button asChild>
+                <Link href="/analytics/scenarios/new">
+                  <FlaskConical /> New what-if scenario
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
 
       <StatGrid>
-        <InsightCard
-          href="/analytics/inventory/shortages"
-          label="Inventory shortage risks"
-          value={formatNumber(c.shortages.count)}
-          icon={CircleAlert}
-          tone={c.shortages.count > 0 ? "danger" : "success"}
-          hint={c.shortages.count > 0 ? `${formatNumber(c.shortages.out)} out, ${formatNumber(c.shortages.belowMin)} below minimum, ${formatNumber(c.shortages.runsOut)} running out` : "No item at risk"}
-        />
-        <InsightCard
-          href="/analytics/forecasting/purchases"
-          label="Purchases for the next 30 days"
-          value={plural(c.purchases.count, "item")}
-          icon={PackagePlus}
-          tone={c.purchases.count > 0 ? "warning" : "default"}
-          hint={
-            c.purchases.count > 0 ? (
-              <>
-                About <Money value={c.purchases.cost} compact /> at recent prices
-                {c.purchases.unknownCost > 0 ? `, ${formatNumber(c.purchases.unknownCost)} without a price` : ""}
-              </>
-            ) : (
-              "Nothing to order yet"
-            )
-          }
-        />
-        <InsightCard
-          href="/analytics/forecasting/projects"
-          label="Predicted cost overruns"
-          value={plural(c.overruns.count, "project")}
-          icon={TriangleAlert}
-          tone={c.overruns.count > 0 ? "danger" : "default"}
-          hint={
-            c.overruns.count > 0 ? (
-              <>
-                <Money value={c.overruns.amount} compact /> above budget, by the forecast or already
-              </>
-            ) : c.overruns.budgeted > 0 ? (
-              `${plural(c.overruns.rated, "open project")} forecast by spend rate${c.overruns.spendToDate ? `, ${formatNumber(c.overruns.spendToDate)} at spend to date` : ""}${c.overruns.noForecast ? `, ${formatNumber(c.overruns.noForecast)} without a forecast` : ""}`
-            ) : (
-              "No open project has a budget"
-            )
-          }
-        />
-        <InsightCard
-          href="/analytics/projects/performance"
-          label="Projects at risk of delay"
-          value={plural(c.delays.count, "project")}
-          icon={CalendarClock}
-          tone={c.delays.count > 0 ? "warning" : "success"}
-          hint={`${plural(c.delays.overdueTasks, "overdue task")}, ${formatNumber(c.delays.pastEnd)} past end date`}
-        />
-        <InsightCard
-          href="/analytics/projects/budget?status=active"
-          label="Budget used (active projects with a budget)"
-          value={c.budget.usage === null ? "No budgets" : formatPercent(c.budget.usage)}
-          icon={Gauge}
-          tone={c.budget.usage !== null && c.budget.usage > 1 ? "danger" : c.budget.usage !== null && c.budget.usage > 0.85 ? "warning" : "info"}
-          hint={
-            c.budget.projects > 0 ? (
-              <>
-                <Money value={c.budget.spent} compact /> of <Money value={c.budget.budget} compact />, {plural(c.budget.projects, "project")}
-                {c.budget.withoutBudget > 0 ? `; ${formatNumber(c.budget.withoutBudget)} without a budget left out` : ""}
-              </>
-            ) : (
-              "No active project has a budget"
-            )
-          }
-        />
-        <InsightCard
-          href="/analytics/forecasting/maintenance"
-          label="Maintenance due in 30 days"
-          value={plural(c.maintenance.due + c.maintenance.overdue, "asset")}
-          icon={Wrench}
-          tone={c.maintenance.overdue > 0 ? "danger" : c.maintenance.due > 0 ? "warning" : "default"}
-          hint={
-            c.maintenance.due + c.maintenance.overdue === 0
-              ? "Nothing due"
-              : c.maintenance.overdue > 0
-                ? `${formatNumber(c.maintenance.overdue)} already past due`
-                : "None past due"
-          }
-        />
-        <InsightCard
-          href="/analytics/forecasting/manpower"
-          label="Manpower shortages"
-          value={formatNumber(c.manpower.overAllocated + c.manpower.unstaffed)}
-          icon={UserRoundX}
-          tone={c.manpower.overAllocated + c.manpower.unstaffed > 0 ? "warning" : "success"}
-          hint={`${plural(c.manpower.overAllocated, "person", "people")} over 100%, ${plural(c.manpower.unstaffed, "active project")} without a team`}
-        />
-        <InsightCard
-          href="/inventory"
-          label="Current inventory value"
-          value={<Money value={c.inventory.value} />}
-          icon={Boxes}
-          tone="brand"
-          hint={`Stock in storage at average cost, ${plural(c.inventory.items, "active item")}`}
-          linkLabel="Inventory"
-        />
+        {open("/analytics/inventory/shortages") ? (
+          <InsightCard
+            href="/analytics/inventory/shortages"
+            label="Inventory shortage risks"
+            value={formatNumber(c.shortages.count)}
+            icon={CircleAlert}
+            tone={c.shortages.count > 0 ? "danger" : "success"}
+            hint={c.shortages.count > 0 ? `${formatNumber(c.shortages.out)} out, ${formatNumber(c.shortages.belowMin)} below minimum, ${formatNumber(c.shortages.runsOut)} running out` : "No item at risk"}
+          />
+        ) : null}
+        {open("/analytics/forecasting/purchases") ? (
+          <InsightCard
+            href="/analytics/forecasting/purchases"
+            label="Purchases for the next 30 days"
+            value={plural(c.purchases.count, "item")}
+            icon={PackagePlus}
+            tone={c.purchases.count > 0 ? "warning" : "default"}
+            hint={
+              c.purchases.count > 0 ? (
+                <>
+                  About <Money value={c.purchases.cost} compact /> at recent prices
+                  {c.purchases.unknownCost > 0 ? `, ${formatNumber(c.purchases.unknownCost)} without a price` : ""}
+                </>
+              ) : (
+                "Nothing to order yet"
+              )
+            }
+          />
+        ) : null}
+        {open("/analytics/forecasting/projects") ? (
+          <InsightCard
+            href="/analytics/forecasting/projects"
+            label="Predicted cost overruns"
+            value={plural(c.overruns.count, "project")}
+            icon={TriangleAlert}
+            tone={c.overruns.count > 0 ? "danger" : "default"}
+            hint={
+              c.overruns.count > 0 ? (
+                <>
+                  <Money value={c.overruns.amount} compact /> above budget, by the forecast or already
+                </>
+              ) : c.overruns.budgeted > 0 ? (
+                `${plural(c.overruns.rated, "open project")} forecast by spend rate${c.overruns.spendToDate ? `, ${formatNumber(c.overruns.spendToDate)} at spend to date` : ""}${c.overruns.noForecast ? `, ${formatNumber(c.overruns.noForecast)} without a forecast` : ""}`
+              ) : (
+                "No open project has a budget"
+              )
+            }
+          />
+        ) : null}
+        {open("/analytics/projects/performance") ? (
+          <InsightCard
+            href="/analytics/projects/performance"
+            label="Projects at risk of delay"
+            value={plural(c.delays.count, "project")}
+            icon={CalendarClock}
+            tone={c.delays.count > 0 ? "warning" : "success"}
+            hint={`${plural(c.delays.overdueTasks, "overdue task")}, ${formatNumber(c.delays.pastEnd)} past end date`}
+          />
+        ) : null}
+        {open("/analytics/projects/budget?status=active") ? (
+          <InsightCard
+            href="/analytics/projects/budget?status=active"
+            label="Budget used (active projects with a budget)"
+            value={c.budget.usage === null ? "No budgets" : formatPercent(c.budget.usage)}
+            icon={Gauge}
+            tone={c.budget.usage !== null && c.budget.usage > 1 ? "danger" : c.budget.usage !== null && c.budget.usage > 0.85 ? "warning" : "info"}
+            hint={
+              c.budget.projects > 0 ? (
+                <>
+                  <Money value={c.budget.spent} compact /> of <Money value={c.budget.budget} compact />, {plural(c.budget.projects, "project")}
+                  {c.budget.withoutBudget > 0 ? `; ${formatNumber(c.budget.withoutBudget)} without a budget left out` : ""}
+                </>
+              ) : (
+                "No active project has a budget"
+              )
+            }
+          />
+        ) : null}
+        {open("/analytics/forecasting/maintenance") ? (
+          <InsightCard
+            href="/analytics/forecasting/maintenance"
+            label="Maintenance due in 30 days"
+            value={plural(c.maintenance.due + c.maintenance.overdue, "asset")}
+            icon={Wrench}
+            tone={c.maintenance.overdue > 0 ? "danger" : c.maintenance.due > 0 ? "warning" : "default"}
+            hint={
+              c.maintenance.due + c.maintenance.overdue === 0
+                ? "Nothing due"
+                : c.maintenance.overdue > 0
+                  ? `${formatNumber(c.maintenance.overdue)} already past due`
+                  : "None past due"
+            }
+          />
+        ) : null}
+        {open("/analytics/forecasting/manpower") ? (
+          <InsightCard
+            href="/analytics/forecasting/manpower"
+            label="Manpower shortages"
+            value={formatNumber(c.manpower.overAllocated + c.manpower.unstaffed)}
+            icon={UserRoundX}
+            tone={c.manpower.overAllocated + c.manpower.unstaffed > 0 ? "warning" : "success"}
+            hint={`${plural(c.manpower.overAllocated, "person", "people")} over 100%, ${plural(c.manpower.unstaffed, "active project")} without a team`}
+          />
+        ) : null}
+        {open("/inventory") ? (
+          <InsightCard
+            href="/inventory"
+            label="Current inventory value"
+            value={<Money value={c.inventory.value} />}
+            icon={Boxes}
+            tone="brand"
+            hint={`Stock in storage at average cost, ${plural(c.inventory.items, "active item")}`}
+            linkLabel="Inventory"
+          />
+        ) : null}
       </StatGrid>
 
       <RuleList
         rules={[
-          { label: "Shortage risks", text: RULES.shortages },
-          { label: "Purchases needed", text: RULES.purchases },
-          { label: "Predicted cost overruns", text: RULES.overruns },
-          { label: "Projects at risk of delay", text: RULES.delays },
-          { label: "Budget used", text: RULES.budget },
-          { label: "Maintenance due", text: RULES.maintenance },
-          { label: "Manpower shortages", text: RULES.manpower },
-          { label: "Inventory value", text: RULES.inventory },
-        ]}
+          { href: "/analytics/inventory/shortages", label: "Shortage risks", text: RULES.shortages },
+          { href: "/analytics/forecasting/purchases", label: "Purchases needed", text: RULES.purchases },
+          { href: "/analytics/forecasting/projects", label: "Predicted cost overruns", text: RULES.overruns },
+          { href: "/analytics/projects/performance", label: "Projects at risk of delay", text: RULES.delays },
+          { href: "/analytics/projects/budget", label: "Budget used", text: RULES.budget },
+          { href: "/analytics/forecasting/maintenance", label: "Maintenance due", text: RULES.maintenance },
+          { href: "/analytics/forecasting/manpower", label: "Manpower shortages", text: RULES.manpower },
+          { href: "/inventory", label: "Inventory value", text: RULES.inventory },
+        ]
+          .filter((r) => open(r.href))
+          .map(({ label, text }) => ({ label, text }))}
       />
 
       <div className="grid gap-5 sm:gap-6 xl:grid-cols-2">
-        <Section title="Material consumption" description="Stock used on projects each month, at cost, with wastage beside it." actions={<DetailsLink href="/analytics/inventory/consumption" />}>
-          {hasConsumption ? (
-            <MonthChart
-              title="Material consumption by month"
-              data={data.months}
-              series={[
-                { key: "consumed", label: "Used on projects", color: "var(--chart-1)" },
-                { key: "wasted", label: "Wasted", color: "var(--chart-5)" },
-              ]}
-            />
-          ) : (
-            <EmptyState icon={ChartColumn} compact title="No stock used in the last 12 months" description="Assign stock to a project and its use shows here." />
-          )}
-          <Footnote>{RULES.consumption}</Footnote>
-        </Section>
+        {open("/analytics/inventory/consumption") ? (
+          <Section title="Material consumption" description="Stock used on projects each month, at cost, with wastage beside it." actions={<DetailsLink href="/analytics/inventory/consumption" />}>
+            {hasConsumption ? (
+              <MonthChart
+                title="Material consumption by month"
+                data={data.months}
+                series={[
+                  { key: "consumed", label: "Used on projects", color: "var(--chart-1)" },
+                  { key: "wasted", label: "Wasted", color: "var(--chart-5)" },
+                ]}
+              />
+            ) : (
+              <EmptyState icon={ChartColumn} compact title="No stock used in the last 12 months" description="Assign stock to a project and its use shows here." />
+            )}
+            <Footnote>{RULES.consumption}</Footnote>
+          </Section>
+        ) : null}
 
-        <Section title="Procurement" description="Stock bought each month, at cost before GST." actions={<DetailsLink href="/analytics/insights/procurement" />}>
-          {hasProcurement ? (
-            <MonthChart title="Stock bought by month, before GST" data={data.months} series={[{ key: "bought", label: "Stock bought, before GST", color: "var(--chart-3)" }]} />
-          ) : (
-            <EmptyState icon={PackagePlus} compact title="No stock bought in the last 12 months" description="Purchases recorded with Buy stock show here." />
-          )}
-          <Footnote>
-            {RULES.procurement} Procurement analysis counts the bill amounts instead, GST included.
-            {opening > 0 ? (
-              <>
-                {" "}
-                Opening and imported stock in these months: <Money value={opening} />.
-              </>
-            ) : null}
-          </Footnote>
-        </Section>
+        {open("/analytics/insights/procurement") ? (
+          <Section title="Procurement" description="Stock bought each month, at cost before GST." actions={<DetailsLink href="/analytics/insights/procurement" />}>
+            {hasProcurement ? (
+              <MonthChart title="Stock bought by month, before GST" data={data.months} series={[{ key: "bought", label: "Stock bought, before GST", color: "var(--chart-3)" }]} />
+            ) : (
+              <EmptyState icon={PackagePlus} compact title="No stock bought in the last 12 months" description="Purchases recorded with Buy stock show here." />
+            )}
+            <Footnote>
+              {RULES.procurement} Procurement analysis counts the bill amounts instead, GST included.
+              {opening > 0 ? (
+                <>
+                  {" "}
+                  Opening and imported stock in these months: <Money value={opening} />.
+                </>
+              ) : null}
+            </Footnote>
+          </Section>
+        ) : null}
       </div>
 
       <div className="grid gap-5 sm:gap-6 xl:grid-cols-2">
-        <Section title="Budget vs actual" description="Open projects with the most spend: budget and spend to date." actions={<DetailsLink href="/analytics/projects/budget?status=planning,active,on_hold" />}>
-          {data.budgetRows.length ? (
+        {open("/analytics/projects/budget?status=planning,active,on_hold") ? (
+          <Section title="Budget vs actual" description="Open projects with the most spend: budget and spend to date." actions={<DetailsLink href="/analytics/projects/budget?status=planning,active,on_hold" />}>
+            {data.budgetRows.length ? (
+              <BarsChart
+                title="Budget and spend per project"
+                data={data.budgetRows}
+                series={[
+                  { key: "budget", label: "Budget", color: "var(--chart-3)" },
+                  { key: "spent", label: "Spent", color: "var(--chart-1)" },
+                ]}
+              />
+            ) : (
+              <EmptyState icon={Gauge} compact title="No open project has a budget or spend yet" />
+            )}
+            <SalariesHiddenNote className="mt-3" />
+          </Section>
+        ) : null}
+
+        {open("/analytics/projects") ? (
+          <Section title="Project-wise cost" description="Where each open project's spend went, by type of expense." actions={<DetailsLink href="/analytics/projects" />}>
+            {data.projectCosts.length ? (
+              <BarsChart title="Spend by type per project" data={data.projectCosts.map((p) => ({ ...p, label: p.name }))} series={COST_SERIES} />
+            ) : (
+              <EmptyState icon={ChartColumn} compact title="No spend on open projects yet" />
+            )}
+            <Footnote>Materials include stock issued to the project. Types follow the expense category, as on the project finance pages.</Footnote>
+            <SalariesHiddenNote className="mt-2" />
+          </Section>
+        ) : null}
+      </div>
+
+      {open("/analytics/projects/performance") ? (
+        <Section
+          title="Project performance"
+          description="Active projects: planned time gone by, budget spent and tasks done. A project whose spend or time runs well ahead of its tasks needs a look."
+          actions={<DetailsLink href="/analytics/projects/performance" />}
+        >
+          {performance.length ? (
             <BarsChart
-              title="Budget and spend per project"
-              data={data.budgetRows}
+              title="Time, budget and tasks per active project"
+              format="percent"
+              labelWidth={140}
+              reference={{ value: 1, label: "100%" }}
+              data={performance}
               series={[
-                { key: "budget", label: "Budget", color: "var(--chart-3)" },
-                { key: "spent", label: "Spent", color: "var(--chart-1)" },
+                { key: "time", label: "Time gone by", color: "var(--chart-4)" },
+                { key: "budget", label: "Budget spent", color: "var(--chart-1)" },
+                { key: "tasks", label: "Tasks done", color: "var(--chart-3)" },
               ]}
             />
           ) : (
-            <EmptyState icon={Gauge} compact title="No open project has a budget or spend yet" />
+            <EmptyState icon={TrendingUp} compact title="No active project with dates, a budget or tasks" description="Add start and end dates, a budget and tasks to a project to compare its progress." />
           )}
-          <SalariesHiddenNote className="mt-3" />
+          <Footnote>{RULES.performance} A bar is missing when its record is (no dates, no budget or no tasks).</Footnote>
         </Section>
-
-        <Section title="Project-wise cost" description="Where each open project's spend went, by type of expense." actions={<DetailsLink href="/analytics/projects" />}>
-          {data.projectCosts.length ? (
-            <BarsChart title="Spend by type per project" data={data.projectCosts.map((p) => ({ ...p, label: p.name }))} series={COST_SERIES} />
-          ) : (
-            <EmptyState icon={ChartColumn} compact title="No spend on open projects yet" />
-          )}
-          <Footnote>Materials include stock issued to the project. Types follow the expense category, as on the project finance pages.</Footnote>
-          <SalariesHiddenNote className="mt-2" />
-        </Section>
-      </div>
-
-      <Section
-        title="Project performance"
-        description="Active projects: planned time gone by, budget spent and tasks done. A project whose spend or time runs well ahead of its tasks needs a look."
-        actions={<DetailsLink href="/analytics/projects/performance" />}
-      >
-        {performance.length ? (
-          <BarsChart
-            title="Time, budget and tasks per active project"
-            format="percent"
-            labelWidth={140}
-            reference={{ value: 1, label: "100%" }}
-            data={performance}
-            series={[
-              { key: "time", label: "Time gone by", color: "var(--chart-4)" },
-              { key: "budget", label: "Budget spent", color: "var(--chart-1)" },
-              { key: "tasks", label: "Tasks done", color: "var(--chart-3)" },
-            ]}
-          />
-        ) : (
-          <EmptyState icon={TrendingUp} compact title="No active project with dates, a budget or tasks" description="Add start and end dates, a budget and tasks to a project to compare its progress." />
-        )}
-        <Footnote>{RULES.performance} A bar is missing when its record is (no dates, no budget or no tasks).</Footnote>
-      </Section>
+      ) : null}
 
       <div className="grid gap-5 sm:gap-6 xl:grid-cols-2">
-        <Section title="Inventory ageing" description="Value of stock in storage by how long it has been held." actions={<DetailsLink href="/analytics/inventory/ageing" />}>
-          {hasStock ? (
-            <BarsChart
-              title="Stock value by age"
-              data={data.ageing.map((b) => ({ label: b.label, value: b.value, note: plural(b.items, "item") }))}
-              series={[{ key: "value", label: "Value on hand", color: "var(--chart-1)" }]}
-              noteKey="note"
-            />
-          ) : (
-            <EmptyState icon={Hourglass} compact title="No stock in storage" />
-          )}
-          <Footnote>{RULES.ageing}</Footnote>
-        </Section>
+        {open("/analytics/inventory/ageing") ? (
+          <Section title="Inventory ageing" description="Value of stock in storage by how long it has been held." actions={<DetailsLink href="/analytics/inventory/ageing" />}>
+            {hasStock ? (
+              <BarsChart
+                title="Stock value by age"
+                data={data.ageing.map((b) => ({ label: b.label, value: b.value, note: plural(b.items, "item") }))}
+                series={[{ key: "value", label: "Value on hand", color: "var(--chart-1)" }]}
+                noteKey="note"
+              />
+            ) : (
+              <EmptyState icon={Hourglass} compact title="No stock in storage" />
+            )}
+            <Footnote>{RULES.ageing}</Footnote>
+          </Section>
+        ) : null}
 
-        <Section title="Fast and slow moving" description="Value of stock on hand by how fast it is used." actions={<DetailsLink href="/analytics/inventory/velocity" />}>
-          {hasVelocity ? (
-            <BarsChart
-              title="Stock value by movement speed"
-              data={data.velocity.map((b) => ({ label: b.label, value: b.value, note: plural(b.items, "item") }))}
-              series={[{ key: "value", label: "Value on hand", color: "var(--chart-2)" }]}
-              noteKey="note"
-            />
-          ) : (
-            <EmptyState icon={Gauge} compact title="No stock or use recorded" />
-          )}
-          <Footnote>{RULES.velocity}</Footnote>
-        </Section>
+        {open("/analytics/inventory/velocity") ? (
+          <Section title="Fast and slow moving" description="Value of stock on hand by how fast it is used." actions={<DetailsLink href="/analytics/inventory/velocity" />}>
+            {hasVelocity ? (
+              <BarsChart
+                title="Stock value by movement speed"
+                data={data.velocity.map((b) => ({ label: b.label, value: b.value, note: plural(b.items, "item") }))}
+                series={[{ key: "value", label: "Value on hand", color: "var(--chart-2)" }]}
+                noteKey="note"
+              />
+            ) : (
+              <EmptyState icon={Gauge} compact title="No stock or use recorded" />
+            )}
+            <Footnote>{RULES.velocity}</Footnote>
+          </Section>
+        ) : null}
       </div>
     </Page>
   );

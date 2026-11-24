@@ -4,7 +4,7 @@ import { fromDateInput } from "@/lib/dates";
 import type { EquipmentInputs } from "../schemas";
 import type { ScenarioResults } from "../types";
 import type { ComputeContext, EquipmentFact, ProjectFact } from "./facts";
-import { budgetImpactTable, compareRow, emptyMetrics, periodDays, round2, stat } from "./common";
+import { SALARIES_NOTE, budgetImpactTable, compareRow, emptyMetrics, periodDays, round2, stat, viewOf } from "./common";
 
 export type EquipmentFacts = {
   /** The equipment picked, or register equipment matching the typed name. */
@@ -63,7 +63,7 @@ export function computeEquipment(inputs: EquipmentInputs, facts: EquipmentFacts,
   ];
   if (cost === null) notes.push("No cost was entered, so the cost of the shortage is not estimated.");
   if (!facts.assets.length) notes.push(`No equipment in the register matches "${name}", so every unit needed counts as short.`);
-  if (!ctx.admin && budget) notes.push("Project spend leaves out salary expenses: only admins see them.");
+  if (!ctx.salaries && budget) notes.push(SALARIES_NOTE);
 
   const tables: ScenarioResults["tables"] = [
     {
@@ -121,7 +121,7 @@ export function computeEquipment(inputs: EquipmentInputs, facts: EquipmentFacts,
     version: 1,
     type: "equipment",
     computedAt: new Date().toISOString(),
-    view: ctx.admin ? "admin" : "member",
+    view: viewOf(ctx),
     headline: `${facts.project?.name ?? "The project"} needs ${required} ${name} from ${day(inputs.usageFrom)} to ${day(inputs.usageTo)}. ${
       shortage > 0
         ? `${free} ${free === 1 ? "is" : "are"} free, so ${shortage} must be ${inputs.acquisition === "rent" ? "rented" : "bought"}${cost !== null ? ` (${formatCurrency(cost)})` : ""}.`

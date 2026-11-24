@@ -48,8 +48,11 @@ function ItemName({ item }: { item: LowStockItem }) {
   );
 }
 
-/** The reorder list: a table on wider screens (scrolling inside its own box), cards on phones. */
-export function LowStockList({ items, today }: { items: LowStockItem[]; today: string }) {
+/**
+ * The reorder list: a table on wider screens (scrolling inside its own box), cards on phones.
+ * `canPurchase` hides the Purchase buttons from people who may not record a purchase.
+ */
+export function LowStockList({ items, today, canPurchase }: { items: LowStockItem[]; today: string; canPurchase: boolean }) {
   return (
     <>
       <div className="hidden overflow-x-auto rounded-xl border bg-card shadow-card md:block">
@@ -111,11 +114,13 @@ export function LowStockList({ items, today }: { items: LowStockItem[]; today: s
                   </ul>
                 </TableCell>
                 <TableCell>
-                  <Button asChild size="sm" variant="outline">
-                    <Link href={purchaseHref(i)}>
-                      <PackagePlus /> Purchase
-                    </Link>
-                  </Button>
+                  {canPurchase ? (
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={purchaseHref(i)}>
+                        <PackagePlus /> Purchase
+                      </Link>
+                    </Button>
+                  ) : null}
                 </TableCell>
               </TableRow>
             ))}
@@ -169,11 +174,13 @@ export function LowStockList({ items, today }: { items: LowStockItem[]; today: s
                   <dd className="tabular font-semibold">{i.suggestedQty ? `${formatNumber(i.suggestedQty)} ${i.unit}` : "-"}</dd>
                 </div>
               </dl>
-              <Button asChild className="w-full">
-                <Link href={purchaseHref(i)}>
-                  <PackagePlus /> Purchase
-                </Link>
-              </Button>
+              {canPurchase ? (
+                <Button asChild className="w-full">
+                  <Link href={purchaseHref(i)}>
+                    <PackagePlus /> Purchase
+                  </Link>
+                </Button>
+              ) : null}
             </article>
           </li>
         ))}

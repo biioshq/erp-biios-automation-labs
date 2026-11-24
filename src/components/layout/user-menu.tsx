@@ -42,7 +42,7 @@ export function UserMenu({ user }: { user: SessionUser }) {
             <DropdownMenuLabel className="font-normal">
               <div className="text-sm font-medium">{user.name}</div>
               <div className="text-xs text-muted-foreground">
-                {user.email} · {user.role === "admin" ? "Admin" : "Member"}
+                {user.email} · {user.roleName}
               </div>
               <SignInMethodsLine methods={account.methods} />
             </DropdownMenuLabel>

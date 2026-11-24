@@ -9,8 +9,8 @@ import { assignItemPhoto, discardPhotoUploads, removeItemPhoto } from "@/feature
 const REVALIDATE: [string, "layout"][] = [["/inventory", "layout"]];
 
 /**
- * Saves an uploaded photo (POST /api/files with kind "photo") as the item's photo. Any signed-in
- * person may add or change it; the old photo file is deleted only after the new one is saved.
+ * Saves an uploaded photo (POST /api/files with kind "photo") as the item's photo. Needs the items
+ * edit permission; the old photo file is deleted only after the new one is saved.
  */
 export const setItemPhoto = defineAction(
   z.object({ itemId: objectId, fileId: objectId }),
@@ -18,14 +18,14 @@ export const setItemPhoto = defineAction(
     const outcome = await assignItemPhoto({ itemId, fileId, replace: true, uploadedBy: user.id });
     return { replaced: outcome.status === "saved" && outcome.replaced };
   },
-  { revalidate: REVALIDATE, message: "Photo saved" },
+  { permission: "inventory.items:edit", revalidate: REVALIDATE, message: "Photo saved" },
 );
 
-/** Takes the photo off the item and deletes the stored file. Admin-only, like every delete. */
+/** Takes the photo off the item and deletes the stored file. Needs the items delete permission. */
 export const deleteItemPhoto = defineAction(
   z.object({ itemId: objectId, fileId: objectId.nullish() }),
   async ({ itemId, fileId }) => removeItemPhoto({ itemId, expectedFileId: fileId ?? null }),
-  { role: "admin", revalidate: REVALIDATE, message: "Photo removed" },
+  { permission: "inventory.items:delete", revalidate: REVALIDATE, message: "Photo removed" },
 );
 
 /** Deletes the person's own photo upload when saving it on the item failed, so no orphan is left. */
@@ -35,5 +35,6 @@ export const discardItemPhotoUpload = defineAction(
     await discardPhotoUploads([fileId], user.id);
     return { ok: true };
   },
-  { readOnly: true },
+  // Only ever deletes the caller's own unattached uploads, so anyone signed in may clean up.
+  { permission: null, readOnly: true },
 );

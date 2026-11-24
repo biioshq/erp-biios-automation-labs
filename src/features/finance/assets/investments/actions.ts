@@ -6,7 +6,7 @@ import { AppError, notFound } from "@/server/errors";
 import { BankAccount, FileModel, Investment } from "@/server/models";
 import { assertGroupUnder } from "@/server/finance-groups";
 import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
-import { getCurrentUser, type SessionUser } from "@/server/auth/session";
+import { can, getCurrentUser, type SessionUser } from "@/server/auth/session";
 import { endOfDayIST, fromDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import {
@@ -20,8 +20,11 @@ import {
 import { INVESTMENT_ROOT, getInvestment } from "./queries";
 import type { InvestmentDetail } from "./types";
 
-/** Investments are admin-only, like the other balance sheet pages that show company money. */
-const ADMIN = { role: "admin" as const, revalidate: [["/finance", "layout"]] as [string, "layout"][] };
+/** Investments hold company money: members have none of these permissions by default. */
+const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
+const CREATE = { permission: "finance.investments:create", revalidate: REVALIDATE };
+const EDIT = { permission: "finance.investments:edit", revalidate: REVALIDATE };
+const DELETE = { permission: "finance.investments:delete", revalidate: REVALIDATE };
 
 const oid = (id: string) => new Types.ObjectId(id);
 
@@ -81,7 +84,7 @@ export const createInvestment = defineAction(
     if (input.documentIds?.length) await attachFiles(input.documentIds, { type: "investment", id: String(created._id) });
     return { id: String(created._id) };
   },
-  { ...ADMIN, message: "Investment added" },
+  { ...CREATE, message: "Investment added" },
 );
 
 export const updateInvestment = defineAction(
@@ -106,7 +109,7 @@ export const updateInvestment = defineAction(
     if (input.documentIds?.length) await attachFiles(input.documentIds, { type: "investment", id: input.id });
     return { id: input.id };
   },
-  { ...ADMIN, message: "Investment updated" },
+  { ...EDIT, message: "Investment updated" },
 );
 
 /** Records the money that came back (sale, maturity, withdrawal). Gain or loss = amount back less cost. */
@@ -125,7 +128,7 @@ export const redeemInvestment = defineAction(
     );
     return { id: input.id };
   },
-  { ...ADMIN, message: "Redemption recorded" },
+  { ...EDIT, message: "Redemption recorded" },
 );
 
 export const removeRedemption = defineAction(
@@ -137,7 +140,7 @@ export const removeRedemption = defineAction(
     await Investment.updateOne({ _id: v._id }, { $unset: { redemption: 1 } });
     return { id };
   },
-  { ...ADMIN, message: "Redemption removed" },
+  { ...DELETE, message: "Redemption removed" },
 );
 
 /** Only a redeemed investment can be archived: the balance sheet counts every one still held. */
@@ -150,7 +153,7 @@ export const archiveInvestment = defineAction(
     await Investment.updateOne({ _id: v._id }, { $set: { archivedAt: new Date() } });
     return { id };
   },
-  { ...ADMIN, message: "Investment archived" },
+  { ...EDIT, message: "Investment archived" },
 );
 
 export const restoreInvestment = defineAction(
@@ -160,7 +163,7 @@ export const restoreInvestment = defineAction(
     if (!res.matchedCount) throw notFound("The investment");
     return { id };
   },
-  { ...ADMIN, message: "Investment restored" },
+  { ...EDIT, message: "Investment restored" },
 );
 
 export const deleteInvestment = defineAction(
@@ -173,7 +176,7 @@ export const deleteInvestment = defineAction(
     for (const f of files) await removeFile(String(f._id));
     return { id };
   },
-  { ...ADMIN, message: "Investment deleted" },
+  { ...DELETE, message: "Investment deleted" },
 );
 
 export const attachInvestmentDocuments = defineAction(
@@ -184,7 +187,7 @@ export const attachInvestmentDocuments = defineAction(
     await attachFiles(fileIds, { type: "investment", id });
     return { id };
   },
-  { ...ADMIN, message: "Document added" },
+  { ...EDIT, message: "Document added" },
 );
 
 export const removeInvestmentDocument = defineAction(
@@ -195,11 +198,11 @@ export const removeInvestmentDocument = defineAction(
     await removeFile(fileId);
     return { id };
   },
-  { ...ADMIN, message: "Document removed" },
+  { ...DELETE, message: "Document removed" },
 );
 
 export async function fetchInvestment(id: string): Promise<InvestmentDetail | null> {
   const user = await getCurrentUser();
-  if (!user || user.role !== "admin") return null;
+  if (!user || !can(user, "finance.investments:view")) return null;
   return getInvestment(id);
 }

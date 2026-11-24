@@ -8,7 +8,7 @@ import { BankAccount, Employee, Expense, FileModel, FixedAsset, Project, type Fi
 import { nextNumber } from "@/server/services/numbering";
 import { assertGroupUnder } from "@/server/finance-groups";
 import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
-import { getCurrentUser, type SessionUser } from "@/server/auth/session";
+import { can, getCurrentUser, type SessionUser } from "@/server/auth/session";
 import { endOfDayIST, fromDateInput, toDateInput } from "@/lib/dates";
 import { formatDate, round2 } from "@/lib/format";
 import type { PaymentMethod } from "@/lib/constants";
@@ -164,9 +164,14 @@ async function createBill(v: AssetFormValues, asset: { _id: Types.ObjectId; code
   return bill;
 }
 
-/** Deletes the unpaid bill this asset created, when the admin asked for it and nothing was paid on it. */
+/** The unpaid bill an asset created is an expense record: deleting it needs asset delete and expense delete. */
+function canDeleteBill(user: SessionUser): boolean {
+  return can(user, "finance.fixed_assets:delete") && can(user, "finance.expenses:delete");
+}
+
+/** Deletes the unpaid bill this asset created, when the person asked for it and nothing was paid on it. */
 async function deleteOwnBill(expenseId: Types.ObjectId, asset: { _id: Types.ObjectId; code: string }, user: SessionUser, uow: UnitOfWork) {
-  if (user.role !== "admin") throw new AppError("Only an admin can delete the bill. Save without deleting it.", "forbidden");
+  if (!canDeleteBill(user)) throw new AppError("You do not have permission to delete the bill. Save without deleting it.", "forbidden");
   const bill = await Expense.findById(expenseId).session(uow.session ?? null).lean();
   if (!isDeletableBill(bill, asset)) throw new AppError("That bill has a payment or was changed, so it is kept. Save without deleting it.", "conflict");
   // A rollback puts the whole document back, link included.
@@ -234,7 +239,7 @@ export const createFixedAsset = defineAction(
     if (input.documentIds?.length) await attachFiles(input.documentIds, { type: "fixed_asset", id: created.id }, input.projectId);
     return created;
   },
-  { revalidate: REVALIDATE, message: "Asset added" },
+  { revalidate: REVALIDATE, message: "Asset added", permission: "finance.fixed_assets:create" },
 );
 
 export const updateFixedAsset = defineAction(
@@ -270,7 +275,7 @@ export const updateFixedAsset = defineAction(
     if (input.documentIds?.length) await attachFiles(input.documentIds, { type: "fixed_asset", id: input.id }, input.projectId);
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Asset updated" },
+  { revalidate: REVALIDATE, message: "Asset updated", permission: "finance.fixed_assets:edit" },
 );
 
 /** Adds or edits a maintenance entry; can book its cost as a normal expense so it is entered once. */
@@ -339,10 +344,10 @@ export const saveMaintenance = defineAction(
     });
     return { id: input.assetId };
   },
-  { revalidate: REVALIDATE, message: "Maintenance saved" },
+  { revalidate: REVALIDATE, message: "Maintenance saved", permission: "finance.fixed_assets:edit" },
 );
 
-/** Removes a maintenance entry. An expense booked from it stays in Expenses. Admins only. */
+/** Removes a maintenance entry. An expense booked from it stays in Expenses. Members cannot by default. */
 export const deleteMaintenance = defineAction(
   maintenanceIdSchema,
   async ({ assetId, entryId }) => {
@@ -350,7 +355,7 @@ export const deleteMaintenance = defineAction(
     if (!res.matchedCount) throw notFound("The maintenance entry");
     return { id: assetId };
   },
-  { revalidate: REVALIDATE, message: "Maintenance entry removed", role: "admin" },
+  { revalidate: REVALIDATE, message: "Maintenance entry removed", permission: "finance.fixed_assets:delete" },
 );
 
 /** Records a sale, scrapping or loss. The asset leaves the books on that date; gain or loss is the proceeds less the book value. */
@@ -384,10 +389,10 @@ export const recordDisposal = defineAction(
     );
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Disposal recorded" },
+  { revalidate: REVALIDATE, message: "Disposal recorded", permission: "finance.fixed_assets:edit" },
 );
 
-/** Takes a disposal back (entered by mistake): the asset returns to the books. Admins only. */
+/** Takes a disposal back (entered by mistake): the asset returns to the books. Members cannot by default. */
 export const removeDisposal = defineAction(
   assetIdSchema,
   async ({ id }) => {
@@ -400,7 +405,7 @@ export const removeDisposal = defineAction(
     await FixedAsset.updateOne({ _id: asset._id }, { $unset: { disposal: 1 }, ...(asset.condition === "disposed" ? { $set: { condition: restored } } : {}) });
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Disposal removed", role: "admin" },
+  { revalidate: REVALIDATE, message: "Disposal removed", permission: "finance.fixed_assets:delete" },
 );
 
 /**
@@ -416,7 +421,7 @@ export const archiveFixedAsset = defineAction(
     await FixedAsset.updateOne({ _id: asset._id }, { $set: { archivedAt: new Date() } });
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Asset archived" },
+  { revalidate: REVALIDATE, message: "Asset archived", permission: "finance.fixed_assets:edit" },
 );
 
 export const restoreFixedAsset = defineAction(
@@ -426,19 +431,22 @@ export const restoreFixedAsset = defineAction(
     if (!res.matchedCount) throw notFound("The asset");
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Asset restored" },
+  { revalidate: REVALIDATE, message: "Asset restored", permission: "finance.fixed_assets:edit" },
 );
 
 /**
  * Deletes an asset for good. The expense that paid for it is unlinked, never deleted, except the
- * unpaid bill the asset form created, when the admin asks for it and nothing was paid on it.
- * Maintenance expenses stay. The asset's own documents are removed. Admins only.
+ * unpaid bill the asset form created, when the person asks for it, may also delete expenses, and nothing
+ * was paid on it. Maintenance expenses stay. The asset's own documents are removed. Members cannot by default.
  */
 export const deleteFixedAsset = defineAction(
   deleteAssetSchema,
-  async ({ id, deleteBill }) => {
+  async ({ id, deleteBill }, user) => {
     const asset = await FixedAsset.findById(id).lean();
     if (!asset) throw notFound("The asset");
+    if (deleteBill && asset.funding?.expense && !canDeleteBill(user)) {
+      throw new AppError("You do not have permission to delete the bill. Delete the asset without it.", "forbidden");
+    }
     await runAtomic(async (uow) => {
       if (deleteBill && asset.funding?.expense) {
         const bill = await Expense.findById(asset.funding.expense).session(uow.session ?? null).lean();
@@ -454,7 +462,7 @@ export const deleteFixedAsset = defineAction(
     for (const f of files) await removeFile(String(f._id));
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Asset deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Asset deleted", permission: "finance.fixed_assets:delete" },
 );
 
 /** Files uploaded from the detail view (invoice, warranty card, photos). */
@@ -467,10 +475,10 @@ export const attachAssetDocuments = defineAction(
     await attachFiles(fileIds, { type: "fixed_asset", id }, asset.project ? String(asset.project) : null);
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Document added" },
+  { revalidate: REVALIDATE, message: "Document added", permission: "finance.fixed_assets:edit" },
 );
 
-/** Deletes one of the asset's documents. Admins only, like every delete. */
+/** Deletes one of the asset's documents. Members cannot by default, like every delete. */
 export const removeAssetDocument = defineAction(
   removeDocumentSchema,
   async ({ id, fileId }) => {
@@ -479,14 +487,19 @@ export const removeAssetDocument = defineAction(
     await removeFile(fileId);
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Document removed", role: "admin" },
+  { revalidate: REVALIDATE, message: "Document removed", permission: "finance.fixed_assets:delete" },
 );
 
-export const searchLinkableExpenses = defineAction(linkableExpenseSearchSchema, async ({ q, assetId }) => findLinkableExpenses(q, assetId), { readOnly: true });
+/** Expenses the asset form can link as the purchase. Anyone who can add or edit an asset. */
+export const searchLinkableExpenses = defineAction(linkableExpenseSearchSchema, async ({ q, assetId }) => findLinkableExpenses(q, assetId), {
+  readOnly: true,
+  permission: ["finance.fixed_assets:create", "finance.fixed_assets:edit"],
+});
 
 /** Loads one asset for the detail drawer and the edit form. */
 export async function fetchFixedAsset(id: string): Promise<AssetDetail | null> {
-  if (!(await getCurrentUser())) return null;
+  const user = await getCurrentUser();
+  if (!user || !can(user, "finance.fixed_assets:view")) return null;
   return getAsset(id);
 }
 

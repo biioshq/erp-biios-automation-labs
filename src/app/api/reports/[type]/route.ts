@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { connectDB } from "@/server/db";
 import { Report } from "@/server/models";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { bumpChanges } from "@/server/changes";
-import { isAdminReport } from "@/features/reports/catalog";
+import { mayExportReport } from "@/features/reports/catalog";
 import { parseReportRequest } from "@/features/reports/schemas";
 import { buildReport, rowCountOf } from "@/features/reports/server/build";
 import { CONTENT_TYPES, reportFileName, renderReport } from "@/features/reports/server/export";
@@ -22,8 +22,11 @@ export async function GET(request: NextRequest, { params }: RouteContext<"/api/r
   const { type } = await params;
   const parsed = parseReportRequest(type, request.nextUrl.searchParams);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  // Statements, loans, capital and cash are company position figures only admins see.
-  if (isAdminReport(parsed.type) && user.role !== "admin") return NextResponse.json({ error: "Only admins can download this report." }, { status: 403 });
+  // Each report needs the export permission of its area (see reportPermissions in the catalog).
+  // The movement history (Inventory > Movements export) is the inventory area's own list.
+  const movementHistory = parsed.type === "inventory" && request.nextUrl.searchParams.get("movements") === "1";
+  const allowed = movementHistory ? can(user, "inventory.movements:export") : mayExportReport(parsed.type, (p) => can(user, p));
+  if (!allowed) return NextResponse.json({ error: "You do not have permission to download this report." }, { status: 403 });
 
   try {
     const report = await buildReport(parsed.type, parsed.filters);

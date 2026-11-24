@@ -12,7 +12,7 @@ import { allowedGoogleDomains, googleEnabled } from "@/server/auth/google";
 export const metadata: Metadata = { title: "Create account" };
 
 export default async function SignUpPage() {
-  if (await getCurrentUser()) redirect("/finance");
+  if (await getCurrentUser()) redirect("/");
   const firstRun = await isFirstRun().catch(() => false);
   const open = firstRun || process.env.ALLOW_OPEN_SIGNUP === "true";
   if (!open) {

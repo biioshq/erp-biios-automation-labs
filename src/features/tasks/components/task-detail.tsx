@@ -17,6 +17,7 @@ import { PriorityBadge, TaskStatusBadge } from "@/components/shared/status-badge
 import { FileDropzone } from "@/features/files/components/file-dropzone";
 import { FileTile } from "@/features/files/components/file-preview";
 import { ACCEPT_DOCUMENTS } from "@/features/files/types";
+import { useCan } from "@/components/current-user";
 import { TASK_STATUSES, type TaskStatus } from "@/lib/constants";
 import { formatDateTime, formatRelative } from "@/lib/format";
 import { emitDataChanged } from "@/lib/events";
@@ -60,10 +61,12 @@ export function TaskDetailView({
   onChanged: () => Promise<void>;
   onEdit: () => void;
   onDelete: () => Promise<boolean>;
-  /** Only admins delete tasks and attachments; the server refuses everyone else. */
+  /** Deleting tasks and attachments needs the tasks delete permission; the server refuses everyone else. */
   canDelete: boolean;
 }) {
   const [, startTransition] = useTransition();
+  // Status, comments, attachments and the Edit button need the tasks edit permission (checked again on the server).
+  const canEdit = useCan("tasks.tasks:edit");
   const [optimisticStatus, setOptimisticStatus] = useOptimistic(task.status);
   const [comments, addOptimisticComment] = useOptimistic(task.comments, (state, comment: TaskComment) => [...state, comment]);
   const [draft, setDraft] = useState("");
@@ -143,7 +146,7 @@ export function TaskDetailView({
 
         <div className="divide-y rounded-xl border px-4">
           <Row icon={CircleDot} label="Status">
-            <Select value={optimisticStatus} onValueChange={(v) => changeStatus(v as TaskStatus)}>
+            <Select value={optimisticStatus} onValueChange={(v) => changeStatus(v as TaskStatus)} disabled={!canEdit}>
               <SelectTrigger size="sm" className="w-full max-w-52 max-md:h-10" aria-label="Change status">
                 <SelectValue />
               </SelectTrigger>
@@ -203,14 +206,16 @@ export function TaskDetailView({
               ))}
             </div>
           ) : null}
-          <FileDropzone
-            compact
-            accept={ACCEPT_DOCUMENTS}
-            meta={{ kind: "attachment", entityType: "task", entityId: task.id, projectId: task.project?.id }}
-            onUploaded={(f) => void attached(f.id)}
-            title="Add attachments"
-            hint="Drop files or click to upload"
-          />
+          {canEdit ? (
+            <FileDropzone
+              compact
+              accept={ACCEPT_DOCUMENTS}
+              meta={{ kind: "attachment", entityType: "task", entityId: task.id, projectId: task.project?.id }}
+              onUploaded={(f) => void attached(f.id)}
+              title="Add attachments"
+              hint="Drop files or click to upload"
+            />
+          ) : null}
         </section>
 
         <section className="space-y-3">
@@ -250,34 +255,36 @@ export function TaskDetailView({
           {task.createdBy ? ` by ${task.createdBy.name}` : ""}
           {task.completedAt ? ` · completed ${formatDateTime(task.completedAt)}` : ""}
         </p>
-        <div className="sticky bottom-0 z-10 -mx-4 mt-auto border-t bg-background px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6">
-          <div className="space-y-2 rounded-xl border bg-surface/40 p-2.5">
-            <Textarea
-              ref={composer}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              rows={2}
-              placeholder="Write a comment…"
-              aria-label="Write a comment"
-              className="min-h-14 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
-            />
-            <div className="flex items-center justify-between gap-2">
-              <span className="hidden items-center gap-1 text-xs text-muted-foreground sm:inline-flex">
-                <Kbd>Ctrl</Kbd>
-                <Kbd>Enter</Kbd> to send
-              </span>
-              <Button type="button" size="sm" className="ml-auto max-md:px-4" onClick={send} disabled={!draft.trim() || sending}>
-                {sending ? <Spinner /> : <Send />} Comment
-              </Button>
+        {canEdit ? (
+          <div className="sticky bottom-0 z-10 -mx-4 mt-auto border-t bg-background px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6">
+            <div className="space-y-2 rounded-xl border bg-surface/40 p-2.5">
+              <Textarea
+                ref={composer}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+                rows={2}
+                placeholder="Write a comment…"
+                aria-label="Write a comment"
+                className="min-h-14 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="hidden items-center gap-1 text-xs text-muted-foreground sm:inline-flex">
+                  <Kbd>Ctrl</Kbd>
+                  <Kbd>Enter</Kbd> to send
+                </span>
+                <Button type="button" size="sm" className="ml-auto max-md:px-4" onClick={send} disabled={!draft.trim() || sending}>
+                  {sending ? <Spinner /> : <Send />} Comment
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
+        ) : null}
       </FormSheetBody>
       <FormSheetFooter>
         {canDelete ? (
@@ -292,9 +299,11 @@ export function TaskDetailView({
             }
           />
         ) : null}
-        <Button onClick={onEdit} className="max-md:flex-1">
-          <Pencil /> Edit
-        </Button>
+        {canEdit ? (
+          <Button onClick={onEdit} className="max-md:flex-1">
+            <Pencil /> Edit
+          </Button>
+        ) : null}
       </FormSheetFooter>
     </>
   );

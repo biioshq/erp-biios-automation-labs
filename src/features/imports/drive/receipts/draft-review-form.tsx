@@ -13,6 +13,7 @@ import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
 import { formValidation } from "@/components/forms/form-options";
+import { useCan } from "@/components/current-user";
 import { applyFieldErrors } from "@/lib/action-result";
 import { PAYMENT_METHODS, PROJECT_STAGES } from "@/lib/constants";
 import { expenseCategoryChoices, type ExpenseCategoryOption } from "@/lib/expense-categories";
@@ -98,9 +99,11 @@ export function DraftReviewForm({
   const interState = isInterState(gst?.gstin);
 
   const currentCategory = draft.values.category || undefined;
+  // Salary expenses need the salaries data permission (the save refuses them otherwise).
+  const seesSalaries = useCan("data.salaries");
   const categoryOptions = useMemo(
-    () => expenseCategoryChoices(categories, { current: currentCategory, allowSalaries: true }),
-    [categories, currentCategory],
+    () => expenseCategoryChoices(categories, { current: currentCategory, allowSalaries: seesSalaries }),
+    [categories, currentCategory, seesSalaries],
   );
   const projectOptions = useMemo(
     () =>

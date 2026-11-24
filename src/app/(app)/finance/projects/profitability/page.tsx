@@ -13,7 +13,8 @@ import { listProjectFinances } from "@/features/finance/projects/queries";
 import { parseStatuses } from "@/features/finance/projects/utils";
 import { ProjectStatusFilter } from "@/features/finance/projects/components/status-filter";
 import { ProfitabilityTable, SpendByTypeTable } from "@/features/finance/projects/components/profitability-view";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Project profitability" };
 
@@ -21,7 +22,8 @@ type Props = { searchParams: Promise<Record<string, string | string[] | undefine
 
 export default async function ProjectProfitabilityPage({ searchParams }: Props) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.project_finance:view")) return <NoAccess title="Profitability" />;
   const status = parseStatuses((await searchParams).status);
   const { rows, total } = await listProjectFinances(status);
 

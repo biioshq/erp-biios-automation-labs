@@ -20,6 +20,7 @@ import { MovementTypeBadge } from "@/components/shared/status-badge";
 import { MOVEMENT_TYPES, PROJECT_STAGES, WASTAGE_REASONS, labelOf } from "@/lib/constants";
 import { formatDate, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/components/current-user";
 import type { Paginated } from "@/lib/list-params";
 import type { MovementRow } from "../types";
 
@@ -129,6 +130,11 @@ export function MovementsView({
   items: Option[];
 }) {
   const searchParams = useSearchParams();
+  // The export goes through /api/reports/inventory, which checks the inventory report's own
+  // permission (finance.reports:export), so the button needs both to work.
+  const canExportMovements = useCan("inventory.movements:export");
+  const canExportReport = useCan("finance.reports:export");
+  const canExport = canExportMovements && canExportReport;
 
   const columns = useMemo<ColumnDef<MovementRow>[]>(
     () => [
@@ -261,25 +267,27 @@ export function MovementsView({
       getRowId={(r) => r.id}
       initialHidden={["by", "note"]}
       toolbarActions={
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-8 max-md:h-10">
-              <Download className="opacity-70" /> Export
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel className="text-xs">Filtered movements</DropdownMenuLabel>
-            <DropdownMenuItem asChild>
-              <a href={exportHref("xlsx")}>Excel (.xlsx)</a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a href={exportHref("csv")}>CSV</a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a href={exportHref("pdf")}>PDF</a>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        canExport ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 max-md:h-10">
+                <Download className="opacity-70" /> Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel className="text-xs">Filtered movements</DropdownMenuLabel>
+              <DropdownMenuItem asChild>
+                <a href={exportHref("xlsx")}>Excel (.xlsx)</a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href={exportHref("csv")}>CSV</a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href={exportHref("pdf")}>PDF</a>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null
       }
       emptyState={
         <EmptyState

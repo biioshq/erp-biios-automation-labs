@@ -21,7 +21,7 @@ export const createCategory = defineAction(
     const created = await InventoryCategory.create(input);
     return { id: String(created._id) };
   },
-  { revalidate: REVALIDATE, message: "Category added" },
+  { permission: "inventory.categories:create", revalidate: REVALIDATE, message: "Category added" },
 );
 
 export const updateCategory = defineAction(
@@ -36,7 +36,7 @@ export const updateCategory = defineAction(
     );
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Category updated" },
+  { permission: "inventory.categories:edit", revalidate: REVALIDATE, message: "Category updated" },
 );
 
 /** Deleted only when no active item uses it. Archived items lose the reference. */
@@ -56,5 +56,5 @@ export const deleteCategory = defineAction(
     await InventoryCategory.deleteOne({ _id: existing._id });
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Category deleted", role: "admin" },
+  { permission: "inventory.categories:delete", revalidate: REVALIDATE, message: "Category deleted" },
 );

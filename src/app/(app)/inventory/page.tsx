@@ -16,7 +16,8 @@ import { STOCK_PERIODS, getStockPosition } from "@/features/inventory/dashboard/
 import { StockOperations, StockRollForwardSection, StockSplit } from "@/features/inventory/dashboard/components/stock-position";
 import type { StockPeriodKey } from "@/features/inventory/dashboard/types";
 import { CategoryValueChart, MovementTrendChart, StockHealthChart } from "@/features/inventory/dashboard/components/dashboard-charts";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 
 export const metadata: Metadata = { title: "Inventory" };
 
@@ -30,7 +31,8 @@ function StatLink({ href, children }: { href: string; children: React.ReactNode 
 
 export default async function InventoryDashboardPage({ searchParams }: PageProps<"/inventory">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "inventory.dashboard:view")) return <NoAccess eyebrow="Inventory" title="Inventory dashboard" />;
   const sp = await searchParams;
   const raw = Array.isArray(sp.period) ? sp.period[0] : sp.period;
   const period: StockPeriodKey = STOCK_PERIODS.find((p) => p.value === raw)?.value ?? "fy";
@@ -55,16 +57,20 @@ export default async function InventoryDashboardPage({ searchParams }: PageProps
         description="Stock levels, value and movement across every item. Status colours match the lists and item pages."
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link href="/inventory/items?new=1">
-                <Plus /> Add item
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="/inventory/purchase">
-                <PackagePlus /> Purchase stock
-              </Link>
-            </Button>
+            {can(user, "inventory.items:create") ? (
+              <Button variant="outline" asChild>
+                <Link href="/inventory/items?new=1">
+                  <Plus /> Add item
+                </Link>
+              </Button>
+            ) : null}
+            {can(user, "inventory.purchase:create") ? (
+              <Button asChild>
+                <Link href="/inventory/purchase">
+                  <PackagePlus /> Purchase stock
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -119,7 +125,7 @@ export default async function InventoryDashboardPage({ searchParams }: PageProps
           <StockRollForwardSection position={position} periods={STOCK_PERIODS} />
         </div>
         <div className="min-w-0 lg:col-span-2">
-          <StockOperations />
+          <StockOperations can={(p) => can(user, p)} />
         </div>
       </div>
 
@@ -187,11 +193,13 @@ export default async function InventoryDashboardPage({ searchParams }: PageProps
                     </p>
                     {item.reason ? <p className="text-xs text-muted-foreground">{item.reason}</p> : null}
                   </div>
-                  <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
-                    <Link href={`/inventory/purchase?item=${item.id}`}>
-                      <ShoppingCart /> Purchase
-                    </Link>
-                  </Button>
+                  {can(user, "inventory.purchase:create") ? (
+                    <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
+                      <Link href={`/inventory/purchase?item=${item.id}`}>
+                        <ShoppingCart /> Purchase
+                      </Link>
+                    </Button>
+                  ) : null}
                 </li>
               ))}
             </ul>

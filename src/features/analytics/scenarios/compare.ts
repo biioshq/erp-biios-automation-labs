@@ -17,7 +17,7 @@ export type BusinessPosition = {
   spent: number;
   activePeople: number;
   freeFte: number;
-  /** Admins only. */
+  /** Only for viewers who see cash figures. */
   cash: number | null;
 };
 

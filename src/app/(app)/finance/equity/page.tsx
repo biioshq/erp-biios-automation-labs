@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowUpFromLine, Landmark, Plus, Scale, TrendingUp, UserRound, Users, Vault } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IfCan } from "@/features/finance/equity/components/if-can";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { formatDate } from "@/lib/format";
 import { getEquitySummary, getPanelData } from "@/features/finance/equity/queries";
 import { EquityPanels } from "@/features/finance/equity/components/equity-panels";
@@ -20,7 +21,7 @@ export const metadata: Metadata = { title: "Capital / Equity" };
 export default async function EquitySummaryPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Capital / Equity" />;
+  if (!can(user, "finance.equity:view")) return <NoAccess title="Capital / Equity" />;
   const [data, panel] = await Promise.all([getEquitySummary(), getPanelData()]);
   const { overview } = data;
   const empty = data.holders.length === 0 && data.latest.length === 0;
@@ -41,16 +42,20 @@ export default async function EquitySummaryPage() {
         }
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/finance/equity/drawings?new=1" scroll={false}>
-                <ArrowUpFromLine /> Record drawing
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="?new=capital" scroll={false}>
-                <Plus /> Record capital
-              </Link>
-            </Button>
+            <IfCan permission="finance.equity:create">
+              <Button asChild variant="outline">
+                <Link href="/finance/equity/drawings?new=1" scroll={false}>
+                  <ArrowUpFromLine /> Record drawing
+                </Link>
+              </Button>
+            </IfCan>
+            <IfCan permission="finance.equity:create">
+              <Button asChild>
+                <Link href="?new=capital" scroll={false}>
+                  <Plus /> Record capital
+                </Link>
+              </Button>
+            </IfCan>
           </>
         }
       />
@@ -85,16 +90,20 @@ export default async function EquitySummaryPage() {
           description="Add the owners and investors, then record the capital each one put in. Drawings, dividends and reserves follow from here."
           action={
             <div className="flex flex-wrap justify-center gap-2">
-              <Button asChild>
-                <Link href="?new=capital" scroll={false}>
-                  <Plus /> Record capital
-                </Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link href="?holder=new&kind=owner" scroll={false}>
-                  <UserRound /> Add owner
-                </Link>
-              </Button>
+              <IfCan permission="finance.equity:create">
+                <Button asChild>
+                  <Link href="?new=capital" scroll={false}>
+                    <Plus /> Record capital
+                  </Link>
+                </Button>
+              </IfCan>
+              <IfCan permission="finance.equity:create">
+                <Button asChild variant="outline">
+                  <Link href="?holder=new&kind=owner" scroll={false}>
+                    <UserRound /> Add owner
+                  </Link>
+                </Button>
+              </IfCan>
             </div>
           }
         />
@@ -105,11 +114,13 @@ export default async function EquitySummaryPage() {
             title="Owners and investors"
             description="Capital in, drawings out and the current balance of each person. Click a name for their history."
             actions={
-              <Button asChild size="sm" variant="outline">
-                <Link href="?holder=new" scroll={false}>
-                  <Plus /> Add person
-                </Link>
-              </Button>
+              <IfCan permission="finance.equity:create">
+                <Button asChild size="sm" variant="outline">
+                  <Link href="?holder=new" scroll={false}>
+                    <Plus /> Add person
+                  </Link>
+                </Button>
+              </IfCan>
             }
             contentClassName="p-0 sm:p-0"
           >

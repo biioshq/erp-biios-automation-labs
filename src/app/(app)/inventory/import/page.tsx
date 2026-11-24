@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { EmptyState } from "@/components/shared/empty-state";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 import { driveConfigured } from "@/server/google-drive";
 import { CsvImport } from "@/features/imports/csv/components/csv-import";
 import { DrivePhotosImport } from "@/features/imports/drive/components/drive-photos-import";
@@ -14,6 +15,7 @@ export const metadata: Metadata = { title: "Import items" };
 export default async function InventoryImportPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
+  if (!can(user, "inventory.import:view")) return <NoAccess eyebrow="Inventory" title="Import" />;
   return (
     <Page>
       <PageHeader
@@ -21,8 +23,8 @@ export default async function InventoryImportPage() {
         title="Import"
         description="Add many items at once from a CSV or Excel file, and attach item photos from a Google Drive folder. Nothing is saved until you review it."
       />
-      {user.role !== "admin" ? (
-        <EmptyState title="Only admins can import" description="Ask an admin to import the file for you." />
+      {!can(user, "inventory.import:create") ? (
+        <EmptyState title="You do not have permission to import" description="Ask an admin to import the file for you." />
       ) : (
         <div className="space-y-6">
           <Section title="Items from a CSV or Excel file" description="One item per row, including parts lists (BOM): every column is kept, as a field or as a detail on the item. Items that already exist get the new stock added instead of a duplicate.">

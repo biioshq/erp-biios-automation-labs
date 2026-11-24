@@ -4,7 +4,7 @@ import { fromDateInput } from "@/lib/dates";
 import type { NewProjectInputs } from "../schemas";
 import type { ResultRow, ResultTable, ScenarioResults } from "../types";
 import type { AllocationFact, CashFact, ComputeContext, EmployeeFact, EquipmentFact, ItemFact, MembershipFact, ProjectFact } from "./facts";
-import { PRICE_BASIS_LABEL, compareRow, emptyMetrics, periodDays, periodMonths, priceOf, qtyByUnit, round2, round3, stat, sumOf } from "./common";
+import { PRICE_BASIS_LABEL, compareRow, emptyMetrics, periodDays, periodMonths, priceOf, qtyByUnit, round2, round3, stat, sumOf, viewOf } from "./common";
 import { averageSalary, departmentCapacity } from "./capacity";
 
 export type NewProjectFacts = {
@@ -15,7 +15,7 @@ export type NewProjectFacts = {
   memberships: MembershipFact[];
   /** Every project (names of the ones affected; planned and active ones for the totals). */
   projects: ProjectFact[];
-  /** Admins only. */
+  /** Only for viewers who see cash figures. */
   cash: CashFact | null;
 };
 
@@ -78,11 +78,11 @@ export function computeNewProject(inputs: NewProjectInputs, facts: NewProjectFac
     const free = freeLeft.get(m.department) ?? 0;
     const covered = Math.min(free, m.count);
     freeLeft.set(m.department, round2(free - covered));
-    const salary = ctx.admin ? averageSalary(facts.employees, m.department) : null;
+    const salary = ctx.salaries ? averageSalary(facts.employees, m.department) : null;
     return { ...m, free: round2(free), short: round2(Math.max(0, m.count - free)), cost: salary !== null ? round2(salary * m.count * m.months) : null, salary };
   });
   const peopleShort = round2(manpower.reduce((s, m) => s + m.short, 0));
-  const labourFromData = ctx.admin && manpower.length && manpower.every((m) => m.cost !== null) ? sumOf(manpower, (m) => m.cost ?? 0) : null;
+  const labourFromData = ctx.salaries && manpower.length && manpower.every((m) => m.cost !== null) ? sumOf(manpower, (m) => m.cost ?? 0) : null;
 
   // The estimate: what was entered, else what the ERP's own figures give.
   const labour = inputs.labourCost ?? labourFromData ?? 0;
@@ -122,12 +122,12 @@ export function computeNewProject(inputs: NewProjectInputs, facts: NewProjectFac
   metrics.equipmentShort = equip.length ? equipmentShort : null;
   metrics.equipmentCost = inputs.equipmentCost ?? null;
   metrics.shortItems = materials.filter((m) => m.short > 0).length;
-  metrics.cashNeed = ctx.admin ? cashNeed : null;
+  metrics.cashNeed = ctx.cash ? cashNeed : null;
   for (const m of materials.filter((x) => x.short > 0)) metrics.risks.push(`${m.item.name}: ${formatNumber(m.short)} ${m.item.unit} to buy`);
   for (const e of equip.filter((x) => x.short > 0)) metrics.risks.push(`${e.label}: ${e.short} short${e.conflict ? ` (${e.conflict.toLowerCase()})` : ""}`);
   for (const m of manpower.filter((x) => x.short > 0)) metrics.risks.push(`${labelOf(DEPARTMENTS, m.department as Department)}: ${formatNumber(m.short)} FTE short`);
   if (gap !== null && gap > 0) metrics.risks.push(`Estimated cost is ${formatCurrency(gap)} above the proposed budget`);
-  if (ctx.admin && facts.cash && cashNeed > facts.cash.total) metrics.risks.push(`Needs ${formatCurrency(cashNeed - facts.cash.total)} more cash than the company holds`);
+  if (ctx.cash && facts.cash && cashNeed > facts.cash.total) metrics.risks.push(`Needs ${formatCurrency(cashNeed - facts.cash.total)} more cash than the company holds`);
 
   const running = facts.projects.filter((p) => p.status === "planning" || p.status === "active");
   const activeBudget = sumOf(running, (p) => p.budget);
@@ -138,7 +138,7 @@ export function computeNewProject(inputs: NewProjectInputs, facts: NewProjectFac
     compareRow("freeFte", "Free people across the company (FTE)", "number", freeFte, round2(Math.max(0, freeFte - (manpower.reduce((s, m) => s + m.count, 0) - peopleShort)))),
     compareRow("short", "Materials short", "number", 0, metrics.shortItems),
   ];
-  if (ctx.admin && facts.cash) comparison.push(compareRow("cash", "Cash and bank balances", "money", facts.cash.total, round2(facts.cash.total - cashNeed)));
+  if (ctx.cash && facts.cash) comparison.push(compareRow("cash", "Cash and bank balances", "money", facts.cash.total, round2(facts.cash.total - cashNeed)));
 
   const costRows: ResultRow[] = [
     { cells: { line: "Labour", entered: inputs.labourCost ?? null, data: labourFromData, used: labour } },
@@ -151,9 +151,9 @@ export function computeNewProject(inputs: NewProjectInputs, facts: NewProjectFac
     {
       key: "cost",
       title: "Cost estimate",
-      description: ctx.admin
+      description: ctx.salaries
         ? "Used is the figure you entered, or the ERP's own estimate when you left it empty: materials at stock prices, labour at the department's average salary."
-        : "Used is the figure you entered, or for materials the cost at stock prices when you left it empty. Salary-based labour estimates are shown to admins only, so labour counts as zero unless you enter it.",
+        : "Used is the figure you entered, or for materials the cost at stock prices when you left it empty. Salary-based labour estimates are left out for your role, so labour counts as zero unless you enter it.",
       columns: [
         { key: "line", header: "Cost", type: "text" },
         { key: "entered", header: "Entered", type: "money" },
@@ -213,10 +213,10 @@ export function computeNewProject(inputs: NewProjectInputs, facts: NewProjectFac
         { key: "months", header: "Months", type: "number" },
         { key: "free", header: "Free capacity (FTE)", type: "number" },
         { key: "short", header: "Additional people", type: "number" },
-        ...(ctx.admin ? [{ key: "cost", header: "Cost at average salary", type: "money" as const }] : []),
+        ...(ctx.salaries ? [{ key: "cost", header: "Cost at average salary", type: "money" as const }] : []),
       ],
       rows: manpower.map((m) => ({
-        cells: { department: labelOf(DEPARTMENTS, m.department as Department), role: m.role ?? "Any", count: m.count, months: m.months, free: m.free, short: m.short, ...(ctx.admin ? { cost: m.cost } : {}) },
+        cells: { department: labelOf(DEPARTMENTS, m.department as Department), role: m.role ?? "Any", count: m.count, months: m.months, free: m.free, short: m.short, ...(ctx.salaries ? { cost: m.cost } : {}) },
         tone: m.short > 0 ? "danger" : undefined,
       })),
       emptyText: "No manpower listed.",
@@ -237,7 +237,7 @@ export function computeNewProject(inputs: NewProjectInputs, facts: NewProjectFac
     },
   ];
 
-  if (ctx.admin) {
+  if (ctx.cash) {
     tables.push({
       key: "feasibility",
       title: "Cash and budget feasibility",
@@ -271,7 +271,9 @@ export function computeNewProject(inputs: NewProjectInputs, facts: NewProjectFac
     `Materials are priced at the ${PRICE_BASIS_LABEL[inputs.priceBasis].toLowerCase()}${materials.some((m) => m.fellBack) ? "; materials with no purchase price recorded use their average cost" : ""}.`,
     "The cash requirement leaves out materials taken from stock that is already paid for.",
   ];
-  if (!ctx.admin) notes.push("Cash balances and salary-based labour costs are shown to admins only.");
+  if (!ctx.cash && !ctx.salaries) notes.push("Cash balances and salary-based labour costs are left out: your role does not show them.");
+  else if (!ctx.cash) notes.push("Cash balances are left out: your role does not show them.");
+  else if (!ctx.salaries) notes.push("Salary-based labour costs are left out: your role does not show salaries.");
   if (inputs.scope) notes.push(`Scope: ${inputs.scope}`);
   if (inputs.size) notes.push(`Size: ${inputs.size}`);
 
@@ -279,13 +281,13 @@ export function computeNewProject(inputs: NewProjectInputs, facts: NewProjectFac
     version: 1,
     type: "new_project",
     computedAt: new Date().toISOString(),
-    view: ctx.admin ? "admin" : "member",
+    view: viewOf(ctx),
     headline,
     stats: [
       stat("total", "Total estimated cost", "money", total),
       stat("buy", "Materials to purchase", "money", purchaseCost, { hint: `${metrics.shortItems} items`, tone: purchaseCost > 0 ? "warning" : "default" }),
       stat("people", "Additional people needed", "number", peopleShort, { tone: peopleShort > 0 ? "danger" : "success" }),
-      ctx.admin
+      ctx.cash
         ? stat("cash", "Estimated cash requirement", "money", cashNeed, { hint: facts.cash ? `${formatCurrency(facts.cash.total)} in cash and bank` : undefined, tone: facts.cash && cashNeed > facts.cash.total ? "danger" : "default" })
         : stat("budget", "Budget surplus or shortfall", "money", gap !== null ? round2(-gap) : null, { tone: gap !== null && gap > 0 ? "danger" : "default" }),
     ],

@@ -174,4 +174,15 @@ export function sumOf<T>(rows: readonly T[], pick: (r: T) => number): number {
   return round2(rows.reduce((s, r) => s + pick(r), 0));
 }
 
-export const SALARIES_NOTE = "Project spend leaves out salary expenses: only admins see them.";
+export const SALARIES_NOTE = "Project spend leaves out salary expenses: your role does not show salaries.";
+
+/**
+ * Which restricted figures a result holds: "admin" salary and cash figures, "member" neither,
+ * "salaries" only salary figures, "cash" only cash figures. A saved result is shown only to
+ * people who may see every kind of figure it holds.
+ */
+export function viewOf(ctx: { salaries: boolean; cash: boolean }): "admin" | "member" | "salaries" | "cash" {
+  if (ctx.salaries && ctx.cash) return "admin";
+  if (ctx.salaries) return "salaries";
+  return ctx.cash ? "cash" : "member";
+}

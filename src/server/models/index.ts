@@ -14,6 +14,7 @@ import "server-only";
  *   expenseCategories (custom categories and renames of built-ins, matched by value on expenses / recurringExpenses)
  *   expenseDrafts (bills imported from Google Drive, waiting for review) >── files (receipt), ── expenses once saved
  *   notifications, reports (export log), counters (document numbers), user (Better Auth)
+ *   roles (custom roles and the edited Member role; user.role holds the role key)
  *
  * Finance (balance sheet side; every balance is computed in src/server/accounting, never stored):
  *   bankAccounts (cash and bank, opening balances) ─< expenses / income / payments (account)
@@ -31,6 +32,7 @@ import "server-only";
  */
 export { Counter } from "./counter";
 export { User, type UserDoc } from "./user";
+export { Role, type RoleDoc } from "./role";
 export { FileModel, type FileDoc, FILE_KINDS, type FileKind } from "./file";
 export { Project, type ProjectDoc } from "./project";
 export { Expense, type ExpenseDoc } from "./expense";

@@ -12,7 +12,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
 import { Section } from "@/components/shared/page";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { AddSubgroupButton } from "@/features/finance/groups/components/add-subgroup-button";
 import type { GroupOption } from "@/features/finance/groups/types";
@@ -116,7 +116,20 @@ function TotalsLine({ node, kind }: { node: AssetGroupNode; kind: AssetKind }) {
   );
 }
 
-function Subgroup({ node, kind, groups, onOpen, onAdd }: { node: AssetGroupNode; kind: AssetKind; groups: GroupOption[]; onOpen: (id: string) => void; onAdd: (group: string) => void }) {
+function Subgroup({
+  node,
+  kind,
+  groups,
+  onOpen,
+  onAdd,
+}: {
+  node: AssetGroupNode;
+  kind: AssetKind;
+  groups: GroupOption[];
+  onOpen: (id: string) => void;
+  /** Null when the person cannot add assets. */
+  onAdd: ((group: string) => void) | null;
+}) {
   return (
     <div className="border-t" style={{ paddingLeft: `${Math.min(node.depth, 4) * 12}px` }}>
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 sm:px-5">
@@ -127,9 +140,11 @@ function Subgroup({ node, kind, groups, onOpen, onAdd }: { node: AssetGroupNode;
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={() => onAdd(node.key)}>
-            <Plus /> Asset
-          </Button>
+          {onAdd ? (
+            <Button size="sm" variant="ghost" onClick={() => onAdd(node.key)}>
+              <Plus /> Asset
+            </Button>
+          ) : null}
           <AddSubgroupButton parents={descendants(groups, node.key)} defaultParent={node.key} label="Subgroup" variant="ghost" />
         </div>
       </div>
@@ -161,7 +176,11 @@ export function AssetsView({
   layout: RegisterLayout;
 }) {
   const labels = labelsFor(kind);
-  const isAdmin = useIsAdmin();
+  // These only hide controls; every action checks the same permission on the server.
+  const canCreate = useCan("finance.fixed_assets:create");
+  const canEdit = useCan("finance.fixed_assets:edit");
+  const canDelete = useCan("finance.fixed_assets:delete");
+  const canDeleteExpenses = useCan("finance.expenses:delete");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -169,13 +188,13 @@ export function AssetsView({
   const [version, setVersion] = useState(0);
 
   const panel: Panel = useMemo(() => {
-    if (searchParams.get("new") === "1") return { kind: "new", group: searchParams.get("group") ?? undefined };
+    if (searchParams.get("new") === "1") return canCreate ? { kind: "new", group: searchParams.get("group") ?? undefined } : null;
     const edit = searchParams.get("edit");
-    if (edit) return { kind: "edit", id: edit };
+    if (edit) return canEdit ? { kind: "edit", id: edit } : { kind: "view", id: edit };
     const view = searchParams.get("view");
     if (view) return { kind: "view", id: view };
     return null;
-  }, [searchParams]);
+  }, [searchParams, canCreate, canEdit]);
 
   const setPanel = (next: Panel) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -308,9 +327,11 @@ export function AssetsView({
           title={`No ${labels.singular}s recorded yet`}
           description={kind === "intangible" ? "Add software and licences the company owns, with their useful life, to see their amortisation and carrying value." : "Add furniture, machines, vehicles and computers the company owns, with their useful life, to see depreciation and book value."}
           action={
-            <Button onClick={() => openNew()}>
-              <Plus /> Add {labels.singular}
-            </Button>
+            canCreate ? (
+              <Button onClick={() => openNew()}>
+                <Plus /> Add {labels.singular}
+              </Button>
+            ) : undefined
           }
         />
       ) : layout === "register" ? (
@@ -356,9 +377,11 @@ export function AssetsView({
               actions={
                 node.key === "_unknown" || node.key === labels.root ? null : (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => openNew(node.key)}>
-                      <Plus /> Asset
-                    </Button>
+                    {canCreate ? (
+                      <Button size="sm" variant="outline" onClick={() => openNew(node.key)}>
+                        <Plus /> Asset
+                      </Button>
+                    ) : null}
                     <AddSubgroupButton parents={descendants(groups.filter((g) => !g.archived), node.key)} defaultParent={node.key} />
                   </>
                 )
@@ -368,7 +391,7 @@ export function AssetsView({
                 <>
                   <GroupTable rows={node.assets} kind={kind} onOpen={open} />
                   {node.children.map((c) => (
-                    <Subgroup key={c.key} node={c} kind={kind} groups={groups.filter((g) => !g.archived)} onOpen={open} onAdd={openNew} />
+                    <Subgroup key={c.key} node={c} kind={kind} groups={groups.filter((g) => !g.archived)} onOpen={open} onAdd={canCreate ? openNew : null} />
                   ))}
                 </>
               ) : (
@@ -395,7 +418,7 @@ export function AssetsView({
             key={detail.id}
             kind={detail.kind}
             asset={detail}
-            isAdmin={isAdmin}
+            canDeleteBills={canDelete && canDeleteExpenses}
             options={{ ...options, groups: rootGroups }}
             onDone={(id) => {
               setDetail(null);
@@ -408,7 +431,9 @@ export function AssetsView({
           <AssetDetailView
             asset={detail}
             accounts={options.accounts}
-            isAdmin={isAdmin}
+            canEdit={canEdit}
+            canDelete={canDelete}
+            canDeleteBills={canDelete && canDeleteExpenses}
             onEdit={() => setPanel({ kind: "edit", id: detail.id })}
             onChanged={reload}
             onDelete={(deleteBill) => remove(detail, deleteBill)}

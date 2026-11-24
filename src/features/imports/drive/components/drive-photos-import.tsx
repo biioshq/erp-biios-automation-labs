@@ -12,7 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { EmptyState } from "@/components/shared/empty-state";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { ItemThumb } from "@/features/inventory/items/components/item-photo";
 import { emitDataChanged } from "@/lib/events";
 import { formatFileSize, formatNumber } from "@/lib/format";
@@ -123,13 +123,13 @@ function ResultNote({ result }: { result: Result }) {
 }
 
 /**
- * Google Drive photos to inventory items (admin only): paste a shared folder link, review which
+ * Google Drive photos to inventory items (needs the Inventory import permission): paste a shared folder link, review which
  * image goes to which item (matched by SKU or name), then add them one file per request.
  * Existing photos are kept unless "Replace existing photos" is ticked.
  */
 export function DrivePhotosImport({ configured }: { configured: boolean }) {
   const router = useRouter();
-  const isAdmin = useIsAdmin();
+  const canImport = useCan("inventory.import:create");
   const [link, setLink] = useState("");
   const [finding, setFinding] = useState(false);
   const [plan, setPlan] = useState<DrivePhotoPlan | null>(null);
@@ -167,7 +167,7 @@ export function DrivePhotosImport({ configured }: { configured: boolean }) {
     });
   }, [plan, chosen, itemsById, results, photoAdded, excluded, replace]);
 
-  if (!isAdmin) return <EmptyState compact title="Only admins can import" description="Ask an admin to import the photos for you." />;
+  if (!canImport) return <EmptyState compact title="Your role cannot import" description="Ask an admin to import the photos for you." />;
   if (!configured) return <SetupNote />;
 
   const ready = states.filter((s) => s.willAdd);

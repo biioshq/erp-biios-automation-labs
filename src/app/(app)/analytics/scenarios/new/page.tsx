@@ -4,7 +4,10 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { SCENARIO_TYPES, labelOf, type ScenarioType } from "@/lib/constants";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { analyticsViewer, userCanOpen } from "@/features/analytics/viewer";
 import { getScenarioFormOptions } from "@/features/analytics/scenarios/queries";
 import { scenarioTypeSchema } from "@/features/analytics/scenarios/schemas";
 import { SCENARIO_TYPE_META } from "@/features/analytics/scenarios/components/badges";
@@ -18,6 +21,9 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
 export default async function NewScenarioPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
+  if (!can(user, ANALYTICS.scenarios.create)) return <NoAccess eyebrow="Analytics & Planning" title="New scenario" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const parsed = scenarioTypeSchema.safeParse(first((await searchParams).type));
 
   if (!parsed.success) {
@@ -34,7 +40,8 @@ export default async function NewScenarioPage({ searchParams }: { searchParams: 
   }
 
   const type: ScenarioType = parsed.data;
-  const options = await getScenarioFormOptions({ admin: user.role === "admin" });
+  const viewer = analyticsViewer(user);
+  const options = await getScenarioFormOptions(viewer);
   return (
     <Page>
       <PageHeader
@@ -42,14 +49,16 @@ export default async function NewScenarioPage({ searchParams }: { searchParams: 
         title={labelOf(SCENARIO_TYPES, type)}
         description={SCENARIO_TYPE_META[type].summary}
         actions={
-          <Button asChild variant="outline">
-            <Link href="/analytics/scenarios/new">
-              <ArrowLeft /> Other types
-            </Link>
-          </Button>
+          open("/analytics/scenarios/new") ? (
+            <Button asChild variant="outline">
+              <Link href="/analytics/scenarios/new">
+                <ArrowLeft /> Other types
+              </Link>
+            </Button>
+          ) : null
         }
       />
-      <ScenarioForm type={type} options={options} isAdmin={user.role === "admin"} />
+      <ScenarioForm type={type} options={options} seesSalaries={viewer.salaries} />
     </Page>
   );
 }

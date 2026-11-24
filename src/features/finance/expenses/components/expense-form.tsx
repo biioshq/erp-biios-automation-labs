@@ -41,7 +41,7 @@ import type { ExpenseDetail } from "../types";
 import { ReceiptPanel } from "./receipt-panel";
 import { accountChoices } from "./record-payment-dialog";
 import { formValidation } from "@/components/forms/form-options";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { BankLineLink } from "@/features/finance/bank-statements/components/bank-line-link";
 
 type Confidence = Partial<Record<FieldPath<ExpenseFormInput>, number>>;
@@ -122,15 +122,16 @@ export function ExpenseForm({
   onCancel: () => void;
 }) {
   const isEdit = Boolean(expense);
-  // Inventory expenses come from assignments; salary payments are recorded by admins only.
-  const isAdmin = useIsAdmin();
+  // Inventory expenses come from assignments; salary payments need the salaries data permission.
+  const seesSalaries = useCan("data.salaries");
+  const canDelete = useCan("finance.expenses:delete");
   const currentCategory = expense?.category;
   const currentLabel = expense?.categoryLabel;
   const categoryOptions = useMemo(() => {
-    const choices = expenseCategoryChoices(categories, { current: currentCategory, allowSalaries: isAdmin });
+    const choices = expenseCategoryChoices(categories, { current: currentCategory, allowSalaries: seesSalaries });
     // A record whose category the list does not know still shows the name its row was given.
     return choices.map((c) => (c.value === currentCategory && c.label === currentCategory && currentLabel ? { ...c, label: currentLabel } : c));
-  }, [categories, currentCategory, currentLabel, isAdmin]);
+  }, [categories, currentCategory, currentLabel, seesSalaries]);
   // The rate of the last quick fill, while its taxes are untouched: they are split again if the GSTIN state changes.
   const quickRate = useRef<number | null>(null);
   const [pending, startTransition] = useTransition();
@@ -345,8 +346,8 @@ export function ExpenseForm({
           receipt={receipt}
           onRead={applyOcr}
           onRemove={removeReceipt}
-          // Removing or replacing the saved receipt deletes the file, which only admins may do.
-          locked={!isAdmin && Boolean(receipt) && receipt?.id === expense?.receipt?.id}
+          // Removing or replacing the saved receipt deletes the file, which needs the delete permission.
+          locked={!canDelete && Boolean(receipt) && receipt?.id === expense?.receipt?.id}
           summary={ocrSummary}
           className="lg:sticky lg:top-0 lg:max-h-[calc(100dvh-170px)]"
         />

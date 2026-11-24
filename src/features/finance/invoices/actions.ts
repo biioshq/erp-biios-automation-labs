@@ -7,7 +7,7 @@ import { AppError, notFound } from "@/server/errors";
 import { FileModel, Income, Invoice } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
 import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { connectDB } from "@/server/db";
 import { endOfDayIST, fromDateInput } from "@/lib/dates";
 import { formatCurrency, round2 } from "@/lib/format";
@@ -103,7 +103,7 @@ export const createInvoice = defineAction(
     if (input.fileId) await attachFiles([input.fileId], { type: "invoice", id: String(created._id) }, null);
     return { id: String(created._id), number };
   },
-  { revalidate: REVALIDATE, message: "Invoice created" },
+  { revalidate: REVALIDATE, message: "Invoice created", permission: "finance.invoices:create" },
 );
 
 export const updateInvoice = defineAction(
@@ -112,9 +112,9 @@ export const updateInvoice = defineAction(
     const existing = await Invoice.findById(input.id).lean();
     if (!existing) throw notFound("The invoice");
     if (existing.status === "cancelled") throw new AppError("This invoice is cancelled. Restore it before editing.", "conflict");
-    // Removing or replacing a saved file deletes it, and deletes are admin-only.
-    if (user.role !== "admin" && existing.file && String(existing.file) !== input.fileId) {
-      throw new AppError("Only an admin can remove or replace a saved invoice file.", "forbidden", { fileId: ["Only an admin can change this file"] });
+    // Removing or replacing a saved file deletes it, so it needs the delete permission.
+    if (!can(user, "finance.invoices:delete") && existing.file && String(existing.file) !== input.fileId) {
+      throw new AppError("You do not have permission to remove or replace a saved invoice file.", "forbidden", { fileId: ["You cannot change this file"] });
     }
     await assertUsableFile(input.fileId, user.id, { id: input.id, file: existing.file });
     const doc = toDocument(input);
@@ -147,7 +147,7 @@ export const updateInvoice = defineAction(
     if (input.fileId) await attachFiles([input.fileId], { type: "invoice", id: input.id }, null);
     return { id: input.id, number };
   },
-  { revalidate: REVALIDATE, message: "Invoice updated" },
+  { revalidate: REVALIDATE, message: "Invoice updated", permission: "finance.invoices:edit" },
 );
 
 export const cancelInvoice = defineAction(
@@ -161,7 +161,8 @@ export const cancelInvoice = defineAction(
     await Invoice.updateOne({ _id: existing._id }, { $set: { status: "cancelled" } });
     return { id, number: existing.number };
   },
-  { revalidate: REVALIDATE, message: "Invoice cancelled", role: "admin" },
+  // Cancelling and restoring were admin-only, like deleting.
+  { revalidate: REVALIDATE, message: "Invoice cancelled", permission: "finance.invoices:delete" },
 );
 
 export const restoreInvoice = defineAction(
@@ -172,7 +173,7 @@ export const restoreInvoice = defineAction(
     await Invoice.updateOne({ _id: existing._id }, { $set: { status: "issued" } });
     return { id, number: existing.number };
   },
-  { revalidate: REVALIDATE, message: "Invoice restored", role: "admin" },
+  { revalidate: REVALIDATE, message: "Invoice restored", permission: "finance.invoices:delete" },
 );
 
 export const deleteInvoice = defineAction(
@@ -187,7 +188,7 @@ export const deleteInvoice = defineAction(
     if (existing.file) await removeFile(String(existing.file));
     return { id, number: existing.number };
   },
-  { revalidate: REVALIDATE, message: "Invoice deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Invoice deleted", permission: "finance.invoices:delete" },
 );
 
 /** Records a payment received against an invoice: a new income record linked to it. */
@@ -222,7 +223,7 @@ export const recordInvoiceReceipt = defineAction(
     });
     return { id: String(created._id), number };
   },
-  { revalidate: REVALIDATE, message: "Payment recorded" },
+  { revalidate: REVALIDATE, message: "Payment recorded", permission: "finance.invoices:edit" },
 );
 
 /** Links an existing receipt (usually an advance) to an invoice, so it settles the invoice instead of counting on its own. */
@@ -251,7 +252,7 @@ export const applyReceiptToInvoice = defineAction(
     if (!done.modifiedCount) throw new AppError(`${income.number} was linked to an invoice meanwhile.`, "conflict");
     return { id: input.invoiceId, number: income.number };
   },
-  { revalidate: REVALIDATE, message: "Receipt applied to the invoice" },
+  { revalidate: REVALIDATE, message: "Receipt applied to the invoice", permission: "finance.invoices:edit" },
 );
 
 /** Removes a receipt's link to its invoice. The receipt then counts as income of its own category again. */
@@ -263,12 +264,13 @@ export const unlinkReceipt = defineAction(
     if (income.invoice) await Income.updateOne({ _id: income._id }, { $unset: { invoice: 1 } });
     return { id: incomeId, number: income.number };
   },
-  { revalidate: REVALIDATE, message: "Link removed" },
+  { revalidate: REVALIDATE, message: "Link removed", permission: "finance.invoices:edit" },
 );
 
 /** Loads one invoice for the detail drawer / edit form. */
 export async function fetchInvoice(id: string): Promise<InvoiceDetail | null> {
-  if (!(await getCurrentUser())) return null;
+  const user = await getCurrentUser();
+  if (!user || !can(user, "finance.invoices:view")) return null;
   return getInvoice(id);
 }
 
@@ -276,7 +278,9 @@ const openInvoicesInput = z.object({ client: z.string().max(200).optional(), pro
 
 /** Open invoices of a client or project, for the income form's "Settles invoice" picker. */
 export async function fetchOpenInvoices(raw: z.input<typeof openInvoicesInput>): Promise<OpenInvoiceOption[]> {
-  if (!(await getCurrentUser())) return [];
+  const user = await getCurrentUser();
+  // The income form asks for these, so recording or editing income is enough.
+  if (!user || !["finance.invoices:view", "finance.income:create", "finance.income:edit"].some((p) => can(user, p))) return [];
   const parsed = openInvoicesInput.safeParse(raw);
   if (!parsed.success) return [];
   return openInvoicesFor(parsed.data);
@@ -284,7 +288,8 @@ export async function fetchOpenInvoices(raw: z.input<typeof openInvoicesInput>):
 
 /** Receipts of the invoice's client that are not linked to any invoice yet. */
 export async function fetchUnlinkedReceipts(invoiceId: string): Promise<UnlinkedReceipt[]> {
-  if (!(await getCurrentUser()) || !objectId.safeParse(invoiceId).success) return [];
+  const user = await getCurrentUser();
+  if (!user || !can(user, "finance.invoices:edit") || !objectId.safeParse(invoiceId).success) return [];
   await connectDB();
   const invoice = await Invoice.findById(invoiceId, { client: 1, project: 1 }).lean();
   if (!invoice) return [];

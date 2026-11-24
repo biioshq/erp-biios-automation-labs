@@ -56,7 +56,7 @@ export type EmployeeFact = {
   department: string;
   designation: string | null;
   skills: string[];
-  /** Admins only; null for members. */
+  /** Null for viewers who do not see salaries. */
   monthlySalary: number | null;
 };
 
@@ -87,5 +87,8 @@ export type CashFact = { total: number; accounts: { name: string; balance: numbe
 export type ComputeContext = {
   /** "yyyy-mm-dd" (IST). */
   today: string;
-  admin: boolean;
+  /** The viewer may see salaries (pay and salary expenses). */
+  salaries: boolean;
+  /** The viewer may see cash, bank and P&L figures. */
+  cash: boolean;
 };

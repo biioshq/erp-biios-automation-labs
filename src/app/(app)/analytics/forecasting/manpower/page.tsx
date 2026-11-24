@@ -11,7 +11,10 @@ import { ProjectStatusBadge } from "@/components/shared/status-badge";
 import { formatDate, formatMonth, formatNumber } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import { cn } from "@/lib/utils";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { MANPOWER_MONTHS } from "@/features/analytics/forecasting/constants";
 import { manpowerOutlook } from "@/features/analytics/forecasting/server/manpower";
 import { PeopleTable } from "@/features/analytics/forecasting/components/people-table";
@@ -27,9 +30,12 @@ const monthName = (m: string) => formatMonth(fromDateInput(`${m}-01`));
 export default async function ManpowerForecastPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  const isAdmin = user.role === "admin";
-  // Pay figures are worked out only for admins, so they never reach a member's page.
-  const data = await manpowerOutlook({ includeSalaries: isAdmin });
+  if (!can(user, ANALYTICS.forecasting.view)) return <NoAccess eyebrow="Analytics & Planning" title="Manpower requirement forecast" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
+  // Pay figures are worked out only for people who see salaries, so they never reach anyone else's page.
+  const seesSalaries = can(user, ANALYTICS.salaries);
+  const data = await manpowerOutlook({ includeSalaries: seesSalaries });
 
   const header = (
     <PageHeader
@@ -37,9 +43,11 @@ export default async function ManpowerForecastPage() {
       title="Manpower requirement"
       description="Who is allocated to which projects now and on work that has not started, where people are stretched past full time and when."
       actions={
-        <Button asChild variant="outline">
-          <Link href="/finance/employees">Employees</Link>
-        </Button>
+        open("/finance/employees") ? (
+          <Button asChild variant="outline">
+            <Link href="/finance/employees">Employees</Link>
+          </Button>
+        ) : null
       }
     />
   );
@@ -53,9 +61,11 @@ export default async function ManpowerForecastPage() {
           title="No employees recorded"
           description="Add employees and put them on project teams with a share of their time to see manpower demand."
           action={
-            <Button asChild>
-              <Link href="/finance/employees">Go to employees</Link>
-            </Button>
+            open("/finance/employees") ? (
+              <Button asChild>
+                <Link href="/finance/employees">Go to employees</Link>
+              </Button>
+            ) : null
           }
         />
       </Page>
@@ -75,7 +85,7 @@ export default async function ManpowerForecastPage() {
         <StatCard label="Active employees" icon={Users} tone="default" value={formatNumber(active.length)} hint={data.onLeave ? `${formatNumber(data.onLeave)} on leave` : "None on leave"} />
         <StatCard label="Over-allocated" icon={UserRoundX} tone={over.length ? "danger" : "success"} value={formatNumber(over.length)} hint="Above 100% in some month ahead" />
         <StatCard label="Spare capacity" icon={UserRoundCheck} tone="info" value={`${fte(spareFte)} FTE`} hint={`Across ${plural(spare.length, "person", "people")} under 100% at their busiest`} />
-        {isAdmin && data.excessMonthlyCost !== undefined ? (
+        {seesSalaries && data.excessMonthlyCost !== undefined ? (
           <StatCard
             label="Extra labour cost a month"
             icon={IndianRupee}
@@ -97,8 +107,8 @@ export default async function ManpowerForecastPage() {
           a handoff. FTE means
           full-time equivalents: 100% of one person is 1 FTE. People on leave are left out of headcount and of the demand set against it.
         </p>
-        {isAdmin ? (
-          <p>Extra labour cost is the allocation above 100% at each person&apos;s busiest month, priced at that person&apos;s monthly pay. Only admins see it.</p>
+        {seesSalaries ? (
+          <p>Extra labour cost is the allocation above 100% at each person&apos;s busiest month, priced at that person&apos;s monthly pay. Only people who can see salaries see it.</p>
         ) : null}
         {data.undated ? <p>{plural(data.undated, "upcoming membership")} on projects without a start date {data.undated === 1 ? "is" : "are"} left out of the month view.</p> : null}
       </MethodNote>
@@ -124,7 +134,7 @@ export default async function ManpowerForecastPage() {
       </Section>
 
       <Section title="People" description="Allocation now, on upcoming work and in the busiest month ahead.">
-        <PeopleTable rows={data.people} showCost={isAdmin} />
+        <PeopleTable rows={data.people} showCost={seesSalaries} />
       </Section>
 
       <div className="grid gap-5 lg:grid-cols-2">

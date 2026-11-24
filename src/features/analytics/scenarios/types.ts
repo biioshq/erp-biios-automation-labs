@@ -87,7 +87,7 @@ export type ScenarioMetrics = {
   delayDays: number | null;
   /** Materials that would run short. */
   shortItems: number | null;
-  /** Cash the scenario needs beyond what it already has (admins only). */
+  /** Cash the scenario needs beyond what it already has (only for viewers who see cash figures). */
   cashNeed: number | null;
   risks: string[];
 };
@@ -97,8 +97,12 @@ export type ScenarioResults = {
   type: ScenarioType;
   /** ISO instant. */
   computedAt: string;
-  /** Whose view the figures were computed for: members never get salary or cash figures. */
-  view: "admin" | "member";
+  /**
+   * Which restricted figures the result holds: "admin" salary and cash figures, "member" neither,
+   * "salaries" only salary figures, "cash" only cash figures. Results saved before roles existed
+   * are "admin" or "member".
+   */
+  view: "admin" | "member" | "salaries" | "cash";
   /** One plain sentence: what the scenario means. */
   headline: string;
   stats: ResultStat[];
@@ -135,7 +139,7 @@ export type ScenarioRow = {
 export type ScenarioDetail = ScenarioRow & {
   description: string | null;
   assumptions: string | null;
-  /** Stored inputs, admin-only fields removed for members. */
+  /** Stored inputs, salary fields removed for viewers who do not see salaries. */
   inputs: Record<string, unknown>;
   /** Input values as label and readable value, for the detail page and exports. */
   inputSummary: { label: string; value: string }[];
@@ -146,7 +150,7 @@ export type ScenarioDetail = ScenarioRow & {
   savedAt: string | null;
   /** Why the saved snapshot is hidden from this viewer. */
   savedHidden: string | null;
-  /** Set when the saved figures were worked out for the other view (member or admin), so they differ for that reason. */
+  /** Set when the saved figures were worked out for a different view (other salary or cash access), so they differ for that reason. */
   savedNote: string | null;
   /** Recomputed from today's data; null when the stored inputs no longer validate. */
   live: ScenarioResults | null;
@@ -186,7 +190,7 @@ export type DepartmentChoice = {
   value: string;
   label: string;
   active: number;
-  /** Average monthly salary of active people; admins only (null for members). */
+  /** Average monthly salary of active people; null for viewers who do not see salaries. */
   averageSalary: number | null;
 };
 

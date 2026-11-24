@@ -7,7 +7,8 @@ import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
 import { formatDate, formatNumber } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 import { getPrepaid } from "@/features/finance/assets/prepaid/queries";
 import { PrepaidTable } from "@/features/finance/assets/prepaid/components/prepaid-table";
 
@@ -15,7 +16,8 @@ export const metadata: Metadata = { title: "Prepaid expenses" };
 
 export default async function PrepaidExpensesPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.prepaid:view")) return <NoAccess title="Prepaid expenses" eyebrow="Finance · Assets" />;
   const data = await getPrepaid();
   const asOf = formatDate(fromDateInput(data.asOf));
 
@@ -26,11 +28,13 @@ export default async function PrepaidExpensesPage() {
         title="Prepaid expenses"
         description={<>Expenses paid for a period ahead, with the part not used yet on {asOf}. The cost is spread evenly over each day the payment covers.</>}
         actions={
-          <Button variant="outline" asChild>
-            <Link href="/finance/expenses">
-              <Receipt /> All expenses
-            </Link>
-          </Button>
+          can(user, "finance.expenses:view") ? (
+            <Button variant="outline" asChild>
+              <Link href="/finance/expenses">
+                <Receipt /> All expenses
+              </Link>
+            </Button>
+          ) : undefined
         }
       />
 

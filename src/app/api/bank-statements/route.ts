@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { rateLimit } from "@/server/rate-limit";
 import { StatementReadError } from "@/features/finance/bank-statements/server/errors";
 import { formatOf, readStatementFile } from "@/features/finance/bank-statements/server/read-file";
@@ -11,13 +11,13 @@ const MAX_BYTES = 4 * 1024 * 1024;
 
 /**
  * POST multipart "file" (CSV, .xlsx, .xls or PDF): the statement's rows, the row with its column
- * names and what each column holds, for the bank statement page. Nothing is saved. Admins only,
- * like the page: what it leads to creates money records across Finance.
+ * names and what each column holds, for the bank statement page. Nothing is saved. Needs the bank
+ * statements create permission: what it leads to creates money records across Finance.
  */
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Your session has ended. Sign in again." }, { status: 401 });
-  if (user.role !== "admin") return NextResponse.json({ error: "Only admins can upload bank statements." }, { status: 403 });
+  if (!can(user, "finance.bank_statements:create")) return NextResponse.json({ error: "You do not have permission to upload bank statements." }, { status: 403 });
   const limited = rateLimit(`bank-statements:${user.id}`, 20, 60_000);
   if (!limited.ok) {
     return NextResponse.json(

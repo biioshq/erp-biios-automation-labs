@@ -102,17 +102,17 @@ async function overheads(from: Date, now: Date, includeSalaries: boolean) {
 }
 
 /** 6.5 Operational efficiency: how materials, equipment and people are used, delays, shortages, wastage and overheads. */
-export async function getEfficiencyInsights(viewer: { isAdmin: boolean }, now: Date = new Date()): Promise<EfficiencyInsights> {
+export async function getEfficiencyInsights(viewer: { salaries: boolean; cash: boolean }, now: Date = new Date()): Promise<EfficiencyInsights> {
   const from = startOfMonthIST(now, -(TREND_MONTHS - 1));
   const [months, stock, projects, people, equipment, maintenance, waste, overhead] = await Promise.all([
     monthlyStock(TREND_MONTHS, now),
     stockOutlook(now),
-    projectHealth(viewer.isAdmin, now),
+    projectHealth(viewer.salaries, now),
     manpower(now),
     equipmentUse(now),
     maintenanceDue(now),
     wastage(from, now),
-    overheads(from, now, viewer.isAdmin),
+    overheads(from, now, viewer.salaries),
   ]);
   const items = await itemUtilisation(from, now, new Map(stock.positions.map((p) => [p.id, p.available])));
 
@@ -157,6 +157,6 @@ export async function getEfficiencyInsights(viewer: { isAdmin: boolean }, now: D
     maintenance,
     wastage: waste,
     overheads: overhead,
-    salariesHidden: !viewer.isAdmin,
+    salariesHidden: !viewer.salaries,
   };
 }

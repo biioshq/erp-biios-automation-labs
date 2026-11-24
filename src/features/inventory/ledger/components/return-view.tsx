@@ -295,7 +295,7 @@ export function ReturnView({
                         <ImpactRow label="Budget remaining" before={round2(impact.budget - impact.spent)} after={round2(impact.budget - impact.spent + credit)} format={(n) => <Money value={n} />} />
                       ) : null}
                       {impact?.salariesHidden ? (
-                        <p className="py-2 text-xs text-muted-foreground">Spend excludes salaries, which only admins can see.</p>
+                        <p className="py-2 text-xs text-muted-foreground">Spend excludes salaries, which your role cannot see.</p>
                       ) : null}
                     </div>
                     <div className="mt-1 flex items-center justify-between border-t pt-3 text-sm">

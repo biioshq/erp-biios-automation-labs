@@ -10,18 +10,21 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Spinner } from "@/components/ui/spinner";
 import { SelectField, TextField } from "@/components/forms/fields";
 import { applyFieldErrors } from "@/lib/action-result";
-import { USER_ROLES } from "@/lib/constants";
 import { emitDataChanged } from "@/lib/events";
 import { addTeamMember } from "../actions";
 import { teamMemberSchema, type TeamMemberInput, type TeamMemberValues } from "../schemas";
 import { formValidation } from "@/components/forms/form-options";
+import type { RoleOption } from "../types";
 
-const EMPTY: TeamMemberInput = { name: "", email: "", password: "", role: "member" };
-
-/** Admin-only dialog: creates an account with a temporary password the person changes after signing in. */
-export function AddMemberDialog() {
+/**
+ * For people with "settings.team:create": creates an account with a temporary password the person
+ * changes after signing in. Roles beyond the actor's own role show but cannot be picked.
+ */
+export function AddMemberDialog({ roles }: { roles: RoleOption[] }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const firstRole = roles.find((r) => r.value === "member" && !r.disabled)?.value ?? roles.find((r) => !r.disabled)?.value ?? "";
+  const EMPTY: TeamMemberInput = { name: "", email: "", password: "", role: firstRole };
   const form = useForm<TeamMemberInput, unknown, TeamMemberValues>({
     resolver: zodResolver(teamMemberSchema),
     defaultValues: EMPTY,
@@ -79,8 +82,8 @@ export function AddMemberDialog() {
               name="role"
               label="Role"
               required
-              options={USER_ROLES}
-              description="Admins can add members. Members work with finance, inventory and tasks."
+              options={roles}
+              description="The role decides which pages and actions they get. Roles and permissions lists what each role opens."
             />
           </div>
           <DialogFooter className="max-sm:flex-col-reverse">

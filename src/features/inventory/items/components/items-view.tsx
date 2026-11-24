@@ -36,7 +36,7 @@ import { FacetedFilter } from "@/components/data-table/faceted-filter";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { Money } from "@/components/shared/money";
 import { StockStatusBadge } from "@/components/shared/status-badge";
 import { StockLevelBar } from "@/components/shared/stock-level-bar";
@@ -81,8 +81,11 @@ export function ItemsView({
   const [loadingRecord, setLoadingRecord] = useState(false);
   const [template, setTemplate] = useState<ItemFormRecord | null>(null);
   const [removing, setRemoving] = useState<ItemRow | null>(null);
-  // Archiving and deleting are admin-only (the action refuses members too).
-  const isAdmin = useIsAdmin();
+  // These only hide controls: every action checks the same permission on the server.
+  const canBuy = useCan("inventory.purchase:create");
+  const canEdit = useCan("inventory.items:edit");
+  const canCreate = useCan("inventory.items:create");
+  const canDelete = useCan("inventory.items:delete");
 
   const panel: Panel = useMemo(() => {
     if (searchParams.get("new") === "1") return { kind: "new", from: searchParams.get("copy") };
@@ -241,18 +244,24 @@ export function ItemsView({
               <Eye /> View item
             </Link>
           </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href={`/inventory/purchase?item=${item.id}`}>
-              <PackagePlus /> Buy more
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: item.id })}>
-            <Pencil /> Edit
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setPanel({ kind: "new", from: item.id })}>
-            <Copy /> Duplicate
-          </DropdownMenuItem>
-          {isAdmin ? (
+          {canBuy ? (
+            <DropdownMenuItem asChild>
+              <Link href={`/inventory/purchase?item=${item.id}`}>
+                <PackagePlus /> Buy more
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          {canEdit ? (
+            <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: item.id })}>
+              <Pencil /> Edit
+            </DropdownMenuItem>
+          ) : null}
+          {canCreate ? (
+            <DropdownMenuItem onSelect={() => setPanel({ kind: "new", from: item.id })}>
+              <Copy /> Duplicate
+            </DropdownMenuItem>
+          ) : null}
+          {canDelete ? (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(item)}>
@@ -390,7 +399,7 @@ export function ItemsView({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchParams, isAdmin],
+    [searchParams, canBuy, canEdit, canCreate, canDelete],
   );
 
   const emptyState = (
@@ -497,7 +506,7 @@ export function ItemsView({
       </FormSheet>
 
       <ConfirmDialog
-        open={isAdmin && removing !== null}
+        open={canDelete && removing !== null}
         onOpenChange={(o) => !o && setRemoving(null)}
         title={removing ? `Archive ${removing.name}?` : "Archive item?"}
         description="Items with stock history are archived and hidden from lists. Items that were never used are deleted. Items still in stock or assigned to projects cannot be archived."

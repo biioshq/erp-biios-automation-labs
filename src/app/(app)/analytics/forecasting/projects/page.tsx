@@ -9,7 +9,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { formatNumber, formatPercent, round2 } from "@/lib/format";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { PROJECT_FORECAST_RULE } from "@/features/analytics/project-forecast";
 import { BUDGET_USE_RULE, budgetUse } from "@/features/analytics/projects/model";
 import type { SearchParams } from "@/features/analytics/forecasting/params";
@@ -29,7 +32,10 @@ type Props = { searchParams: Promise<SearchParams> };
 
 export default async function ProjectCostForecastPage({ searchParams }: Props) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.forecasting.view)) return <NoAccess eyebrow="Analytics & Planning" title="Project cost forecast" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   // The month's forecast (with salaries, whoever is viewing) is stored once, after the page is sent.
   after(() => ensureMonthSnapshot("project_cost"));
@@ -44,9 +50,11 @@ export default async function ProjectCostForecastPage({ searchParams }: Props) {
           title="No open projects"
           description="Forecasts cover projects in planning, active or on hold. Completed and cancelled projects are in budget tracking."
           action={
-            <Button asChild variant="outline">
-              <Link href="/finance/projects/budgets">Budget tracking</Link>
-            </Button>
+            open("/finance/projects/budgets") ? (
+              <Button asChild variant="outline">
+                <Link href="/finance/projects/budgets">Budget tracking</Link>
+              </Button>
+            ) : null
           }
         />
       </Page>
@@ -78,9 +86,11 @@ export default async function ProjectCostForecastPage({ searchParams }: Props) {
         actions={
           <>
             <SaveForecastButton />
-            <Button asChild variant="outline">
-              <Link href="/finance/projects/budgets">Budget tracking</Link>
-            </Button>
+            {open("/finance/projects/budgets") ? (
+              <Button asChild variant="outline">
+                <Link href="/finance/projects/budgets">Budget tracking</Link>
+              </Button>
+            ) : null}
           </>
         }
       />

@@ -344,18 +344,19 @@ const byUrgency = (a: DueItem, b: DueItem) => Number(b.overdue) - Number(a.overd
 const totalOf = (items: DueItem[], overdue: boolean) => round2(items.filter((i) => i.overdue === overdue).reduce((s, i) => s + i.amount, 0));
 
 /**
- * What the company has to pay (supplier bills, loans for admins, recurring schedules) and to
- * receive (customer invoices) that is overdue or due in the next 30 days. Members do not get
- * salary bills or salary schedules in the lists, as elsewhere.
+ * What the company has to pay (supplier bills, loans for people who see the company's financial
+ * position, recurring schedules) and to receive (customer invoices) that is overdue or due in the
+ * next 30 days. People without the salaries data permission do not get salary bills or salary
+ * schedules in the lists, as elsewhere.
  */
-async function duePayments(now: Date, isAdmin: boolean, payables: PayablesSummary, receivables: ReceivablesSummary): Promise<DuePayments> {
+async function duePayments(now: Date, seesPosition: boolean, payables: PayablesSummary, receivables: ReceivablesSummary): Promise<DuePayments> {
   const seesSalaries = await canSeeSalaries();
   const today = toDateInput(now);
   const soon = toDateInput(addDays(now, DUE_WINDOW_DAYS));
   const inWindow = (status: string, due: string | null) => status === "overdue" || Boolean(due && due >= today && due <= soon);
 
   const [loans, schedules] = await Promise.all([
-    isAdmin ? liabilityRows(now) : Promise.resolve([]),
+    seesPosition ? liabilityRows(now) : Promise.resolve([]),
     RecurringExpense.find({ status: "active", nextRunDate: { $lte: endOfDayIST(addDays(now, DUE_WINDOW_DAYS)) } }, { name: 1, amount: 1, category: 1, nextRunDate: 1, endDate: 1, vendor: 1 })
       .sort({ nextRunDate: 1 })
       .lean(),
@@ -452,10 +453,14 @@ async function projectOverview(): Promise<{ totals: ProjectTotals; rows: Project
 }
 
 /**
- * Everything on the Finance dashboard for a period. Members get the dashboard without the
- * balance sheet and cash figures (null `position`): those queries do not run for them at all.
+ * Everything on the Finance dashboard for a period. Without the financial position data permission
+ * the dashboard comes without the balance sheet, cash and loan figures (null `position`, no loans
+ * in due payments): those queries do not run at all.
  */
-export async function getFinanceDashboard(selection: PeriodSelection | DashboardPeriod, viewer: { isAdmin: boolean } = { isAdmin: false }): Promise<FinanceDashboardData> {
+export async function getFinanceDashboard(
+  selection: PeriodSelection | DashboardPeriod,
+  viewer: { financialPosition: boolean } = { financialPosition: false },
+): Promise<FinanceDashboardData> {
   await connectDB();
   const { period, from: customFrom, to: customTo } = typeof selection === "string" ? { period: selection, from: undefined, to: undefined } : selection;
   const now = new Date();
@@ -489,9 +494,9 @@ export async function getFinanceDashboard(selection: PeriodSelection | Dashboard
     payablesSummary(now),
     receivablesSummary(now),
     projectOverview(),
-    viewer.isAdmin ? positionFigures(range, now) : Promise.resolve(null),
+    viewer.financialPosition ? positionFigures(range, now) : Promise.resolve(null),
   ]);
-  const due = await duePayments(now, viewer.isAdmin, payables, receivables);
+  const due = await duePayments(now, viewer.financialPosition, payables, receivables);
 
   const monthly = trendPoints.slice(-12);
   const projectCount = (status: ProjectStatus) => statusCounts.find((s) => s._id === status)?.n ?? 0;

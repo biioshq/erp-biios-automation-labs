@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { CalendarDays, CreditCard, FileText, Hash, Landmark, Pencil, Trash2, User, Vault, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IfCan } from "./if-can";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -164,26 +165,30 @@ export function EntryDetailView({ entry, onEdit, onDelete }: { entry: EntryDetai
         </div>
       </FormSheetBody>
       <FormSheetFooter>
-        <ConfirmDialog
-          title="Delete this entry?"
-          description={
-            <>
-              {entry.number} ({entryTypeLabel(entry.type).toLowerCase()}, {formatDate(entry.date)}) and its documents will be removed. Equity, cash and the balance sheet change at once.
-              {entry.fromBankStatement
-                ? " The bank statement line stays on its statement, shown as “Linked record was deleted”, and can be reviewed and added again there. To keep the entry and only untie it from the line, unmatch the line in Bank statements instead."
-                : ""}
-            </>
-          }
-          onConfirm={onDelete}
-          trigger={
-            <Button variant="ghost" className="mr-auto text-danger hover:bg-danger/10 hover:text-danger">
-              <Trash2 /> Delete
-            </Button>
-          }
-        />
-        <Button onClick={onEdit}>
-          <Pencil /> Edit
-        </Button>
+        <IfCan permission="finance.equity:delete">
+          <ConfirmDialog
+            title="Delete this entry?"
+            description={
+              <>
+                {entry.number} ({entryTypeLabel(entry.type).toLowerCase()}, {formatDate(entry.date)}) and its documents will be removed. Equity, cash and the balance sheet change at once.
+                {entry.fromBankStatement
+                  ? " The bank statement line stays on its statement, shown as “Linked record was deleted”, and can be reviewed and added again there. To keep the entry and only untie it from the line, unmatch the line in Bank statements instead."
+                  : ""}
+              </>
+            }
+            onConfirm={onDelete}
+            trigger={
+              <Button variant="ghost" className="mr-auto text-danger hover:bg-danger/10 hover:text-danger">
+                <Trash2 /> Delete
+              </Button>
+            }
+          />
+        </IfCan>
+        <IfCan permission="finance.equity:edit">
+          <Button onClick={onEdit}>
+            <Pencil /> Edit
+          </Button>
+        </IfCan>
       </FormSheetFooter>
     </>
   );

@@ -93,12 +93,12 @@ async function vendorHistory(key: string, now: Date) {
 }
 
 /** 6.4 Vendor performance: what is recorded per vendor (bills, value, prices) and what is not. */
-export async function getVendorInsights(periodValue: InsightPeriod, vendorParam: string | null, viewer: { isAdmin: boolean }, now: Date = new Date()): Promise<VendorInsights> {
+export async function getVendorInsights(periodValue: InsightPeriod, vendorParam: string | null, viewer: { salaries: boolean; cash: boolean }, now: Date = new Date()): Promise<VendorInsights> {
   const period = resolvePeriod(periodValue, now);
   const [bills, entries, payables] = await Promise.all([
     loadBills(vendorBillFilter(period)),
     loadPurchaseEntries({ date: periodMatch(period), unitCost: { $gt: 0 } }, false),
-    viewerPayables(viewer.isAdmin, now),
+    viewerPayables(viewer.salaries, now),
   ]);
   // Outstanding today on supplier bills (salary bills are never vendor bills here).
   const supplierRows = payables.rows.filter((r) => r.category !== "salaries");

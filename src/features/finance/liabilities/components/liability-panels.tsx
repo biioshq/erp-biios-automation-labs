@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { useOnLiveChange } from "@/components/live-updates";
+import { useCan } from "@/components/current-user";
 import { emitDataChanged } from "@/lib/events";
 import type { LiabilityKind } from "@/lib/constants";
 import type { BankAccountOption } from "@/server/lookups";
@@ -25,14 +26,17 @@ export function useLiabilityPanel() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // Only hides the drawers; the actions check the same permissions on the server.
+  const canCreate = useCan("finance.liabilities:create");
+  const canEdit = useCan("finance.liabilities:edit");
   const panel: Panel = useMemo(() => {
-    if (searchParams.get("new") === "1") return { kind: "new", group: searchParams.get("newGroup") };
+    if (searchParams.get("new") === "1") return canCreate ? { kind: "new", group: searchParams.get("newGroup") } : null;
     const edit = searchParams.get("edit");
-    if (edit) return { kind: "edit", id: edit };
+    if (edit) return canEdit ? { kind: "edit", id: edit } : { kind: "view", id: edit };
     const view = searchParams.get("view");
     if (view) return { kind: "view", id: view };
     return null;
-  }, [searchParams]);
+  }, [searchParams, canCreate, canEdit]);
   const setPanel = useCallback(
     (next: Panel) => {
       const params = new URLSearchParams(searchParams.toString());
@@ -49,7 +53,7 @@ export function useLiabilityPanel() {
     },
     [pathname, router, searchParams],
   );
-  return { panel, setPanel };
+  return { panel, setPanel, canCreate, canEdit };
 }
 
 /** The create, view and edit drawers for liabilities on one page. */

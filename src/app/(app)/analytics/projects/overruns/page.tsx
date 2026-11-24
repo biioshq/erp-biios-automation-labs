@@ -10,7 +10,10 @@ import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { formatCompactCurrency, formatMonth } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { idParam } from "@/features/analytics/inventory/params";
 import { statusesParam, sumOf } from "@/features/analytics/projects/model";
 import { PROJECT_FORECAST_RULE } from "@/features/analytics/project-forecast";
@@ -25,7 +28,10 @@ export const metadata: Metadata = { title: "Cost overruns" };
 
 export default async function OverrunsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.projects)) return <NoAccess eyebrow="Analytics & Planning" title="Cost overruns" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const statuses = statusesParam(sp);
   const { rows, total, salariesHidden } = await loadProjectCosts(statuses);
@@ -55,11 +61,13 @@ export default async function OverrunsPage({ searchParams }: { searchParams: Pro
         actions={
           <>
             <ProjectStatusSelect statuses={statuses} />
-            <Button asChild variant="outline">
-              <Link href="/analytics/projects/budget">
-                <Gauge /> Budget vs actual
-              </Link>
-            </Button>
+            {open("/analytics/projects/budget") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/projects/budget">
+                  <Gauge /> Budget vs actual
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

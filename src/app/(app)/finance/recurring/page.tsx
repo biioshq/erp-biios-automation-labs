@@ -7,7 +7,8 @@ import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
 import { parseListParams } from "@/lib/list-params";
 import { formatNumber } from "@/lib/format";
-import { getCurrentUser, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { getEmployeeOptions, getProjectOptions, getVendorNames } from "@/server/lookups";
 import { getRecurringSummary, listRecurring } from "@/features/finance/recurring/queries";
 import { RECURRING_FILTER_KEYS, RECURRING_SORT_KEYS } from "@/features/finance/recurring/schemas";
@@ -18,22 +19,24 @@ export const metadata: Metadata = { title: "Recurring expenses" };
 
 export default async function RecurringPage({ searchParams }: PageProps<"/finance/recurring">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.recurring:view")) return <NoAccess title="Recurring expenses" />;
   const params = parseListParams(await searchParams, {
     filterKeys: RECURRING_FILTER_KEYS,
     sortable: RECURRING_SORT_KEYS,
     defaultSort: { id: "nextRunDate", desc: false },
   });
-  const [data, summary, projects, vendors, employees, user, categories] = await Promise.all([
+  const [data, summary, projects, vendors, employees, categories] = await Promise.all([
     listRecurring(params),
     getRecurringSummary(),
     getProjectOptions(),
     getVendorNames(),
     getEmployeeOptions(),
-    getCurrentUser(),
     getExpenseCategories(),
   ]);
-  const isAdmin = user?.role === "admin";
+  const canCreate = can(user, "finance.recurring:create");
+  // The list leaves salary schedules out without the salaries data permission.
+  const seesSalaries = can(user, "data.salaries");
 
   return (
     <Page>
@@ -42,7 +45,7 @@ export default async function RecurringPage({ searchParams }: PageProps<"/financ
         title="Recurring expenses"
         description="Salaries, rent, bills and subscriptions that post themselves on their due dates."
         actions={
-          isAdmin ? (
+          canCreate ? (
             <Button asChild className="max-sm:w-full">
               <Link href="?new=1" scroll={false}>
                 <Plus /> New schedule
@@ -84,11 +87,11 @@ export default async function RecurringPage({ searchParams }: PageProps<"/financ
           className="p-4 sm:p-5"
         />
       </StatGrid>
-      {isAdmin ? null : (
+      {seesSalaries ? null : (
         // The totals above are company-wide; the list below names each schedule, so it leaves salaries out.
         <p className="-mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
           <EyeOff className="size-3.5 shrink-0" aria-hidden />
-          The totals include all salaries together. Salary schedules are not listed: only admins can see them.
+          The totals include all salaries together. Salary schedules are not listed: your role does not include individual salaries.
         </p>
       )}
 

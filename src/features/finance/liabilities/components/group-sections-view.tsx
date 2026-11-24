@@ -105,7 +105,8 @@ function SectionCard({
   groups: GroupOption[];
   columns: ColumnDef<LiabilityListRow>[];
   filtered: boolean;
-  onAdd: (group: string) => void;
+  /** Null when the person cannot add liabilities. */
+  onAdd: ((group: string) => void) | null;
   onOpen: (id: string) => void;
 }) {
   const parents = groups.filter((g) => section.groupKeys.includes(g.key));
@@ -138,9 +139,11 @@ function SectionCard({
             {section.entry ? (
               <>
                 {parents.length ? <AddSubgroupButton parents={parents} defaultParent={section.key} variant="ghost" /> : null}
-                <Button size="sm" variant="outline" onClick={() => onAdd(section.groupKeys.includes(section.key) ? section.key : section.groupKeys[0])}>
-                  <Plus /> Add
-                </Button>
+                {onAdd ? (
+                  <Button size="sm" variant="outline" onClick={() => onAdd(section.groupKeys.includes(section.key) ? section.key : section.groupKeys[0])}>
+                    <Plus /> Add
+                  </Button>
+                ) : null}
               </>
             ) : null}
           </>
@@ -213,7 +216,7 @@ function SectionCard({
               title={section.totalCount ? "No records match the filters" : "Nothing recorded in this group"}
               description={section.totalCount ? undefined : "Add an amount owed here, such as TDS, salaries due or a loan, with who it is owed to and when it is due."}
               action={
-                section.totalCount ? undefined : (
+                section.totalCount || !onAdd ? undefined : (
                   <Button size="sm" variant="outline" onClick={() => onAdd(section.groupKeys.includes(section.key) ? section.key : section.groupKeys[0])}>
                     <Plus /> Add
                   </Button>
@@ -243,14 +246,14 @@ export function GroupSectionsView({
   lenders: string[];
   categories?: { value: string; label: string }[];
 }) {
-  const { setPanel } = useLiabilityPanel();
+  const { setPanel, canCreate } = useLiabilityPanel();
   const url = useTableUrl();
   const filtered = ["q", "lender", "status", "due", "from", "to"].some((k) => url.get(k));
   return (
     <>
       <FilterBar lenders={lenders} />
       {sections.map((s) => (
-        <SectionCard key={s.key} section={s} groups={groups} columns={COLUMNS} filtered={filtered} onAdd={(group) => setPanel({ kind: "new", group })} onOpen={(id) => setPanel({ kind: "view", id })} />
+        <SectionCard key={s.key} section={s} groups={groups} columns={COLUMNS} filtered={filtered} onAdd={canCreate ? (group) => setPanel({ kind: "new", group }) : null} onOpen={(id) => setPanel({ kind: "view", id })} />
       ))}
       <LiabilityPanels groups={groups} accounts={accounts} lenders={lenders} defaultKind="other" side={side} categories={categories} />
     </>

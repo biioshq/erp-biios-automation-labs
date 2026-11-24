@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import { getStatementLines } from "@/features/finance/bank-statements/queries";
 import { StoredLinesTable } from "@/features/finance/bank-statements/components/stored-lines";
 
@@ -26,7 +26,7 @@ export default async function BankStatementPage({
 }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Bank statement" />;
+  if (!can(user, "finance.bank_statements:view")) return <NoAccess title="Bank statement" />;
   const { id } = await params;
   const data = await getStatementLines(id);
   if (!data) notFound();

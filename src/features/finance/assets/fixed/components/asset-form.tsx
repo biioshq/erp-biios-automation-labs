@@ -92,7 +92,7 @@ export function AssetForm({
   asset,
   options,
   defaultGroup,
-  isAdmin = false,
+  canDeleteBills = false,
   onDone,
   onCancel,
 }: {
@@ -100,8 +100,8 @@ export function AssetForm({
   asset?: AssetDetail | null;
   options: AssetFormOptions;
   defaultGroup?: string;
-  /** Admins may delete the unpaid bill the asset created when it stops pointing at it. */
-  isAdmin?: boolean;
+  /** People who may delete assets and expenses may delete the unpaid bill the asset created when it stops pointing at it. */
+  canDeleteBills?: boolean;
   onDone: (id: string) => void;
   onCancel: () => void;
 }) {
@@ -141,7 +141,7 @@ export function AssetForm({
   // "Not paid yet" on an asset that has the bill it created keeps that bill (the server never makes a second one).
   const keepsOwnBill = mode === "unpaid" && Boolean(linkedBefore?.createdWithAsset);
   const unlinking = Boolean(linkedBefore && !keepsOwnBill && (mode !== "expense" || (picked && picked.id !== linkedBefore.id)));
-  const canDeleteBill = unlinking && Boolean(asset?.deletableBill) && isAdmin;
+  const canDeleteBill = unlinking && Boolean(asset?.deletableBill) && canDeleteBills;
   const [deleteBill, setDeleteBill] = useState(false);
 
   function pickExpense(e: PickedExpense) {

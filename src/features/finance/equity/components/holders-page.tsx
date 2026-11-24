@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowUpFromLine, Landmark, PieChart, Plus, UserPlus, UserRound, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IfCan } from "@/features/finance/equity/components/if-can";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -55,16 +56,20 @@ export async function HoldersPage({ kind }: { kind: EquityHolderKind }) {
         description={copy.description}
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href={`?holder=new&kind=${kind}`} scroll={false}>
-                <UserPlus /> {copy.add}
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="?new=capital" scroll={false}>
-                <Plus /> Record capital
-              </Link>
-            </Button>
+            <IfCan permission="finance.equity:create">
+              <Button asChild variant="outline">
+                <Link href={`?holder=new&kind=${kind}`} scroll={false}>
+                  <UserPlus /> {copy.add}
+                </Link>
+              </Button>
+            </IfCan>
+            <IfCan permission="finance.equity:create">
+              <Button asChild>
+                <Link href="?new=capital" scroll={false}>
+                  <Plus /> Record capital
+                </Link>
+              </Button>
+            </IfCan>
           </>
         }
       />
@@ -118,11 +123,13 @@ export async function HoldersPage({ kind }: { kind: EquityHolderKind }) {
               title={copy.emptyTitle}
               description={copy.emptyText}
               action={
-                <Button asChild>
-                  <Link href={`?holder=new&kind=${kind}`} scroll={false}>
-                    <UserPlus /> {copy.add}
-                  </Link>
-                </Button>
+                <IfCan permission="finance.equity:create">
+                  <Button asChild>
+                    <Link href={`?holder=new&kind=${kind}`} scroll={false}>
+                      <UserPlus /> {copy.add}
+                    </Link>
+                  </Button>
+                </IfCan>
               }
             />
           }

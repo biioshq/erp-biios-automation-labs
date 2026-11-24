@@ -9,7 +9,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
 import { formatDate, formatMonth, formatNumber, formatPercent, round2 } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { UNUSUAL_MIN_UNITS, UNUSUAL_PRIOR_DAYS, UNUSUAL_RATIO, UNUSUAL_RECENT_DAYS, MIN_HISTORY_DAYS } from "@/features/analytics/forecasting/constants";
 import { parseFilters, resolveWindow, type SearchParams } from "@/features/analytics/forecasting/params";
 import { consumptionOutlook } from "@/features/analytics/forecasting/server/consumption";
@@ -26,7 +29,10 @@ type Props = { searchParams: Promise<SearchParams> };
 
 export default async function ConsumptionForecastPage({ searchParams }: Props) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.forecasting.view)) return <NoAccess eyebrow="Analytics & Planning" title="Material consumption forecast" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const window = resolveWindow(sp);
   const filters = parseFilters(sp);
@@ -50,9 +56,11 @@ export default async function ConsumptionForecastPage({ searchParams }: Props) {
         title="Material consumption"
         description="How fast each material is used, how that is changing and what the next 30 days look like. Use is stock assigned to projects less stock returned."
         actions={
-          <Button asChild variant="outline">
-            <Link href="/inventory/movements">Stock movements</Link>
-          </Button>
+          open("/inventory/movements") ? (
+            <Button asChild variant="outline">
+              <Link href="/inventory/movements">Stock movements</Link>
+            </Button>
+          ) : null
         }
       />
       <ForecastFilters materials={options.materials} categories={options.categories} projects={options.projects} window={window} />
@@ -63,9 +71,11 @@ export default async function ConsumptionForecastPage({ searchParams }: Props) {
           title="No inventory items yet"
           description="Consumption shows once items are added and stock is assigned to projects."
           action={
-            <Button asChild>
-              <Link href="/inventory/items">Go to items</Link>
-            </Button>
+            open("/inventory/items") ? (
+              <Button asChild>
+                <Link href="/inventory/items">Go to items</Link>
+              </Button>
+            ) : null
           }
         />
       ) : rows.length === 0 ? (
@@ -74,9 +84,11 @@ export default async function ConsumptionForecastPage({ searchParams }: Props) {
           title="No materials match these filters"
           description="Clear a filter to see consumption."
           action={
-            <Button asChild variant="outline">
-              <Link href="/analytics/forecasting/consumption">Clear filters</Link>
-            </Button>
+            open("/analytics/forecasting/consumption") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/forecasting/consumption">Clear filters</Link>
+              </Button>
+            ) : null
           }
         />
       ) : (

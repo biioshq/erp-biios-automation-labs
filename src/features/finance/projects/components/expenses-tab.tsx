@@ -20,6 +20,7 @@ import { PROJECT_STAGES, labelOf } from "@/lib/constants";
 import type { ExpenseCategoryOption } from "@/lib/expense-categories";
 import { formatDate, formatNumber } from "@/lib/format";
 import type { ProjectOption } from "@/server/lookups";
+import { useCan } from "@/components/current-user";
 
 /** The project's expenses with a stage filter, running totals and the shared expense form in a drawer (?expense=new). */
 export function ProjectExpensesTab({
@@ -146,11 +147,12 @@ export function ProjectExpensesTab({
     [],
   );
 
-  const addButton = (
+  const canCreate = useCan("finance.expenses:create");
+  const addButton = canCreate ? (
     <Button onClick={() => setOpen(true)}>
       <Plus /> Add expense
     </Button>
-  );
+  ) : undefined;
 
   return (
     <div className="space-y-4">
@@ -168,7 +170,7 @@ export function ProjectExpensesTab({
           <Money value={fromStock} className="mt-1 block text-xl font-semibold" />
         </div>
       </div>
-      {/* Members get the list without salary rows, so their total is lower than an admin's. */}
+      {/* Without the salaries data permission the list has no salary rows, so its total is lower. */}
       <SalariesHiddenNote className="-mt-2" />
 
       {rows.length === 0 ? (

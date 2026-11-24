@@ -24,33 +24,36 @@ const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
 export const addExpenseCategory = defineAction(expenseCategoryCreateSchema, async ({ label }, user) => createExpenseCategory(label, user.id), {
   revalidate: REVALIDATE,
   message: "Category added",
-  role: "admin",
+  permission: "finance.expense_categories:create",
 });
 
 export const renameExpenseCategoryAction = defineAction(expenseCategoryRenameSchema, async ({ value, label }) => renameExpenseCategory(value, label), {
   revalidate: REVALIDATE,
   message: "Category renamed",
-  role: "admin",
+  permission: "finance.expense_categories:edit",
 });
 
 export const setExpenseCategoryHiddenAction = defineAction(
   expenseCategoryHiddenSchema,
   async ({ value, hidden }) => setExpenseCategoryHidden(value, hidden),
-  { revalidate: REVALIDATE, role: "admin" },
+  { revalidate: REVALIDATE, permission: "finance.expense_categories:edit" },
 );
 
 /** Direct or indirect: changes how every expense of the category without a project is classed, past ones included. */
 export const setExpenseCategoryNatureAction = defineAction(
   expenseCategoryNatureSchema,
   async ({ value, nature }) => setExpenseCategoryNature(value, nature),
-  { revalidate: REVALIDATE, role: "admin" },
+  { revalidate: REVALIDATE, permission: "finance.expense_categories:edit" },
 );
 
 export const deleteExpenseCategoryAction = defineAction(expenseCategoryValueOnlySchema, async ({ value }) => deleteExpenseCategory(value), {
   revalidate: REVALIDATE,
   message: "Category deleted",
-  role: "admin",
+  permission: "finance.expense_categories:delete",
 });
 
 /** Usage counts for the categories dialog. Read-only. */
-export const fetchExpenseCategoryUsage = defineAction(z.object({}), async () => getExpenseCategoryUsage(), { role: "admin", readOnly: true });
+export const fetchExpenseCategoryUsage = defineAction(z.object({}), async () => getExpenseCategoryUsage(), {
+  permission: "finance.expense_categories:view",
+  readOnly: true,
+});

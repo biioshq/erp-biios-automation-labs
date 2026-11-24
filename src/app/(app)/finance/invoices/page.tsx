@@ -9,7 +9,8 @@ import { parseListParams, type SearchParams } from "@/lib/list-params";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { getBankAccountOptions, getProjectOptions } from "@/server/lookups";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { getClientNames } from "@/features/finance/income/queries";
 import { getInvoiceClients, invoiceStats, listInvoicePayments, listInvoices } from "@/features/finance/invoices/queries";
 import {
@@ -46,7 +47,8 @@ function Tabs({ active }: { active: "invoices" | "payments" }) {
 
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.invoices:view")) return <NoAccess title="Invoices & receivables" />;
   const sp = await searchParams;
   const payments = sp.tab === "payments";
   const [stats, projects, clients, invoiceClients, accounts] = await Promise.all([
@@ -69,11 +71,13 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
               <ChartColumn /> Income summary
             </Link>
           </Button>
-          <Button asChild>
-            <Link href="/finance/invoices?new=1" scroll={false}>
-              <Plus /> New invoice
-            </Link>
-          </Button>
+          {can(user, "finance.invoices:create") ? (
+            <Button asChild>
+              <Link href="/finance/invoices?new=1" scroll={false}>
+                <Plus /> New invoice
+              </Link>
+            </Button>
+          ) : null}
         </>
       }
     />

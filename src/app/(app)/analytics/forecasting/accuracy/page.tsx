@@ -4,7 +4,9 @@ import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatDate, formatNumber, formatPercent } from "@/lib/format";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
 import { MAJOR_DEVIATION, SNAPSHOT_HORIZON_DAYS } from "@/features/analytics/forecasting/constants";
 import { accuracyReport } from "@/features/analytics/forecasting/server/snapshots";
 import { AccuracyByKeyList, AccuracyTable } from "@/features/analytics/forecasting/components/accuracy-table";
@@ -20,9 +22,10 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.l
 export default async function ForecastAccuracyPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  const isAdmin = user.role === "admin";
-  // Project cost forecasts include salaries, so only admins see them.
-  const report = await accuracyReport({ includeProjects: isAdmin });
+  if (!can(user, ANALYTICS.forecasting.view)) return <NoAccess eyebrow="Analytics & Planning" title="Forecast vs actual" />;
+  // Project cost forecasts include salaries, so only people who see salaries see them.
+  const seesSalaries = can(user, ANALYTICS.salaries);
+  const report = await accuracyReport({ includeProjects: seesSalaries });
 
   const header = (
     <PageHeader
@@ -47,7 +50,7 @@ export default async function ForecastAccuracyPage() {
               : `${plural(pendingCount, "forecast")} stored so far. The first comparison appears on ${report.pending.nextCheck ? formatDate(report.pending.nextCheck) : "the end of its period"}, when its period ends.`
           }
         />
-        {!isAdmin ? <MemberNote /> : null}
+        {!seesSalaries ? <MemberNote /> : null}
       </Page>
     );
   }
@@ -69,7 +72,7 @@ export default async function ForecastAccuracyPage() {
           value={materialAccuracy === null ? "-" : formatPercent(materialAccuracy)}
           hint={materials.length ? `Mean over ${plural(materials.length, "comparison")}` : "No material comparisons yet"}
         />
-        {isAdmin ? (
+        {seesSalaries ? (
           <StatCard
             label="Project cost accuracy"
             icon={FolderKanban}
@@ -107,7 +110,7 @@ export default async function ForecastAccuracyPage() {
       </MethodNote>
 
       <Section title="Accuracy over time" description="Mean accuracy of the forecasts made in each month.">
-        <AccuracyChart months={report.byMonth} showProjects={isAdmin && projects.length > 0} />
+        <AccuracyChart months={report.byMonth} showProjects={seesSalaries && projects.length > 0} />
       </Section>
 
       <Section title="All comparisons" description="Largest deviation first.">
@@ -122,7 +125,7 @@ export default async function ForecastAccuracyPage() {
             <EmptyState compact icon={Gauge} title="No material comparisons yet" description="They appear once a stored material forecast's 30 days have passed." />
           )}
         </Section>
-        {isAdmin ? (
+        {seesSalaries ? (
           <Section title="Project-wise accuracy" description="Least accurate first.">
             {projects.length ? (
               <AccuracyByKeyList rows={report.byKey.filter((k) => k.kind === "project_cost")} />
@@ -146,7 +149,7 @@ function MemberNote() {
   return (
     <p className="flex items-center gap-2 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground">
       <EyeOff className="size-4 shrink-0" aria-hidden />
-      Project cost forecasts include salaries, so only admins see their comparisons.
+      Project cost forecasts include salaries, so their comparisons are shown only to people who can see salaries.
     </p>
   );
 }

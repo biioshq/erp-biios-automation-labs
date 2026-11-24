@@ -42,7 +42,7 @@ export type ManpowerOutlook = {
   /** Upcoming memberships whose project has no start date: left out of the month timeline. */
   undated: number;
   onLeave: number;
-  /** Admins only: monthly cost of all allocation above 100% at each person's pay. */
+  /** Only for people who see salaries: monthly cost of all allocation above 100% at each person's pay. */
   excessMonthlyCost?: number;
 };
 

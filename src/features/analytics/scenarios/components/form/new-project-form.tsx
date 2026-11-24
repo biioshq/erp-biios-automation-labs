@@ -54,7 +54,7 @@ function RemoveButton({ onClick }: { onClick: () => void }) {
 }
 
 /** 1.3 New project: planned against what the company has. It never creates a project. */
-export function NewProjectForm({ options, initial, isAdmin }: TypeFormProps) {
+export function NewProjectForm({ options, initial, seesSalaries }: TypeFormProps) {
   const form = useForm<In, unknown, Out>({ resolver: zodResolver(newProjectFormSchema), defaultValues: defaults(initial), ...formValidation });
   const { control } = form;
   const materials = useFieldArray({ control, name: "inputs.materials" });
@@ -144,9 +144,9 @@ export function NewProjectForm({ options, initial, isAdmin }: TypeFormProps) {
       <Section
         title="Costs and budget"
         description={
-          isAdmin
+          seesSalaries
             ? "Leave a cost empty to use the ERP's own estimate: materials at stock prices, labour at the department's average salary."
-            : "Leave the material cost empty to use stock prices. Labour is only estimated from salaries for admins, so enter it here."
+            : "Leave the material cost empty to use stock prices. Labour is not estimated from salaries for your role, so enter it here."
         }
       >
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

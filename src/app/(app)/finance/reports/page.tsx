@@ -5,28 +5,31 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { EmptyState } from "@/components/shared/empty-state";
 import { financialYearIST, toDateInput } from "@/lib/dates";
-import { REPORT_TYPES, labelOf } from "@/lib/constants";
+import { REPORT_TYPES, labelOf, type ReportType } from "@/lib/constants";
 import { ExportHistory } from "@/features/reports/components/export-history";
 import { ReportCards } from "@/features/reports/components/report-cards";
 import { ReportFilterBar } from "@/features/reports/components/report-filters";
 import { ReportPanel } from "@/features/reports/components/report-panel";
-import { isLegacyReport, metaOf, type ReportMeta } from "@/features/reports/meta";
+import { REPORT_META, isLegacyReport, mayExportReport, metaOf, type ReportMeta } from "@/features/reports/meta";
 import { getFilterOptions } from "@/features/reports/options";
 import { getInventoryReportOverview, listReportHistory } from "@/features/reports/queries";
 import { InventoryMovementsSection, InventoryOverview } from "@/features/reports/components/inventory-overview";
 import { filtersForReport, parseReportFilters, reportQueryString } from "@/features/reports/schemas";
-import { canSeeSalaries, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, canSeeSalaries, requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Reports" };
 
 export default async function ReportsPage({ searchParams }: PageProps<"/finance/reports">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  const isAdmin = user.role === "admin";
+  if (!can(user, "finance.reports:view")) return <NoAccess title="Reports" />;
+  // The reports this person may build and download; the others are not offered.
+  const allowed = new Set<ReportType>(REPORT_META.filter((m) => mayExportReport(m.type, (p) => can(user, p))).map((m) => m.type));
   const sp = await searchParams;
   const asked = metaOf(typeof sp.report === "string" ? sp.report : undefined);
-  // Members never build an admin-only report, even from a shared link.
-  const blocked = Boolean(asked?.adminOnly && !isAdmin);
+  // A report the person may not build stays closed, even from a shared link.
+  const blocked = Boolean(asked && !allowed.has(asked.type));
   const selected = blocked ? undefined : asked;
   // The newer reports keep only the filters they offer, as their downloads do; the older ones read the URL as before.
   const parsed = parseReportFilters(sp);
@@ -39,6 +42,9 @@ export default async function ReportsPage({ searchParams }: PageProps<"/finance/
     // The inventory report shows its valuation and movement overview on screen too.
     isInventory ? getInventoryReportOverview(filters) : Promise.resolve(null),
   ]);
+
+  // Past exports are listed only for reports the person may still build (scenario files with the scenario export permission).
+  const visibleHistory = history.filter((r) => (r.type === "scenario" ? can(user, "analytics.scenarios:export") : allowed.has(r.type)));
 
   const today = toDateInput(new Date());
   const fy = financialYearIST();
@@ -63,7 +69,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/finance/
         title="Reports and exports"
         description="Build a report, check it on screen, then download it as PDF, Excel or CSV. Figures come from the same records as the rest of Project Manager."
       />
-      <ReportCards selected={selected?.type} hrefFor={hrefFor} isAdmin={isAdmin} />
+      <ReportCards selected={selected?.type} hrefFor={hrefFor} allowed={allowed} markRestricted={can(user, "settings.roles:view")} />
       {inventory ? <InventoryOverview overview={inventory} /> : null}
       {selected ? (
         <ReportPanel
@@ -86,8 +92,8 @@ export default async function ReportsPage({ searchParams }: PageProps<"/finance/
       ) : blocked ? (
         <EmptyState
           icon={ShieldCheck}
-          title="Only admins can open this report"
-          description="Statements, loans, capital and cash figures are for admins. Pick one of the reports above, or ask an admin for this one."
+          title="You cannot open this report"
+          description="Your role does not include this report. Pick one of the reports above, or ask an admin for this one."
         />
       ) : (
         <EmptyState
@@ -97,7 +103,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/finance/
         />
       )}
       {inventory ? <InventoryMovementsSection overview={inventory} from={filters.from} to={filters.to} /> : null}
-      <ExportHistory rows={history} ownOnly={!seesAll} />
+      <ExportHistory rows={visibleHistory} ownOnly={!seesAll} />
     </Page>
   );
 }

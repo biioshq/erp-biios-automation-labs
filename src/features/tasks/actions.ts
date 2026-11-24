@@ -6,7 +6,7 @@ import { AppError, notFound } from "@/server/errors";
 import { FileModel, Task } from "@/server/models";
 import { nextNumber } from "@/server/services/numbering";
 import { createNotification } from "@/server/services/notifications";
-import { getCurrentUser, type SessionUser } from "@/server/auth/session";
+import { can, getCurrentUser, type SessionUser } from "@/server/auth/session";
 import { attachFiles, removeFile } from "@/features/files/server";
 import { fromDateInput } from "@/lib/dates";
 import type { TaskStatus } from "@/lib/constants";
@@ -108,7 +108,7 @@ export const createTask = defineAction(
     await notifyAssigned({ id, number, title: input.title }, input.assigneeId, user);
     return { id, number };
   },
-  { revalidate: REVALIDATE, message: "Task created" },
+  { permission: "tasks.tasks:create", revalidate: REVALIDATE, message: "Task created" },
 );
 
 export const updateTask = defineAction(
@@ -122,8 +122,8 @@ export const updateTask = defineAction(
     const currentFiles = (existing.attachments ?? []).map(String);
     // Only what the editor removed is deleted, never a file someone attached while the form was open.
     const removed = input.removedAttachmentIds.filter((f) => currentFiles.includes(f) && !input.attachmentIds.includes(f));
-    if (removed.length && user.role !== "admin") {
-      throw new AppError("Only an admin can remove attachments. Ask an admin on your team.", "forbidden");
+    if (removed.length && !can(user, "tasks.tasks:delete")) {
+      throw new AppError("You do not have permission to remove attachments. Ask an admin on your team.", "forbidden");
     }
     const added = await claimableFiles(
       input.attachmentIds.filter((f) => !currentFiles.includes(f)),
@@ -174,7 +174,7 @@ export const updateTask = defineAction(
     }
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Task updated" },
+  { permission: "tasks.tasks:edit", revalidate: REVALIDATE, message: "Task updated" },
 );
 
 export const setTaskStatus = defineAction(
@@ -190,7 +190,7 @@ export const setTaskStatus = defineAction(
     );
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Status updated" },
+  { permission: "tasks.tasks:edit", revalidate: REVALIDATE, message: "Status updated" },
 );
 
 export const moveTask = defineAction(
@@ -212,7 +212,7 @@ export const moveTask = defineAction(
     }
     return { id, order };
   },
-  { revalidate: REVALIDATE },
+  { permission: "tasks.tasks:edit", revalidate: REVALIDATE },
 );
 
 export const deleteTask = defineAction(
@@ -224,7 +224,7 @@ export const deleteTask = defineAction(
     await Promise.all((existing.attachments ?? []).map((f) => removeFile(String(f))));
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Task deleted", role: "admin" },
+  { permission: "tasks.tasks:delete", revalidate: REVALIDATE, message: "Task deleted" },
 );
 
 export const addTaskComment = defineAction(
@@ -254,7 +254,7 @@ export const addTaskComment = defineAction(
       author: { id: user.id, name: user.name, image: user.image },
     };
   },
-  { revalidate: [["/tasks", "layout"]] },
+  { permission: "tasks.tasks:edit", revalidate: [["/tasks", "layout"]] },
 );
 
 export const attachToTask = defineAction(
@@ -268,7 +268,7 @@ export const attachToTask = defineAction(
     await attachFiles(ok, { type: "task", id }, task.project ? String(task.project) : undefined);
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Attachment added" },
+  { permission: "tasks.tasks:edit", revalidate: REVALIDATE, message: "Attachment added" },
 );
 
 export const removeTaskAttachment = defineAction(
@@ -281,12 +281,13 @@ export const removeTaskAttachment = defineAction(
     await removeFile(fileId);
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Attachment removed", role: "admin" },
+  { permission: "tasks.tasks:delete", revalidate: REVALIDATE, message: "Attachment removed" },
 );
 
 /** Loads one task for the detail drawer / edit form. */
 export async function fetchTask(id: string): Promise<TaskDetail | null> {
-  if (!(await getCurrentUser())) return null;
+  const user = await getCurrentUser();
+  if (!user || !can(user, "tasks.tasks:view")) return null;
   return getTask(id);
 }
 

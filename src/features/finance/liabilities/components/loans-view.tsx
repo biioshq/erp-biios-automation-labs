@@ -49,7 +49,7 @@ export function LoansView({
   /** Expense categories, for when the form is switched to another obligation that is an expense not paid yet. */
   categories?: { value: string; label: string }[];
 }) {
-  const { setPanel } = useLiabilityPanel();
+  const { setPanel, canEdit, canCreate } = useLiabilityPanel();
 
   const columns = useMemo<ColumnDef<LiabilityListRow>[]>(
     () => [
@@ -161,18 +161,20 @@ export function LoansView({
                 <DropdownMenuLabel className="font-mono text-xs">{row.original.code}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => setPanel({ kind: "view", id: row.original.id })}>
-                  <Eye /> View and repay
+                  <Eye /> {canEdit ? "View and repay" : "View"}
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
-                  <Pencil /> Edit
-                </DropdownMenuItem>
+                {canEdit ? (
+                  <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
+                    <Pencil /> Edit
+                  </DropdownMenuItem>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         ),
       },
     ],
-    [setPanel],
+    [setPanel, canEdit],
   );
 
   const filters: FilterDef[] = useMemo(
@@ -223,9 +225,11 @@ export function LoansView({
             title="No loans recorded"
             description="Add each bank loan, business loan or other borrowing with its lender, amount and terms. Repayments then reduce it, and their interest shows in Expenses."
             action={
-              <Button onClick={() => setPanel({ kind: "new", group: null })}>
-                <Plus /> Add loan
-              </Button>
+              canCreate ? (
+                <Button onClick={() => setPanel({ kind: "new", group: null })}>
+                  <Plus /> Add loan
+                </Button>
+              ) : undefined
             }
           />
         }

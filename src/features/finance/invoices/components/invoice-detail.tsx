@@ -20,6 +20,7 @@ import type { InvoiceDetail } from "../types";
 import { InvoiceStatusBadge } from "./invoice-status-badge";
 import { RecordReceiptButton } from "./record-receipt-dialog";
 import { ApplyAdvanceButton } from "./apply-advance-dialog";
+import { useCan } from "@/components/current-user";
 
 export function InvoiceDetailSkeleton() {
   return (
@@ -56,20 +57,22 @@ function TotalRow({ label, value, strong }: { label: string; value: number; stro
 export function InvoiceDetailView({
   invoice,
   accounts,
-  isAdmin,
+  canDelete,
   onEdit,
   onChanged,
   onDelete,
 }: {
   invoice: InvoiceDetail;
   accounts: BankAccountOption[];
-  isAdmin: boolean;
+  canDelete: boolean;
   onEdit: () => void;
   /** Called after a payment, link or status change, to load the invoice again. */
   onChanged: () => void;
   onDelete: () => Promise<boolean>;
 }) {
   const [pending, startTransition] = useTransition();
+  // Receipts, links and the edit form need the invoices edit permission (the actions check it too).
+  const canEdit = useCan("finance.invoices:edit");
   const cancelled = invoice.status === "cancelled";
   const hasReceipts = invoice.receipts.length > 0;
 
@@ -192,7 +195,7 @@ export function InvoiceDetailView({
         <section className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">Payments received</h3>
-            {cancelled ? null : (
+            {cancelled || !canEdit ? null : (
               <div className="flex flex-wrap gap-2">
                 <ApplyAdvanceButton invoice={invoice} onApplied={onChanged} />
                 <RecordReceiptButton invoice={invoice} accounts={accounts} onRecorded={onChanged} />
@@ -234,18 +237,20 @@ export function InvoiceDetailView({
                         <Money value={r.amount} exact tone="positive" className="font-medium" />
                       </TableCell>
                       <TableCell>
-                        <ConfirmDialog
-                          title={`Remove ${r.number} from this invoice?`}
-                          description="The receipt stays recorded, but no longer settles this invoice. It then counts as income of its own category, and the invoice shows that amount as pending again."
-                          confirmLabel="Remove link"
-                          destructive={false}
-                          onConfirm={() => run(() => unlinkReceipt({ incomeId: r.id }))}
-                          trigger={
-                            <Button variant="ghost" size="icon-sm" aria-label={`Remove ${r.number} from this invoice`} disabled={pending}>
-                              <Link2Off />
-                            </Button>
-                          }
-                        />
+                        {canEdit ? (
+                          <ConfirmDialog
+                            title={`Remove ${r.number} from this invoice?`}
+                            description="The receipt stays recorded, but no longer settles this invoice. It then counts as income of its own category, and the invoice shows that amount as pending again."
+                            confirmLabel="Remove link"
+                            destructive={false}
+                            onConfirm={() => run(() => unlinkReceipt({ incomeId: r.id }))}
+                            trigger={
+                              <Button variant="ghost" size="icon-sm" aria-label={`Remove ${r.number} from this invoice`} disabled={pending}>
+                                <Link2Off />
+                              </Button>
+                            }
+                          />
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -293,7 +298,7 @@ export function InvoiceDetailView({
         </p>
       </FormSheetBody>
       <FormSheetFooter className="flex-wrap">
-        {isAdmin && !hasReceipts ? (
+        {canDelete && !hasReceipts ? (
           <div className="mr-auto flex flex-wrap gap-1">
             <ConfirmDialog
               title={`Delete ${invoice.number}?`}
@@ -321,16 +326,16 @@ export function InvoiceDetailView({
           </div>
         ) : null}
         {cancelled ? (
-          isAdmin ? (
+          canDelete ? (
             <Button variant="outline" disabled={pending} onClick={() => void run(() => restoreInvoice({ id: invoice.id }))}>
               <RotateCcw /> Restore
             </Button>
           ) : null
-        ) : (
+        ) : canEdit ? (
           <Button onClick={onEdit}>
             <Pencil /> Edit
           </Button>
-        )}
+        ) : null}
       </FormSheetFooter>
     </>
   );

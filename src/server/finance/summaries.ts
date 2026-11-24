@@ -67,8 +67,11 @@ export async function openPayables(now: Date = new Date()): Promise<PayableRow[]
   return rows.sort((a, b) => (a.dueDate ?? a.date).localeCompare(b.dueDate ?? b.date));
 }
 
-export async function payablesSummary(now: Date = new Date()) {
-  const rows = await openPayables(now);
+export async function payablesSummary(now: Date = new Date(), options: { includeSalaries?: boolean } = {}) {
+  // Without salary access the bills, totals and vendor lines all leave salary bills out, so no
+  // figure can be used to work out one person's pay.
+  const all = await openPayables(now);
+  const rows = options.includeSalaries === false ? all.filter((r) => r.category !== "salaries") : all;
   const soon = toDateInput(addDays(now, 30));
   const today = toDateInput(now);
   const byVendor = new Map<string, { vendor: string; outstanding: number; bills: number; overdue: number }>();

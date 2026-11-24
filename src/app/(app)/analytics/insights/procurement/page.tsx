@@ -8,7 +8,10 @@ import { Money } from "@/components/shared/money";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatNumber } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { getProcurementInsights } from "@/features/analytics/insights/procurement";
 import { DEFAULT_PERIOD, parsePeriod } from "@/features/analytics/insights/period";
 import { DetailsLink, Footnote, NotRecorded } from "@/features/analytics/dashboard/components/bits";
@@ -23,7 +26,10 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
 
 export default async function ProcurementPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.insights)) return <NoAccess eyebrow="Analytics & Planning" title="Procurement analysis" />;
+  // A card or chart shows only when its page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const period = parsePeriod(sp.period);
   const data = await getProcurementInsights(period, first(sp.item));
@@ -42,11 +48,13 @@ export default async function ProcurementPage({ searchParams }: { searchParams: 
         actions={
           <>
             <PeriodLinks value={period} basePath="/analytics/insights/procurement" keep={{ item: first(sp.item) }} />
-            <Button asChild variant="outline">
-              <Link href="/inventory/purchase">
-                <ShoppingCart /> Buy stock
-              </Link>
-            </Button>
+            {open("/inventory/purchase") ? (
+              <Button asChild variant="outline">
+                <Link href="/inventory/purchase">
+                  <ShoppingCart /> Buy stock
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -64,41 +72,47 @@ export default async function ProcurementPage({ searchParams }: { searchParams: 
         </p>
       ) : null}
 
-      <Section title="Purchase trend" description="Purchase value each month, by kind of bill." actions={<DetailsLink href="/finance/expenses/summary">Expense summary</DetailsLink>}>
-        {hasTrend ? (
-          <MonthChart
-            title="Purchase value by month"
-            data={data.months}
-            series={[
-              { key: "stock", label: "Stock bought", color: "var(--chart-1)", stack: "p" },
-              { key: "materials", label: "Material bills", color: "var(--chart-2)", stack: "p" },
-              { key: "equipment", label: "Equipment bills", color: "var(--chart-3)", stack: "p" },
-            ]}
-          />
-        ) : (
-          <EmptyState icon={ChartColumn} compact title="No purchases in this period" description="Buy stock, or record a Materials or Equipment expense, and it shows here." />
-        )}
-        <Footnote>
-          A purchase is a stock purchase, or an expense in Materials or Equipment entered by hand or by a recurring schedule. Stock issued to projects and wastage are left out: that stock was bought
-          already. Amounts are what the bills say, GST included.
-        </Footnote>
-      </Section>
+      {open("/finance/expenses/summary") ? (
+        <Section title="Purchase trend" description="Purchase value each month, by kind of bill." actions={<DetailsLink href="/finance/expenses/summary">Expense summary</DetailsLink>}>
+          {hasTrend ? (
+            <MonthChart
+              title="Purchase value by month"
+              data={data.months}
+              series={[
+                { key: "stock", label: "Stock bought", color: "var(--chart-1)", stack: "p" },
+                { key: "materials", label: "Material bills", color: "var(--chart-2)", stack: "p" },
+                { key: "equipment", label: "Equipment bills", color: "var(--chart-3)", stack: "p" },
+              ]}
+            />
+          ) : (
+            <EmptyState icon={ChartColumn} compact title="No purchases in this period" description="Buy stock, or record a Materials or Equipment expense, and it shows here." />
+          )}
+          <Footnote>
+            A purchase is a stock purchase, or an expense in Materials or Equipment entered by hand or by a recurring schedule. Stock issued to projects and wastage are left out: that stock was bought
+            already. Amounts are what the bills say, GST included.
+          </Footnote>
+        </Section>
+      ) : null}
 
       <div className="grid gap-5 sm:gap-6 xl:grid-cols-2">
-        <Section title="Vendor-wise purchases" description="Purchase value per vendor. Open a vendor for its full history." contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/analytics/insights/vendors">Vendor performance</DetailsLink>}>
-          {data.vendors.length ? (
-            <VendorTable rows={data.vendors} hrefOf={vendorHref} />
-          ) : (
-            <EmptyState icon={Store} compact className="m-4" title="No purchases from vendors in this period" />
-          )}
-        </Section>
-        <Section title="Material-wise purchases" description="Stock bought per item, before GST, with the prices paid." contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/inventory/items">Items</DetailsLink>}>
-          {data.materials.length ? (
-            <MaterialTable rows={data.materials} />
-          ) : (
-            <EmptyState icon={Layers} compact className="m-4" title="No stock bought in this period" description="Material and equipment bills are not split by item, so only stock purchases show here." />
-          )}
-        </Section>
+        {open("/analytics/insights/vendors") ? (
+          <Section title="Vendor-wise purchases" description="Purchase value per vendor. Open a vendor for its full history." contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/analytics/insights/vendors">Vendor performance</DetailsLink>}>
+            {data.vendors.length ? (
+              <VendorTable rows={data.vendors} hrefOf={vendorHref} />
+            ) : (
+              <EmptyState icon={Store} compact className="m-4" title="No purchases from vendors in this period" />
+            )}
+          </Section>
+        ) : null}
+        {open("/inventory/items") ? (
+          <Section title="Material-wise purchases" description="Stock bought per item, before GST, with the prices paid." contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/inventory/items">Items</DetailsLink>}>
+            {data.materials.length ? (
+              <MaterialTable rows={data.materials} />
+            ) : (
+              <EmptyState icon={Layers} compact className="m-4" title="No stock bought in this period" description="Material and equipment bills are not split by item, so only stock purchases show here." />
+            )}
+          </Section>
+        ) : null}
       </div>
 
       <div id="price-trend" className="scroll-mt-20">

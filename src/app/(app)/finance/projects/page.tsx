@@ -11,7 +11,8 @@ import { getClientNames, getProjectRow, listProjects } from "@/features/finance/
 import { PROJECT_SORTS, type ProjectSort } from "@/features/finance/projects/schemas";
 import { ProjectsView } from "@/features/finance/projects/components/projects-view";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Projects" };
 
@@ -19,7 +20,8 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
 
 export default async function ProjectsPage({ searchParams }: PageProps<"/finance/projects">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.projects:view")) return <NoAccess title="Projects" />;
   const sp = await searchParams;
   const sortRaw = first(sp.sort);
   const sort = PROJECT_SORTS.some((s) => s.value === sortRaw) ? (sortRaw as ProjectSort) : "newest";
@@ -55,11 +57,13 @@ export default async function ProjectsPage({ searchParams }: PageProps<"/finance
           </>
         }
         actions={
-          <Button asChild>
-            <Link href="?new=1" scroll={false}>
-              <Plus /> New project
-            </Link>
-          </Button>
+          can(user, "finance.projects:create") ? (
+            <Button asChild>
+              <Link href="?new=1" scroll={false}>
+                <Plus /> New project
+              </Link>
+            </Button>
+          ) : undefined
         }
       />
       <StatGrid className="xl:grid-cols-3">

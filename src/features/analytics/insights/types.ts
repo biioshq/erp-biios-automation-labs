@@ -29,9 +29,9 @@ export type FinancialInsights = {
   fyLabel: string;
   fy: { income: number; expenses: number };
   monthly: MonthMoney[];
-  /** Admins only (null for members): P&L per month and for the year, from the accounting engine. */
+  /** Only with the financial position permission (null otherwise): P&L per month and for the year, from the accounting engine. */
   pl: { months: (MonthMoney & { grossProfit: number })[]; fy: { income: number; expenses: number; profit: number; grossProfit: number; from: string; to: string } } | null;
-  /** Admins only: cash flow for the financial year to date and balances today. */
+  /** Only with the financial position permission: cash flow for the financial year to date and balances today. */
   cash: {
     from: string;
     to: string;

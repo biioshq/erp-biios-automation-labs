@@ -4,7 +4,7 @@ import { fromDateInput } from "@/lib/dates";
 import type { BudgetInputs } from "../schemas";
 import type { ResultTable, ScenarioResults } from "../types";
 import type { ComputeContext, ProjectFact } from "./facts";
-import { SALARIES_NOTE, compareRow, daysBetween, emptyMetrics, periodDays, round2, stat, sumOf } from "./common";
+import { SALARIES_NOTE, compareRow, daysBetween, emptyMetrics, periodDays, round2, stat, sumOf, viewOf } from "./common";
 import { headCategoryLabels, headOfCategory } from "./budget-heads";
 
 export type BudgetFacts = {
@@ -166,14 +166,14 @@ export function computeBudget(inputs: BudgetInputs, facts: BudgetFacts, ctx: Com
         : "The period has not started and nothing is booked in it yet, so there is no run rate to project from.",
     );
   }
-  if (!ctx.admin) notes.push(SALARIES_NOTE);
+  if (!ctx.salaries) notes.push(SALARIES_NOTE);
 
   const day = (d: string) => formatDate(fromDateInput(d));
   return {
     version: 1,
     type: "budget",
     computedAt: new Date().toISOString(),
-    view: ctx.admin ? "admin" : "member",
+    view: viewOf(ctx),
     headline: `${label} (${headText}), ${day(inputs.periodFrom)} to ${day(inputs.periodTo)}: the budget moves from ${formatCurrency(original)} to ${formatCurrency(proposed)}. ${
       expected === null
         ? partial

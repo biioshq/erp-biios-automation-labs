@@ -106,14 +106,14 @@ export async function nameLookup(specs: ScenarioSpec[]): Promise<NameLookup> {
   };
 }
 
-/** Stored inputs without the fields only admins see. */
+/** Stored inputs without the salary fields this viewer may not see. */
 export function inputsForViewer(type: string, inputs: unknown, viewer: Viewer): Record<string, unknown> {
   const copy = { ...((inputs ?? {}) as Record<string, unknown>) };
-  if (!viewer.admin) for (const key of ADMIN_ONLY_INPUTS[type as ScenarioType] ?? []) delete copy[key];
+  if (!viewer.salaries) for (const key of ADMIN_ONLY_INPUTS[type as ScenarioType] ?? []) delete copy[key];
   return copy;
 }
 
-/** A member's spec never carries admin-only inputs into a calculation either. */
+/** A spec never carries salary inputs into a calculation for a viewer who may not see them. */
 export function specForViewer(spec: ScenarioSpec, viewer: Viewer): ScenarioSpec {
   return { ...spec, inputs: inputsForViewer(spec.type, spec.inputs, viewer) } as ScenarioSpec;
 }
@@ -137,10 +137,21 @@ export function changedParameters(saved: ScenarioResults, live: ScenarioResults)
   return out;
 }
 
-/** Whether this viewer may see a saved snapshot. Members never see one computed with admin-only figures. */
+/**
+ * Whether a viewer may see every restricted figure a saved snapshot holds: salary figures need
+ * the salaries permission, cash figures the financial position permission. A snapshot without a
+ * view value is treated as holding neither, as it was before roles existed.
+ */
+export function snapshotFitsViewer(view: ScenarioResults["view"] | undefined, viewer: Viewer): boolean {
+  const holdsSalaries = view === "admin" || view === "salaries";
+  const holdsCash = view === "admin" || view === "cash";
+  return (!holdsSalaries || viewer.salaries) && (!holdsCash || viewer.cash);
+}
+
+/** Whether this viewer may see a saved snapshot: only when they may see every figure it holds. */
 export function savedVisible(saved: ScenarioResults | null, viewer: Viewer): { results: ScenarioResults | null; hidden: string | null } {
   if (!saved) return { results: null, hidden: null };
-  if (saved.view === "admin" && !viewer.admin) return { results: null, hidden: "The saved figures were worked out by an admin and include salary or cash figures that only admins see. Today's figures below leave those out." };
+  if (!snapshotFitsViewer(saved.view, viewer)) return { results: null, hidden: "The saved figures include salary or cash figures that your role does not show. Today's figures below leave those out." };
   return { results: saved, hidden: null };
 }
 
@@ -180,27 +191,27 @@ export async function getScenarioDetail(id: string, viewer: Viewer): Promise<Sce
     doc.duplicatedFrom ? Scenario.findById(doc.duplicatedFrom, { code: 1, name: 1 }).lean() : Promise.resolve(null),
   ]);
   const saved = savedVisible((doc.results ?? null) as ScenarioResults | null, viewer);
-  // A member's snapshot leaves out salary and cash figures an admin sees today: that is not a change in the records.
+  // A snapshot worked out with less access leaves out figures this viewer sees today: that is not a change in the records.
   const otherView = Boolean(saved.results && live.results && saved.results.view !== live.results.view);
   return {
     ...toRow(doc, names),
     description: doc.description ?? null,
     assumptions: doc.assumptions ?? null,
     inputs: inputsForViewer(doc.type, doc.inputs, viewer),
-    inputSummary: spec ? describeInputs(specForViewer(spec, viewer), lookup, { admin: viewer.admin }) : [],
+    inputSummary: spec ? describeInputs(specForViewer(spec, viewer), lookup, { salaries: viewer.salaries }) : [],
     duplicatedFrom: source ? { id: String(source._id), code: source.code, name: source.name } : null,
     history: historyOf(doc),
     saved: saved.results,
     savedAt: doc.computedAt ? new Date(doc.computedAt).toISOString() : null,
     savedHidden: saved.hidden,
-    savedNote: otherView ? "The saved figures were worked out for a member, so they leave out salary and cash figures. Update the saved results to keep today's full figures." : null,
+    savedNote: otherView ? "The saved figures were worked out for someone with different access to salary and cash figures, so they differ from today's. Update the saved results to keep today's figures." : null,
     live: live.results,
     liveError: live.error,
     changedSinceSave: saved.results && live.results && !otherView ? changedParameters(saved.results, live.results) : [],
   };
 }
 
-/** Pickers for the scenario forms. Salary averages only for admins. */
+/** Pickers for the scenario forms. Salary averages only for viewers who see salaries. */
 export async function getScenarioFormOptions(viewer: Viewer): Promise<ScenarioFormOptions> {
   await connectDB();
   const [projects, items, vendors, equipment, employees] = await Promise.all([
@@ -247,7 +258,7 @@ export async function getScenarioFormOptions(viewer: Viewer): Promise<ScenarioFo
         value: d.value,
         label: d.label,
         active: people.length,
-        averageSalary: viewer.admin && paid.length ? round2(paid.reduce((s, n) => s + n, 0) / paid.length) : null,
+        averageSalary: viewer.salaries && paid.length ? round2(paid.reduce((s, n) => s + n, 0) / paid.length) : null,
       };
     }),
     skills,
@@ -322,9 +333,9 @@ export async function getScenarioChoices(): Promise<{ value: string; label: stri
 export async function businessPosition(viewer: Viewer): Promise<BusinessPosition> {
   await connectDB();
   const [usage, people, cash] = await Promise.all([
-    budgetUsage({ status: ["planning", "active", "on_hold"] }, { includeSalaries: viewer.admin }),
+    budgetUsage({ status: ["planning", "active", "on_hold"] }, { includeSalaries: viewer.salaries }),
     loadPeople(viewer),
-    viewer.admin ? loadCash() : Promise.resolve(null),
+    viewer.cash ? loadCash() : Promise.resolve(null),
   ]);
   const capacity = departmentCapacity(people.employees, people.memberships);
   return {

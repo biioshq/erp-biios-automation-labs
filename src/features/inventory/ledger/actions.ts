@@ -5,7 +5,7 @@ import { defineAction } from "@/server/action";
 import { connectDB } from "@/server/db";
 import { Expense, FileModel } from "@/server/models";
 import { assignToProject, purchaseStock, returnFromProject } from "@/server/services/inventory-ledger";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
 import { AppError } from "@/server/errors";
 import { fromDateInput } from "@/lib/dates";
@@ -75,7 +75,7 @@ export const purchaseStockAction = defineAction(
       expenseAmount,
     };
   },
-  { revalidate: REVALIDATE },
+  { permission: "inventory.purchase:create", revalidate: REVALIDATE },
 );
 
 export const assignStockAction = defineAction(
@@ -106,7 +106,7 @@ export const assignStockAction = defineAction(
       status: getStockStatus(result.after.available, result.after.minStock),
     };
   },
-  { revalidate: REVALIDATE },
+  { permission: "inventory.movement:create", revalidate: REVALIDATE },
 );
 
 export const returnStockAction = defineAction(
@@ -131,18 +131,24 @@ export const returnStockAction = defineAction(
       available: result.after.available,
     };
   },
-  { revalidate: REVALIDATE },
+  { permission: "inventory.movement:create", revalidate: REVALIDATE },
 );
 
-/** Items a project holds, for the return form and its credit preview. */
+/** Items a project holds, for the return, project move and wastage forms. */
 export async function fetchHeldItems(projectId: string): Promise<HeldItem[]> {
-  if (!(await getCurrentUser())) return [];
+  const user = await getCurrentUser();
+  if (!user || !(can(user, "inventory.movement:view") || can(user, "inventory.wastage:view"))) return [];
   return getHeldItems(projectId);
 }
 
-/** Budget and spend of a project, for the assignment impact preview. */
+/**
+ * Budget and spend of a project, for the assign, return and project move previews. Only for people
+ * who may also see project figures; everyone else gets null and the forms leave the spend rows out.
+ */
 export async function fetchProjectImpact(projectId: string): Promise<ProjectImpact | null> {
-  if (!(await getCurrentUser())) return null;
+  const user = await getCurrentUser();
+  if (!user || !can(user, "inventory.movement:view")) return null;
+  if (!can(user, "finance.projects:view") && !can(user, "finance.project_finance:view")) return null;
   return getProjectImpact(projectId);
 }
 

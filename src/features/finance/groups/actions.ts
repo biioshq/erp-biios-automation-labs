@@ -9,7 +9,7 @@ import { subgroupFormSchema, subgroupIdSchema } from "./schemas";
 
 const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
 
-/** Adds a subgroup under a built-in group or another subgroup. Anyone signed in can add one. */
+/** Adds a subgroup under a built-in group or another subgroup. Members can add one by default. */
 export const createSubgroup = defineAction(
   subgroupFormSchema,
   async (input, user) => {
@@ -29,7 +29,7 @@ export const createSubgroup = defineAction(
     });
     return { key: String(created._id), label: created.name };
   },
-  { revalidate: REVALIDATE, message: "Subgroup added" },
+  { revalidate: REVALIDATE, message: "Subgroup added", permission: "finance.groups:create" },
 );
 
 /** Renames a subgroup or changes its description. Records keep pointing at it by id. */
@@ -47,12 +47,12 @@ export const updateSubgroup = defineAction(
     );
     return { key: input.id };
   },
-  { revalidate: REVALIDATE, message: "Subgroup updated" },
+  { revalidate: REVALIDATE, message: "Subgroup updated", permission: "finance.groups:edit" },
 );
 
 /**
  * Hides a subgroup from pickers. Only when nothing is filed under it or under a subgroup below it,
- * so no record loses its place on the balance sheet. Admins only.
+ * so no record loses its place on the balance sheet. Members cannot by default.
  */
 export const archiveSubgroup = defineAction(
   subgroupIdSchema,
@@ -71,5 +71,5 @@ export const archiveSubgroup = defineAction(
     await FinanceGroup.updateMany({ _id: { $in: keys.filter((k) => Types.ObjectId.isValid(k)).map((k) => new Types.ObjectId(k)) } }, { $set: { archivedAt: new Date() } });
     return { key: id };
   },
-  { revalidate: REVALIDATE, message: "Subgroup removed", role: "admin" },
+  { revalidate: REVALIDATE, message: "Subgroup removed", permission: "finance.groups:delete" },
 );

@@ -43,7 +43,7 @@ function defaults(initial: TypeFormProps["initial"]): In {
 }
 
 /** 1.6 HR and manpower. Members never see or send salary figures. */
-export function ManpowerForm({ options, initial, isAdmin }: TypeFormProps) {
+export function ManpowerForm({ options, initial, seesSalaries }: TypeFormProps) {
   const form = useForm<In, unknown, Out>({ resolver: zodResolver(manpowerFormSchema), defaultValues: defaults(initial), ...formValidation });
   const { control, setValue } = form;
   const scope = useWatch({ control, name: "inputs.scope" });
@@ -55,13 +55,13 @@ export function ManpowerForm({ options, initial, isAdmin }: TypeFormProps) {
   );
   const average = options.departments.find((d) => d.value === department)?.averageSalary ?? null;
 
-  // Admins: picking a department fills the monthly cost with its average salary, once per change.
+  // People who see salaries: picking a department fills the monthly cost with its average salary, once per change.
   const lastDept = useRef(String(initial?.inputs.department ?? ""));
   useEffect(() => {
-    if (!isAdmin || !department || department === lastDept.current) return;
+    if (!seesSalaries || !department || department === lastDept.current) return;
     lastDept.current = department;
     if (average !== null) setValue("inputs.monthlyCost", average, { shouldDirty: true });
-  }, [isAdmin, department, average, setValue]);
+  }, [seesSalaries, department, average, setValue]);
 
   return (
     <ScenarioFormShell form={form} scenarioId={initial?.id} version={initial?.updatedAt}>
@@ -89,9 +89,9 @@ export function ManpowerForm({ options, initial, isAdmin }: TypeFormProps) {
           </div>
         </div>
       </Section>
-      <Section title="Cost" description={isAdmin ? "Salary figures are visible to admins only." : "Salary-based costs are worked out for admins only. Overtime you enter is costed for everyone."}>
+      <Section title="Cost" description={seesSalaries ? "Salary figures are shown only to people who can see salaries." : "Salary-based costs are left out for your role. Overtime you enter is costed for everyone."}>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {isAdmin ? (
+          {seesSalaries ? (
             <NumberField
               control={control}
               name="inputs.monthlyCost"

@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import type { TaskStatus } from "@/lib/constants";
 import { emitDataChanged } from "@/lib/events";
@@ -49,7 +49,7 @@ export function TasksView({ view, lockedView, table, board, calendar, people, pr
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const isAdmin = useIsAdmin();
+  const canDelete = useCan("tasks.tasks:delete");
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(false);
   // Each fetch takes a ticket; only the newest one may apply, so a late answer for a task the drawer has
@@ -180,7 +180,7 @@ export function TasksView({ view, lockedView, table, board, calendar, people, pr
   return (
     <>
       {view === "table" && table ? (
-        <TaskTable data={table} filters={filters} onOpen={openTask} onEdit={editTask} onDelete={isAdmin ? askDelete : undefined} onNew={() => newTask()} toolbarActions={switcher} />
+        <TaskTable data={table} filters={filters} onOpen={openTask} onEdit={editTask} onDelete={canDelete ? askDelete : undefined} onNew={() => newTask()} toolbarActions={switcher} />
       ) : null}
       {view === "board" && board ? (
         <div className="space-y-4">
@@ -229,7 +229,7 @@ export function TasksView({ view, lockedView, table, board, calendar, people, pr
             onCancel={() => setPanel({ kind: "task", id: ready.id })}
           />
         ) : panel?.kind === "task" && ready ? (
-          <TaskDetailView task={ready} currentUser={currentUser} onChanged={reload} onEdit={() => editTask(ready.id)} onDelete={() => remove(ready)} canDelete={isAdmin} />
+          <TaskDetailView task={ready} currentUser={currentUser} onChanged={reload} onEdit={() => editTask(ready.id)} onDelete={() => remove(ready)} canDelete={canDelete} />
         ) : null}
       </FormSheet>
 

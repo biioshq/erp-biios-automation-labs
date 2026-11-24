@@ -14,6 +14,7 @@ import { Money } from "@/components/shared/money";
 import { Section } from "@/components/shared/page";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { useOnLiveChange } from "@/components/live-updates";
+import { useCan } from "@/components/current-user";
 import { AddSubgroupButton } from "@/features/finance/groups/components/add-subgroup-button";
 import type { GroupOption } from "@/features/finance/groups/types";
 import { AssetToolbar, type RegisterLayout } from "@/features/finance/assets/fixed/components/asset-toolbar";
@@ -116,7 +117,18 @@ function TotalsLine({ node }: { node: InvestmentGroupNode }) {
   );
 }
 
-function Subgroup({ node, groups, onOpen, onAdd }: { node: InvestmentGroupNode; groups: GroupOption[]; onOpen: (id: string) => void; onAdd: (group: string) => void }) {
+function Subgroup({
+  node,
+  groups,
+  onOpen,
+  onAdd,
+}: {
+  node: InvestmentGroupNode;
+  groups: GroupOption[];
+  onOpen: (id: string) => void;
+  /** Null when the person cannot add investments. */
+  onAdd: ((group: string) => void) | null;
+}) {
   return (
     <div className="border-t" style={{ paddingLeft: `${Math.min(node.depth, 4) * 12}px` }}>
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 sm:px-5">
@@ -127,9 +139,11 @@ function Subgroup({ node, groups, onOpen, onAdd }: { node: InvestmentGroupNode; 
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={() => onAdd(node.key)}>
-            <Plus /> Investment
-          </Button>
+          {onAdd ? (
+            <Button size="sm" variant="ghost" onClick={() => onAdd(node.key)}>
+              <Plus /> Investment
+            </Button>
+          ) : null}
           <AddSubgroupButton parents={descendants(groups, node.key)} defaultParent={node.key} label="Subgroup" variant="ghost" />
         </div>
       </div>
@@ -157,6 +171,10 @@ export function InvestmentsView({
   accounts: BankAccountOption[];
   layout: RegisterLayout;
 }) {
+  // These only hide controls; every action checks the same permission on the server.
+  const canCreate = useCan("finance.investments:create");
+  const canEdit = useCan("finance.investments:edit");
+  const canDelete = useCan("finance.investments:delete");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -165,13 +183,13 @@ export function InvestmentsView({
   const activeGroups = useMemo(() => groups.filter((g) => !g.archived), [groups]);
 
   const panel: Panel = useMemo(() => {
-    if (searchParams.get("new") === "1") return { kind: "new", group: searchParams.get("group") ?? undefined };
+    if (searchParams.get("new") === "1") return canCreate ? { kind: "new", group: searchParams.get("group") ?? undefined } : null;
     const edit = searchParams.get("edit");
-    if (edit) return { kind: "edit", id: edit };
+    if (edit) return canEdit ? { kind: "edit", id: edit } : { kind: "view", id: edit };
     const view = searchParams.get("view");
     if (view) return { kind: "view", id: view };
     return null;
-  }, [searchParams]);
+  }, [searchParams, canCreate, canEdit]);
 
   const setPanel = (next: Panel) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -290,9 +308,11 @@ export function InvestmentsView({
           title="No investments recorded yet"
           description="Add fixed deposits, mutual funds, shares or bonds the company holds for more than a year. The balance sheet carries them at cost."
           action={
-            <Button onClick={() => openNew()}>
-              <Plus /> Add investment
-            </Button>
+            canCreate ? (
+              <Button onClick={() => openNew()}>
+                <Plus /> Add investment
+              </Button>
+            ) : undefined
           }
         />
       ) : layout === "register" ? (
@@ -333,9 +353,11 @@ export function InvestmentsView({
               actions={
                 node.key === "_unknown" || node.key === INVESTMENT_ROOT_KEY ? null : (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => openNew(node.key)}>
-                      <Plus /> Investment
-                    </Button>
+                    {canCreate ? (
+                      <Button size="sm" variant="outline" onClick={() => openNew(node.key)}>
+                        <Plus /> Investment
+                      </Button>
+                    ) : null}
                     <AddSubgroupButton parents={descendants(activeGroups, node.key)} defaultParent={node.key} />
                   </>
                 )
@@ -345,7 +367,7 @@ export function InvestmentsView({
                 <>
                   <GroupTable rows={node.rows} onOpen={open} />
                   {node.children.map((c) => (
-                    <Subgroup key={c.key} node={c} groups={activeGroups} onOpen={open} onAdd={openNew} />
+                    <Subgroup key={c.key} node={c} groups={activeGroups} onOpen={open} onAdd={canCreate ? openNew : null} />
                   ))}
                 </>
               ) : (
@@ -384,6 +406,8 @@ export function InvestmentsView({
           <InvestmentDetailView
             investment={detail}
             accounts={accounts}
+            canEdit={canEdit}
+            canDelete={canDelete}
             onEdit={() => setPanel({ kind: "edit", id: detail.id })}
             onChanged={reload}
             onDelete={() => remove(detail)}

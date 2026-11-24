@@ -15,6 +15,7 @@ import { FileTile } from "@/features/files/components/file-preview";
 import { ACCEPT_DOCUMENTS } from "@/features/files/types";
 import { LIABILITY_KINDS, LIABILITY_SOURCES, PAYMENT_METHODS, labelOf } from "@/lib/constants";
 import { emitDataChanged } from "@/lib/events";
+import { useCan } from "@/components/current-user";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { BankAccountOption } from "@/server/lookups";
@@ -71,6 +72,9 @@ export function LiabilityDetailView({
   onChanged: () => void;
 }) {
   const [repaying, setRepaying] = useState(false);
+  // These only hide controls; every action checks the same permission on the server.
+  const canEdit = useCan("finance.liabilities:edit");
+  const canDelete = useCan("finance.liabilities:delete");
   const isLoan = liability.kind === "loan";
   const schedule = useMemo(
     () =>
@@ -174,7 +178,7 @@ export function LiabilityDetailView({
         </p>
       </FormSheetBody>
       <FormSheetFooter>
-        {liability.paymentCount === 0 && !liability.fromBankStatement ? (
+        {canDelete && liability.paymentCount === 0 && !liability.fromBankStatement ? (
           <ConfirmDialog
             title="Delete this liability?"
             description={`${liability.code} ${liability.name} and its documents will be removed. It has no repayments.`}
@@ -186,10 +190,12 @@ export function LiabilityDetailView({
             }
           />
         ) : null}
-        <Button variant="outline" onClick={onEdit}>
-          <Pencil /> Edit
-        </Button>
-        {liability.outstanding > 0 ? (
+        {canEdit ? (
+          <Button variant="outline" onClick={onEdit}>
+            <Pencil /> Edit
+          </Button>
+        ) : null}
+        {canEdit && liability.outstanding > 0 ? (
           <Button onClick={() => setRepaying(true)}>
             <Banknote /> Record repayment
           </Button>
@@ -281,6 +287,7 @@ function ScheduleSection({ schedule }: { schedule: Schedule | null }) {
 }
 
 function PaymentHistory({ liability, onChanged }: { liability: LiabilityDetail; onChanged: () => void }) {
+  const canDelete = useCan("finance.liabilities:delete");
   async function remove(p: RepaymentRow) {
     const result = await deleteRepaymentAction({ liabilityId: liability.id, paymentId: p.id });
     if (!result.ok) {
@@ -322,7 +329,7 @@ function PaymentHistory({ liability, onChanged }: { liability: LiabilityDetail; 
                 {p.note ? <p className="text-xs whitespace-pre-wrap text-muted-foreground">{p.note}</p> : null}
               </div>
               {/* A repayment matched to a bank statement line stays: the statement still shows the money going out. */}
-              {p.fromBankStatement ? null : (
+              {p.fromBankStatement || !canDelete ? null : (
                 <ConfirmDialog
                   title="Delete this repayment?"
                   description={
@@ -350,6 +357,8 @@ function PaymentHistory({ liability, onChanged }: { liability: LiabilityDetail; 
 
 function Documents({ liability, onChanged }: { liability: LiabilityDetail; onChanged: () => void }) {
   const [pending, startTransition] = useTransition();
+  const canEdit = useCan("finance.liabilities:edit");
+  const canDelete = useCan("finance.liabilities:delete");
   function attach(fileId: string) {
     startTransition(async () => {
       const result = await addLiabilityDocumentsAction({ liabilityId: liability.id, fileIds: [fileId] });
@@ -377,26 +386,31 @@ function Documents({ liability, onChanged }: { liability: LiabilityDetail; onCha
       {liability.documents.length ? (
         <div className="space-y-2">
           {liability.documents.map((f) => (
-            <DocumentTile key={f.id} file={f} onRemove={() => remove(f.id)} />
+            <DocumentTile key={f.id} file={f} onRemove={canDelete ? () => remove(f.id) : null} />
           ))}
         </div>
       ) : null}
-      <FileDropzone
-        meta={{ kind: "document" }}
-        accept={ACCEPT_DOCUMENTS}
-        compact
-        disabled={pending}
-        title={liability.documents.length ? "Add more documents" : "Drop the agreement, sanction letter or statements"}
-        hint="PDF, images, Word, Excel"
-        onUploaded={(file) => attach(file.id)}
-      />
+      {canEdit ? (
+        <FileDropzone
+          meta={{ kind: "document" }}
+          accept={ACCEPT_DOCUMENTS}
+          compact
+          disabled={pending}
+          title={liability.documents.length ? "Add more documents" : "Drop the agreement, sanction letter or statements"}
+          hint="PDF, images, Word, Excel"
+          onUploaded={(file) => attach(file.id)}
+        />
+      ) : liability.documents.length ? null : (
+        <p className="text-sm text-muted-foreground">No documents.</p>
+      )}
     </section>
   );
 }
 
-/** A saved document; removing it asks first, since the file is deleted. */
-function DocumentTile({ file, onRemove }: { file: LiabilityDetail["documents"][number]; onRemove: () => Promise<void> }) {
+/** A saved document; removing it asks first, since the file is deleted. No onRemove: view only. */
+function DocumentTile({ file, onRemove }: { file: LiabilityDetail["documents"][number]; onRemove: (() => Promise<void>) | null }) {
   const [confirming, setConfirming] = useState(false);
+  if (!onRemove) return <FileTile file={file} />;
   return (
     <>
       <FileTile file={file} onRemove={() => setConfirming(true)} />

@@ -9,7 +9,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { formatCompactCurrency, formatPercent } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { BUDGET_USE_RULE, budgetUse, statusesParam, sumOf } from "@/features/analytics/projects/model";
 import { loadProjectCosts } from "@/features/analytics/projects/queries";
 import { MoneyBars } from "@/features/analytics/inventory/components/charts";
@@ -21,7 +24,10 @@ export const metadata: Metadata = { title: "Budget vs actual" };
 
 export default async function BudgetVsActualPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.projects)) return <NoAccess eyebrow="Analytics & Planning" title="Budget vs actual" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const statuses = statusesParam(await searchParams);
   const { rows, total, salariesHidden } = await loadProjectCosts(statuses);
   const budgeted = rows.filter((r) => r.budget > 0);
@@ -47,11 +53,13 @@ export default async function BudgetVsActualPage({ searchParams }: { searchParam
         actions={
           <>
             <ProjectStatusSelect statuses={statuses} />
-            <Button asChild variant="outline">
-              <Link href="/analytics/projects/overruns">
-                <TriangleAlert /> Cost overruns
-              </Link>
-            </Button>
+            {open("/analytics/projects/overruns") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/projects/overruns">
+                  <TriangleAlert /> Cost overruns
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

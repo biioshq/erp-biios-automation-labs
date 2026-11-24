@@ -13,13 +13,15 @@ import { EXPENSE_FILTER_KEYS, EXPENSE_SORT_KEYS } from "@/features/finance/expen
 import { ExpensesView } from "@/features/finance/expenses/components/expenses-view";
 import { ExpenseCategoriesButton } from "@/features/finance/expenses/components/categories-dialog";
 import { getExpenseCategories } from "@/server/expense-categories";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Expenses" };
 
 export default async function ExpensesPage({ searchParams }: PageProps<"/finance/expenses">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
+  if (!can(user, "finance.expenses:view")) return <NoAccess title="Expenses" />;
   const params = parseListParams(await searchParams, {
     filterKeys: EXPENSE_FILTER_KEYS,
     sortable: EXPENSE_SORT_KEYS,
@@ -47,13 +49,15 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/finance
         }
         actions={
           <>
-            {/* Managing categories is a settings change, so admins only (the actions refuse anyone else too). */}
-            {user.role === "admin" ? <ExpenseCategoriesButton categories={categories} /> : null}
-            <Button asChild>
-              <Link href="?new=1" scroll={false}>
-                <Plus /> Add expense
-              </Link>
-            </Button>
+            {/* Managing categories has its own permission (the actions refuse anyone else too). */}
+            {can(user, "finance.expense_categories:view") ? <ExpenseCategoriesButton categories={categories} /> : null}
+            {can(user, "finance.expenses:create") ? (
+              <Button asChild>
+                <Link href="?new=1" scroll={false}>
+                  <Plus /> Add expense
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

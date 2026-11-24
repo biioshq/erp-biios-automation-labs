@@ -4,18 +4,20 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getSectionTabs } from "@/config/navigation";
+import { useCanFn } from "@/components/current-user";
 import { cn } from "@/lib/utils";
 
 /**
  * The pages under a sidebar entry (Expenses and Recurring, the task statuses …)
- * as a tab row above the page. It renders nothing on pages without tabs and on
+ * that the person's role opens, as a tab row above the page. It renders nothing on pages without tabs and on
  * detail pages. The row lines up with the page body and scrolls sideways inside
  * itself on narrow screens, keeping the active tab in view.
  */
-export function SectionTabs({ isAdmin = true }: { isAdmin?: boolean }) {
+export function SectionTabs() {
   const pathname = usePathname();
   const navRef = useRef<HTMLElement>(null);
-  const section = getSectionTabs(pathname, isAdmin);
+  const can = useCanFn();
+  const section = getSectionTabs(pathname, can);
   const activeHref = section?.activeHref;
 
   useEffect(() => {

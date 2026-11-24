@@ -11,10 +11,12 @@ import { labelsFor, type AssetKind } from "../labels";
 import { loadAssetPage } from "../page-data";
 import { depreciationSummary } from "@/features/finance/assets/depreciation/queries";
 import { AssetsView } from "./assets-view";
+import { can, requireUser } from "@/server/auth/session";
 
 /** The register page shared by Fixed assets and Intangible assets (server component). */
 export async function AssetRegisterPage({ kind, searchParams }: { kind: AssetKind; searchParams: SearchParams }) {
   const labels = labelsFor(kind);
+  const user = await requireUser();
   const { register, groups, layout, options } = await loadAssetPage(kind, searchParams);
   const t = register.totals;
   const fy = financialYearIST();
@@ -42,11 +44,13 @@ export async function AssetRegisterPage({ kind, searchParams }: { kind: AssetKin
                 <TrendingDown /> {labels.charge} summary
               </Link>
             </Button>
-            <Button asChild>
-              <Link href="?new=1" scroll={false}>
-                <Plus /> Add {labels.singular}
-              </Link>
-            </Button>
+            {can(user, "finance.fixed_assets:create") ? (
+              <Button asChild>
+                <Link href="?new=1" scroll={false}>
+                  <Plus /> Add {labels.singular}
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

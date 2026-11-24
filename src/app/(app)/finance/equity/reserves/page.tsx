@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRightLeft, Layers, Plus, Vault } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IfCan } from "@/features/finance/equity/components/if-can";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { round2 } from "@/lib/format";
 import { AddSubgroupButton } from "@/features/finance/groups/components/add-subgroup-button";
 import { getPanelData, getReserves, listEntries } from "@/features/finance/equity/queries";
@@ -20,7 +21,7 @@ export const metadata: Metadata = { title: "Reserves & surplus" };
 
 export default async function ReservesPage() {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Reserves & surplus" />;
+  if (!can(user, "finance.equity:view")) return <NoAccess title="Reserves & surplus" />;
   const [reserves, transfers, panel] = await Promise.all([getReserves(), listEntries({ types: ["reserve_transfer"] }), getPanelData()]);
   // General reserve includes the reserve types added under it.
   const underGeneral = new Set(["general_reserve"]);
@@ -37,11 +38,13 @@ export default async function ReservesPage() {
         actions={
           <>
             <AddSubgroupButton parents={reserves.parents} defaultParent="reserves_surplus" label="Add reserve type" size="default" />
-            <Button asChild>
-              <Link href="?new=reserve_transfer" scroll={false}>
-                <ArrowRightLeft /> Transfer to reserve
-              </Link>
-            </Button>
+            <IfCan permission="finance.equity:create">
+              <Button asChild>
+                <Link href="?new=reserve_transfer" scroll={false}>
+                  <ArrowRightLeft /> Transfer to reserve
+                </Link>
+              </Button>
+            </IfCan>
           </>
         }
       />
@@ -103,11 +106,13 @@ export default async function ReservesPage() {
               title="No transfers yet"
               description="When the company decides to keep part of its profit in a reserve, record the transfer here."
               action={
-                <Button asChild>
-                  <Link href="?new=reserve_transfer" scroll={false}>
-                    <Plus /> Transfer to reserve
-                  </Link>
-                </Button>
+                <IfCan permission="finance.equity:create">
+                  <Button asChild>
+                    <Link href="?new=reserve_transfer" scroll={false}>
+                      <Plus /> Transfer to reserve
+                    </Link>
+                  </Button>
+                </IfCan>
               }
             />
           }

@@ -10,7 +10,7 @@ import { describeLinks } from "./server/links";
 import { isReopenable } from "./server/claims";
 import { loadPickers } from "./server/context";
 
-/** Reads for the bank statement page. Admin-only data: the page checks the role first. */
+/** Reads for the bank statement page. The page checks the bank statements view permission first. */
 
 export async function getStatementPickers(): Promise<StatementPickers> {
   await connectDB();

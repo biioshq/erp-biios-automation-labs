@@ -11,13 +11,15 @@ import { inventorySnapshot } from "@/server/services/metrics";
 import { getItemSubcategories, getItemVendors, listItems } from "@/features/inventory/items/queries";
 import { ITEM_FILTER_KEYS, ITEM_SORT_KEYS } from "@/features/inventory/items/schemas";
 import { ItemsView } from "@/features/inventory/items/components/items-view";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 
 export const metadata: Metadata = { title: "All items" };
 
 export default async function ItemsPage({ searchParams }: PageProps<"/inventory/items">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "inventory.items:view")) return <NoAccess eyebrow="Inventory" title="All items" />;
   const sp = await searchParams;
   const params = parseListParams(sp, {
     filterKeys: ITEM_FILTER_KEYS,
@@ -47,16 +49,20 @@ export default async function ItemsPage({ searchParams }: PageProps<"/inventory/
         }
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link href="/inventory/purchase">
-                <PackagePlus /> Purchase stock
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="?new=1" scroll={false}>
-                <Plus /> Add item
-              </Link>
-            </Button>
+            {can(user, "inventory.purchase:create") ? (
+              <Button variant="outline" asChild>
+                <Link href="/inventory/purchase">
+                  <PackagePlus /> Purchase stock
+                </Link>
+              </Button>
+            ) : null}
+            {can(user, "inventory.items:create") ? (
+              <Button asChild>
+                <Link href="?new=1" scroll={false}>
+                  <Plus /> Add item
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

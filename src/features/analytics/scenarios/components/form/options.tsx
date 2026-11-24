@@ -17,7 +17,8 @@ export type InitialScenario = {
   /** ISO time the scenario was last saved, so a stale edit form cannot overwrite a later change. */
   updatedAt?: string;
 };
-export type TypeFormProps = { options: ScenarioFormOptions; initial?: InitialScenario; isAdmin: boolean };
+/** `seesSalaries`: the person may see salaries, so salary inputs and averages are shown. */
+export type TypeFormProps = { options: ScenarioFormOptions; initial?: InitialScenario; seesSalaries: boolean };
 
 export function projectOptions(projects: ProjectChoice[]): Option[] {
   return projects.map((p) => ({

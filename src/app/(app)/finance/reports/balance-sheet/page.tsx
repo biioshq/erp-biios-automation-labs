@@ -4,13 +4,13 @@ import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { DownloadButtons } from "@/features/reports/components/download-buttons";
 import { ReportFilterBar } from "@/features/reports/components/report-filters";
 import { CheckBadge, GrandTotal, RelatedStatements, StatementBlock } from "@/features/reports/components/statements/statement-view";
 import { filtersForReport, parseReportFilters } from "@/features/reports/schemas";
 import { balanceSheet } from "@/server/accounting/statements";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import { fromDateInput } from "@/lib/dates";
 import { formatDate, round2 } from "@/lib/format";
 
@@ -20,7 +20,7 @@ const NO_OPTIONS = { projects: [], vendors: [], categories: [] };
 
 export default async function BalanceSheetPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Balance sheet" />;
+  if (!can(user, "finance.statements:view")) return <NoAccess title="Balance sheet" />;
   const filters = filtersForReport("balance_sheet", parseReportFilters(await searchParams));
   const sheet = await balanceSheet(filters.to ? fromDateInput(filters.to) : null);
   const empty = !sheet.assets.current.length && !sheet.assets.nonCurrent.length && !sheet.liabilities.current.length && !sheet.liabilities.nonCurrent.length && sheet.equity.total === 0;
@@ -31,7 +31,7 @@ export default async function BalanceSheetPage({ searchParams }: { searchParams:
         eyebrow="Reports"
         title="Balance sheet"
         description={`What the company owns, owes and is worth on ${formatDate(fromDateInput(sheet.asOf))}. Every figure is computed from the records in Project Manager; nothing is typed in by hand.`}
-        actions={<DownloadButtons type="balance_sheet" filters={filters} refreshOnDownload={false} />}
+        actions={can(user, "finance.statements:export") ? <DownloadButtons type="balance_sheet" filters={filters} refreshOnDownload={false} /> : undefined}
       />
       <ReportFilterBar meta={{ type: "balance_sheet", filters: ["asOf"] }} filters={filters} options={NO_OPTIONS} />
 

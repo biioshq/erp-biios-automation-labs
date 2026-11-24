@@ -11,7 +11,7 @@ import { DataTable, DataTableColumnHeader } from "@/components/data-table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { PAYMENT_METHODS, labelOf } from "@/lib/constants";
 import { emitDataChanged } from "@/lib/events";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
@@ -277,7 +277,8 @@ function DeletePaymentButton({ row, onConfirm }: { row: PaymentHistoryRow; onCon
 
 /** Every payment recorded against an expense, newest first. Admins can delete one. */
 export function PaymentHistoryTable({ rows, total, page, pageSize }: { rows: PaymentHistoryRow[]; total: number; page: number; pageSize: number }) {
-  const isAdmin = useIsAdmin();
+  const canDelete = useCan("finance.payments:delete");
+  const canOpenLines = useCan("finance.bank_statements:view");
 
   async function remove(row: PaymentHistoryRow) {
     const result = await deleteExpensePayment({ id: row.expenseId, paymentId: row.id });
@@ -366,7 +367,7 @@ export function PaymentHistoryTable({ rows, total, page, pageSize }: { rows: Pay
         enableSorting: false,
         cell: ({ row }) =>
           row.original.fromBankStatement ? (
-            isAdmin && row.original.bankTransactionId ? (
+            canOpenLines && row.original.bankTransactionId ? (
               <Link
                 href={bankLineHref(row.original.bankTransactionId)}
                 title="Matched to a bank statement line. Open the line to unmatch it."
@@ -379,12 +380,12 @@ export function PaymentHistoryTable({ rows, total, page, pageSize }: { rows: Pay
                 <Landmark className="size-4" aria-label="Matched to a bank statement line" />
               </span>
             )
-          ) : isAdmin ? (
+          ) : canDelete ? (
             <DeletePaymentButton row={row.original} onConfirm={remove} />
           ) : null,
       },
     ],
-    [isAdmin],
+    [canDelete, canOpenLines],
   );
 
   return (
@@ -417,7 +418,7 @@ export function PaymentHistoryTable({ rows, total, page, pageSize }: { rows: Pay
               <span className="font-mono">{r.number}</span>
               {r.reference ? ` · ${r.reference}` : ""} · by {r.recordedBy ?? "unknown"}
             </p>
-            {isAdmin && !r.fromBankStatement ? <DeletePaymentButton row={r} onConfirm={remove} /> : null}
+            {canDelete && !r.fromBankStatement ? <DeletePaymentButton row={r} onConfirm={remove} /> : null}
             {r.fromBankStatement ? <BankLineLink id={r.bankTransactionId} label="Statement line" className="shrink-0" /> : null}
           </div>
         </div>

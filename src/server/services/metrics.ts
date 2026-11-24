@@ -127,9 +127,9 @@ const emptyStages = () => Object.fromEntries(PROJECT_STAGES.map((s) => [s.value,
 
 export type SpendOptions = {
   /**
-   * Whether salary expenses count. Defaults to the viewer: admins see them,
-   * members do not, because a project or stage whose spend includes one
-   * salary would let a member work out that person's pay.
+   * Whether salary expenses count. Defaults to the viewer: people with the
+   * salaries data permission see them, others do not, because a project or
+   * stage whose spend includes one salary would let them work out that person's pay.
    */
   includeSalaries?: boolean;
 };

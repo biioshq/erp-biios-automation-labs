@@ -4,7 +4,7 @@ import { Types } from "mongoose";
 import { defineAction } from "@/server/action";
 import { AppError, notFound } from "@/server/errors";
 import { AccountTransfer, BankAccount, BankTransaction } from "@/server/models";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { fromDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import { unmatchHint } from "@/features/finance/bank-statements/line-href";
@@ -38,7 +38,7 @@ export const createBankAccount = defineAction(
     const created = await BankAccount.create({ ...fields, createdBy: new Types.ObjectId(user.id) });
     return { id: String(created._id), name: created.name };
   },
-  { revalidate: REVALIDATE, message: "Account added", role: "admin" },
+  { revalidate: REVALIDATE, message: "Account added", permission: "finance.cash_bank:create" },
 );
 
 export const updateBankAccount = defineAction(
@@ -58,7 +58,7 @@ export const updateBankAccount = defineAction(
     await BankAccount.updateOne({ _id: existing._id }, { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
     return { id: input.id };
   },
-  { revalidate: REVALIDATE, message: "Account updated", role: "admin" },
+  { revalidate: REVALIDATE, message: "Account updated", permission: "finance.cash_bank:edit" },
 );
 
 /**
@@ -72,7 +72,7 @@ export const archiveBankAccount = defineAction(
     if (!res.matchedCount && !(await BankAccount.exists({ _id: new Types.ObjectId(id) }))) throw notFound("The account");
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Account archived", role: "admin" },
+  { revalidate: REVALIDATE, message: "Account archived", permission: "finance.cash_bank:edit" },
 );
 
 export const restoreBankAccount = defineAction(
@@ -82,7 +82,7 @@ export const restoreBankAccount = defineAction(
     if (!res.matchedCount) throw notFound("The account");
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Account restored", role: "admin" },
+  { revalidate: REVALIDATE, message: "Account restored", permission: "finance.cash_bank:edit" },
 );
 
 export const recordTransfer = defineAction(
@@ -101,11 +101,11 @@ export const recordTransfer = defineAction(
       user.id,
     );
   },
-  { revalidate: REVALIDATE, message: "Transfer recorded", role: "admin" },
+  { revalidate: REVALIDATE, message: "Transfer recorded", permission: "finance.cash_bank:create" },
 );
 
 /**
- * Deletes a transfer after the admin confirmed it. A transfer that a bank statement line became
+ * Deletes a transfer after the person confirmed it. A transfer that a bank statement line became
  * is left alone: that line would point at nothing and the statement could not be imported again.
  */
 export const deleteTransfer = defineAction(
@@ -125,12 +125,12 @@ export const deleteTransfer = defineAction(
     await AccountTransfer.deleteOne({ _id: existing._id });
     return { id };
   },
-  { revalidate: REVALIDATE, message: "Transfer deleted", role: "admin" },
+  { revalidate: REVALIDATE, message: "Transfer deleted", permission: "finance.cash_bank:delete" },
 );
 
-/** Loads one account for the edit form. Admins only, like the page. */
+/** Loads one account for the edit form. Needs Cash & bank view, like the page. */
 export async function fetchBankAccount(id: string): Promise<BankAccountDetail | null> {
   const user = await getCurrentUser();
-  if (user?.role !== "admin" || !Types.ObjectId.isValid(id)) return null;
+  if (!user || !can(user, "finance.cash_bank:view") || !Types.ObjectId.isValid(id)) return null;
   return getBankAccount(id);
 }

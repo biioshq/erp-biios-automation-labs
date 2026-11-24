@@ -35,10 +35,11 @@ export function RecurringDetailSkeleton() {
   );
 }
 
-/** Read-only view of a schedule with its upcoming dates, posted history and admin actions. */
+/** Read-only view of a schedule with its upcoming dates, posted history and the actions the viewer's role allows. */
 export function RecurringDetailView({
   schedule,
-  isAdmin,
+  canEdit,
+  canRemove,
   justPosted,
   onEdit,
   onPostNext,
@@ -46,7 +47,10 @@ export function RecurringDetailView({
   onDelete,
 }: {
   schedule: RecurringDetail;
-  isAdmin: boolean;
+  /** Edit, pause, resume, end and post now. */
+  canEdit: boolean;
+  /** Delete a schedule that never posted. */
+  canRemove: boolean;
   justPosted: PostedResult | null;
   onEdit: () => void;
   onPostNext: () => Promise<boolean>;
@@ -55,7 +59,7 @@ export function RecurringDetailView({
 }) {
   const due = dueInfo(schedule.nextRunDate, schedule.status);
   const active = schedule.status === "active";
-  const canDelete = schedule.postedCount === 0 && schedule.occurrences === 0;
+  const deletable = schedule.postedCount === 0 && schedule.occurrences === 0;
   const following = schedule.upcoming[1];
 
   return (
@@ -230,37 +234,41 @@ export function RecurringDetailView({
       </FormSheetBody>
 
       <FormSheetFooter className="flex-wrap justify-start sm:justify-end">
-        {!isAdmin ? (
-          <p className="mr-auto text-xs text-muted-foreground">Only admins can change schedules.</p>
+        {!canEdit && !canRemove ? (
+          <p className="mr-auto text-xs text-muted-foreground">Your role cannot change schedules.</p>
         ) : (
           <>
-            {canDelete ? (
-              <ConfirmDialog
-                title="Delete this schedule?"
-                description={`${schedule.code} (${schedule.name}) has not posted anything, so it can be removed completely.`}
-                onConfirm={onDelete}
-                trigger={
-                  <Button variant="ghost" className="text-danger hover:bg-danger/10 hover:text-danger sm:mr-auto">
-                    <Trash2 /> Delete
-                  </Button>
-                }
-              />
+            {deletable ? (
+              canRemove ? (
+                <ConfirmDialog
+                  title="Delete this schedule?"
+                  description={`${schedule.code} (${schedule.name}) has not posted anything, so it can be removed completely.`}
+                  onConfirm={onDelete}
+                  trigger={
+                    <Button variant="ghost" className="text-danger hover:bg-danger/10 hover:text-danger sm:mr-auto">
+                      <Trash2 /> Delete
+                    </Button>
+                  }
+                />
+              ) : null
             ) : schedule.status !== "ended" ? (
-              <ConfirmDialog
-                title="End this schedule?"
-                description={`${schedule.name} stops posting for good. The ${schedule.postedCount} expense${schedule.postedCount === 1 ? "" : "s"} already posted stay in Expenses. This cannot be undone.`}
-                confirmLabel="End schedule"
-                onConfirm={() => onSetStatus("end")}
-                trigger={
-                  <Button variant="ghost" className="text-danger hover:bg-danger/10 hover:text-danger sm:mr-auto">
-                    <Square /> End schedule
-                  </Button>
-                }
-              />
+              canEdit ? (
+                <ConfirmDialog
+                  title="End this schedule?"
+                  description={`${schedule.name} stops posting for good. The ${schedule.postedCount} expense${schedule.postedCount === 1 ? "" : "s"} already posted stay in Expenses. This cannot be undone.`}
+                  confirmLabel="End schedule"
+                  onConfirm={() => onSetStatus("end")}
+                  trigger={
+                    <Button variant="ghost" className="text-danger hover:bg-danger/10 hover:text-danger sm:mr-auto">
+                      <Square /> End schedule
+                    </Button>
+                  }
+                />
+              ) : null
             ) : (
               <p className="text-xs text-muted-foreground sm:mr-auto">Ended schedules with history cannot be deleted.</p>
             )}
-            {active ? (
+            {canEdit && active ? (
               <>
                 <Button variant="outline" onClick={() => void onSetStatus("pause")}>
                   <Pause /> Pause
@@ -284,14 +292,16 @@ export function RecurringDetailView({
                 />
               </>
             ) : null}
-            {schedule.status === "paused" ? (
+            {canEdit && schedule.status === "paused" ? (
               <Button variant="outline" onClick={() => void onSetStatus("resume")}>
                 <Play /> Resume
               </Button>
             ) : null}
-            <Button onClick={onEdit}>
-              <Pencil /> Edit
-            </Button>
+            {canEdit ? (
+              <Button onClick={onEdit}>
+                <Pencil /> Edit
+              </Button>
+            ) : null}
           </>
         )}
       </FormSheetFooter>

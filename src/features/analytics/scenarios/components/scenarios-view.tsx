@@ -10,12 +10,15 @@ import { DataTable, DataTableColumnHeader, type FilterDef } from "@/components/d
 import { EmptyState } from "@/components/shared/empty-state";
 import { SCENARIO_STATUSES, SCENARIO_TYPES } from "@/lib/constants";
 import { formatDate, formatRelative } from "@/lib/format";
+import { useCan } from "@/components/current-user";
+import { ANALYTICS } from "../../links";
 import type { Paginated } from "@/lib/list-params";
 import type { ScenarioRow } from "../types";
 import { ScenarioStatusBadge, ScenarioTypeBadge } from "./badges";
 
 /** The scenario list: search, filters by type, status and creator; a row opens the scenario. */
 export function ScenariosView({ data, creators }: { data: Paginated<ScenarioRow>; creators: { value: string; label: string }[] }) {
+  const mayCreate = useCan(ANALYTICS.scenarios.create);
   const router = useRouter();
   const columns = useMemo<ColumnDef<ScenarioRow>[]>(
     () => [
@@ -127,11 +130,13 @@ export function ScenariosView({ data, creators }: { data: Paginated<ScenarioRow>
           title="No scenarios yet"
           description="A scenario tries out a change, like more demand, a late delivery or a new project, against today's records. It never changes stock, budgets, people or money."
           action={
-            <Button asChild>
-              <Link href="/analytics/scenarios/new">
-                <Plus /> New scenario
-              </Link>
-            </Button>
+            mayCreate ? (
+              <Button asChild>
+                <Link href="/analytics/scenarios/new">
+                  <Plus /> New scenario
+                </Link>
+              </Button>
+            ) : undefined
           }
         />
       }

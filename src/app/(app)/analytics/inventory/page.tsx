@@ -9,7 +9,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { financialYearIST } from "@/lib/dates";
 import { formatCompactCurrency, formatNumber, round2 } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { idParam, parseRange, rangeQuery, withParams } from "@/features/analytics/inventory/params";
 import { getMovementAnalysis } from "@/features/analytics/inventory/movement-queries";
 import { RangeControl } from "@/features/analytics/inventory/components/controls";
@@ -40,7 +43,10 @@ function monthLabel(key: string) {
 
 export default async function StockMovementPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.inventory)) return <NoAccess eyebrow="Analytics & Planning" title="Stock movement analysis" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const range = parseRange(sp, "fy");
   const historyId = idParam(sp, "item");
@@ -67,16 +73,20 @@ export default async function StockMovementPage({ searchParams }: { searchParams
         description="What the store received, issued to projects, got back and wrote off in the period, from the inventory ledger. Values are the cost recorded on each movement."
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/inventory/movements">
-                <History /> Movement log
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/analytics/inventory/consumption">
-                <ChartColumn /> Consumption trends
-              </Link>
-            </Button>
+            {open("/inventory/movements") ? (
+              <Button asChild variant="outline">
+                <Link href="/inventory/movements">
+                  <History /> Movement log
+                </Link>
+              </Button>
+            ) : null}
+            {open("/analytics/inventory/consumption") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/inventory/consumption">
+                  <ChartColumn /> Consumption trends
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -88,9 +98,11 @@ export default async function StockMovementPage({ searchParams }: { searchParams
           title="No stock movements in this range"
           description="Nothing was purchased, issued, returned, adjusted, moved or wasted between these dates. Pick a wider range."
           action={
-            <Button asChild variant="outline">
-              <Link href="/inventory/purchase">Purchase stock</Link>
-            </Button>
+            open("/inventory/purchase") ? (
+              <Button asChild variant="outline">
+                <Link href="/inventory/purchase">Purchase stock</Link>
+              </Button>
+            ) : null
           }
         />
       ) : (

@@ -24,7 +24,7 @@ import { taskFormSchema, type TaskFormInput, type TaskFormValues } from "../sche
 import type { TaskDetail } from "../types";
 import { MAX_UPLOAD_LABEL } from "@/features/files/prepare";
 import { formValidation } from "@/components/forms/form-options";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 
 export type TaskDefaults = { projectId?: string; assigneeId?: string; status?: TaskStatus };
 
@@ -58,7 +58,7 @@ export function TaskForm({
   onCancel: () => void;
 }) {
   const isEdit = Boolean(task);
-  const isAdmin = useIsAdmin();
+  const canRemoveSaved = useCan("tasks.tasks:delete");
   // Phones: skip autofocus so the keyboard does not cover the form the moment it opens.
   const [focusTitle] = useState(() => typeof window !== "undefined" && window.innerWidth >= 768);
   const [pending, startTransition] = useTransition();
@@ -164,8 +164,8 @@ export function TaskForm({
           {files.length ? (
             <div className="space-y-2">
               {files.map((f) => (
-                // Removing a saved attachment deletes it, which only admins may do. New uploads can always be taken off.
-                <FileTile key={f.id} file={f} onRemove={isAdmin || !initialIds.has(f.id) ? () => removeFile(f) : undefined} />
+                // Removing a saved attachment deletes it, which needs the tasks delete permission. New uploads can always be taken off.
+                <FileTile key={f.id} file={f} onRemove={canRemoveSaved || !initialIds.has(f.id) ? () => removeFile(f) : undefined} />
               ))}
             </div>
           ) : null}

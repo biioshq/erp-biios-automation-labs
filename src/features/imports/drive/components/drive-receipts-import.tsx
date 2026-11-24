@@ -15,7 +15,7 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { emitDataChanged } from "@/lib/events";
 import { formatDate, formatFileSize, formatNumber } from "@/lib/format";
@@ -90,13 +90,14 @@ async function postReceipt(body: Record<string, unknown>): Promise<ProcessReceip
 const lowCount = (d: ReceiptDraft) => Object.values(d.confidence).filter((c) => c < LOW_CONFIDENCE).length;
 
 /**
- * Google Drive bills to draft expenses (admin only). Paste a shared folder link, see which files
+ * Google Drive bills to draft expenses (needs the Finance import permission). Paste a shared folder link, see which files
  * are new, then read them one file per request (progress, Stop, continue later). Each bill becomes
  * a draft kept on the server; review it here and save it as an expense, or discard it.
  */
 export function DriveReceiptsImport({ configured }: { configured: boolean }) {
   const router = useRouter();
-  const isAdmin = useIsAdmin();
+  const canImport = useCan("finance.import:create");
+  const seesSalaries = useCan("data.salaries");
   const [data, setData] = useState<ReceiptDraftsData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [link, setLink] = useState("");
@@ -133,7 +134,7 @@ export function DriveReceiptsImport({ configured }: { configured: boolean }) {
   const reload = useCallback(async () => apply(await loadReceiptDraftsAction({}).catch(() => null)), [apply]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canImport) return;
     let live = true;
     loadReceiptDraftsAction({})
       .catch(() => null)
@@ -141,8 +142,8 @@ export function DriveReceiptsImport({ configured }: { configured: boolean }) {
     return () => {
       live = false;
     };
-  }, [isAdmin, apply]);
-  // Another admin saving or discarding drafts shows here, but never while a run or an edit is open.
+  }, [canImport, apply]);
+  // Someone else saving or discarding drafts shows here, but never while a run or an edit is open.
   useOnLiveChange(() => {
     if (!running && !editingId) void reload();
   });
@@ -150,7 +151,7 @@ export function DriveReceiptsImport({ configured }: { configured: boolean }) {
   const drafts = useMemo(() => data?.drafts ?? [], [data]);
   const editing = drafts.find((d) => d.id === editingId) ?? null;
   const categories = useMemo(() => data?.categories ?? [], [data]);
-  const categoryOptions = useMemo(() => expenseCategoryChoices(categories, { allowSalaries: true }), [categories]);
+  const categoryOptions = useMemo(() => expenseCategoryChoices(categories, { allowSalaries: seesSalaries }), [categories, seesSalaries]);
 
   const queue: DriveReceiptFile[] = useMemo(
     () => (listing?.files ?? []).filter((f) => (f.state === "new" || (includeDiscarded && f.state === "discarded")) && results[f.id]?.status !== "created" && results[f.id]?.status !== "skipped"),
@@ -158,7 +159,7 @@ export function DriveReceiptsImport({ configured }: { configured: boolean }) {
   );
   const skippedFiles = (listing?.files ?? []).filter((f) => f.state === "too_large" || f.state === "unsupported");
 
-  if (!isAdmin) return <EmptyState compact title="Only admins can import" description="Ask an admin to import the bills for you." />;
+  if (!canImport) return <EmptyState compact title="Your role cannot import" description="Ask an admin to import the bills for you." />;
 
   async function find(e: React.FormEvent) {
     e.preventDefault();

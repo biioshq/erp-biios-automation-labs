@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { EmptyState } from "@/components/shared/empty-state";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { driveConfigured } from "@/server/google-drive";
 import { CsvImport } from "@/features/imports/csv/components/csv-import";
 import { DriveReceiptsImport } from "@/features/imports/drive/components/drive-receipts-import";
@@ -14,6 +15,7 @@ export const metadata: Metadata = { title: "Import" };
 export default async function FinanceImportPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
+  if (!can(user, "finance.import:view")) return <NoAccess title="Import" />;
   return (
     <Page>
       <PageHeader
@@ -21,8 +23,8 @@ export default async function FinanceImportPage() {
         title="Import"
         description="Add many expenses or income records from a CSV or Excel file, or turn a Google Drive folder of bills into draft expenses. Nothing is saved until you review it."
       />
-      {user.role !== "admin" ? (
-        <EmptyState title="Only admins can import" description="Ask an admin to import the file for you." />
+      {!can(user, "finance.import:create") ? (
+        <EmptyState title="Your role cannot import" description="Ask an admin to import the file for you." />
       ) : (
         <div className="space-y-6">
           <Section title="From a CSV or Excel file" description="Expenses or income, one row each. Download a template to see the columns.">

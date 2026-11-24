@@ -20,11 +20,11 @@ import type { AnalyticsDashboard } from "./types";
 const CHART_PROJECTS = 8;
 
 /**
- * Everything on the Analytics dashboard. Members get project spend without salaries (as on every
- * project page); nothing here is a P&L, cash or balance-sheet figure.
+ * Everything on the Analytics dashboard. People who do not see salaries get project spend without
+ * them (as on every project page); nothing here is a P&L, cash or balance-sheet figure.
  */
-export async function getAnalyticsDashboard(viewer: { isAdmin: boolean }, now: Date = new Date()): Promise<AnalyticsDashboard> {
-  const includeSalaries = viewer.isAdmin;
+export async function getAnalyticsDashboard(viewer: { salaries: boolean }, now: Date = new Date()): Promise<AnalyticsDashboard> {
+  const includeSalaries = viewer.salaries;
   const [projects, stock, inventory, months, maintenance, people] = await Promise.all([
     projectHealth(includeSalaries, now),
     stockOutlook(now),

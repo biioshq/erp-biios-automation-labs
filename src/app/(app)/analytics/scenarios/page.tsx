@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/shared/page";
 import { parseListParams, type SearchParams } from "@/lib/list-params";
 import { formatNumber } from "@/lib/format";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { getScenarioCreators, listScenarios } from "@/features/analytics/scenarios/queries";
 import { SCENARIO_FILTER_KEYS, SCENARIO_SORT_KEYS } from "@/features/analytics/scenarios/schemas";
 import { ScenariosView } from "@/features/analytics/scenarios/components/scenarios-view";
@@ -15,7 +18,10 @@ export const metadata: Metadata = { title: "What-if scenarios" };
 
 export default async function ScenariosPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.scenarios.view)) return <NoAccess eyebrow="Analytics & Planning" title="What-if scenarios" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   // The ERP's usual list links: ?new=1 opens the create form, ?view=<id> the record.
   if (sp.new === "1") redirect("/analytics/scenarios/new");
@@ -39,21 +45,27 @@ export default async function ScenariosPage({ searchParams }: { searchParams: Pr
         }
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/analytics/compare">
-                <Columns3 /> Compare
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/analytics/compare/history">
-                <History /> History
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="/analytics/scenarios/new">
-                <Plus /> New scenario
-              </Link>
-            </Button>
+            {open("/analytics/compare") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/compare">
+                  <Columns3 /> Compare
+                </Link>
+              </Button>
+            ) : null}
+            {open("/analytics/compare/history") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/compare/history">
+                  <History /> History
+                </Link>
+              </Button>
+            ) : null}
+            {open("/analytics/scenarios/new") ? (
+              <Button asChild>
+                <Link href="/analytics/scenarios/new">
+                  <Plus /> New scenario
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />

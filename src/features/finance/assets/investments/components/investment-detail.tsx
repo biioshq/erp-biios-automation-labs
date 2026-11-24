@@ -43,12 +43,17 @@ export function InvestmentDetailSkeleton() {
 export function InvestmentDetailView({
   investment: v,
   accounts,
+  canEdit,
+  canDelete,
   onEdit,
   onChanged,
   onDelete,
 }: {
   investment: InvestmentDetail;
   accounts: BankAccountOption[];
+  /** These only hide controls; the actions check the same permissions on the server. */
+  canEdit: boolean;
+  canDelete: boolean;
   onEdit: () => void;
   onChanged: () => void;
   onDelete: () => Promise<boolean>;
@@ -158,32 +163,38 @@ export function InvestmentDetailView({
                 {v.redemption.amount > 0 ? `Received into ${v.redemption.account?.name ?? "the default bank account"}.` : "Nothing received."}
                 {v.redemption.notes ? ` ${v.redemption.notes}` : ""}
               </p>
-              {!v.archived ? (
+              {!v.archived && (canEdit || canDelete) ? (
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={() => setRedeeming(true)}>
-                    <Pencil /> Edit redemption
-                  </Button>
-                  <ConfirmDialog
-                    title="Take this redemption back?"
-                    description={`${v.name} returns to the books at cost, as if it was never redeemed.`}
-                    confirmLabel="Take back"
-                    destructive={false}
-                    onConfirm={() => run(() => removeRedemption({ id: v.id }))}
-                    trigger={
-                      <Button size="sm" variant="ghost">
-                        <Undo2 /> Take back
-                      </Button>
-                    }
-                  />
+                  {canEdit ? (
+                    <Button size="sm" variant="outline" onClick={() => setRedeeming(true)}>
+                      <Pencil /> Edit redemption
+                    </Button>
+                  ) : null}
+                  {canDelete ? (
+                    <ConfirmDialog
+                      title="Take this redemption back?"
+                      description={`${v.name} returns to the books at cost, as if it was never redeemed.`}
+                      confirmLabel="Take back"
+                      destructive={false}
+                      onConfirm={() => run(() => removeRedemption({ id: v.id }))}
+                      trigger={
+                        <Button size="sm" variant="ghost">
+                          <Undo2 /> Take back
+                        </Button>
+                      }
+                    />
+                  ) : null}
                 </div>
               ) : null}
             </div>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-4 py-3">
               <p className="text-sm text-muted-foreground">Still held. Record a sale, maturity or withdrawal when the money comes back.</p>
-              <Button size="sm" variant="outline" onClick={() => setRedeeming(true)}>
-                Record redemption
-              </Button>
+              {canEdit ? (
+                <Button size="sm" variant="outline" onClick={() => setRedeeming(true)}>
+                  Record redemption
+                </Button>
+              ) : null}
             </div>
           )}
         </section>
@@ -192,7 +203,8 @@ export function InvestmentDetailView({
           <h3 className="text-sm font-semibold">Documents</h3>
           <RecordDocuments
             documents={v.documents}
-            canRemove
+            canAttach={canEdit}
+            canRemove={canDelete}
             attach={(fileIds) => attachInvestmentDocuments({ id: v.id, fileIds })}
             remove={(fileId) => removeInvestmentDocument({ id: v.id, fileId })}
             onChanged={onChanged}
@@ -213,17 +225,19 @@ export function InvestmentDetailView({
         </p>
       </FormSheetBody>
       <FormSheetFooter>
-        <ConfirmDialog
-          title={`Delete ${v.name}?`}
-          description="The investment and its documents are removed, and the balance sheet no longer counts it. Archiving after a redemption keeps the history instead."
-          onConfirm={onDelete}
-          trigger={
-            <Button variant="ghost" className="mr-auto text-danger hover:bg-danger/10 hover:text-danger">
-              <Trash2 /> Delete
-            </Button>
-          }
-        />
-        {v.redemption ? (
+        {canDelete ? (
+          <ConfirmDialog
+            title={`Delete ${v.name}?`}
+            description="The investment and its documents are removed, and the balance sheet no longer counts it. Archiving after a redemption keeps the history instead."
+            onConfirm={onDelete}
+            trigger={
+              <Button variant="ghost" className="mr-auto text-danger hover:bg-danger/10 hover:text-danger">
+                <Trash2 /> Delete
+              </Button>
+            }
+          />
+        ) : null}
+        {v.redemption && canEdit ? (
           v.archived ? (
             <Button variant="outline" disabled={busy} onClick={() => run(() => restoreInvestment({ id: v.id }))}>
               <ArchiveRestore /> Restore
@@ -234,9 +248,11 @@ export function InvestmentDetailView({
             </Button>
           )
         ) : null}
-        <Button onClick={onEdit}>
-          <Pencil /> Edit
-        </Button>
+        {canEdit ? (
+          <Button onClick={onEdit}>
+            <Pencil /> Edit
+          </Button>
+        ) : null}
       </FormSheetFooter>
       {redeeming ? <RedemptionDialog investment={v} accounts={accounts} open onOpenChange={setRedeeming} onSaved={onChanged} /> : null}
     </>

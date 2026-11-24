@@ -1,7 +1,21 @@
 import "server-only";
 
 import { Types } from "mongoose";
-import { Expense, FileModel, type FileDoc, type FileKind } from "@/server/models";
+import {
+  CapitalEntry,
+  Expense,
+  ExpenseDraft,
+  FileModel,
+  Income,
+  InventoryItem,
+  InventoryMovement,
+  Invoice,
+  Task,
+  type FileDoc,
+  type FileKind,
+} from "@/server/models";
+import { can, type SessionUser } from "@/server/auth/session";
+import { INVENTORY_RESOURCES } from "@/lib/permissions/inventory";
 import { deleteStoredFile, saveUpload } from "@/server/storage";
 import { iso } from "@/server/serialize";
 import type { ProjectDocumentType } from "@/lib/constants";
@@ -45,8 +59,49 @@ export type FileEntityType =
   | "investment"
   | "bank_statement";
 
-/** Records whose papers only admins see (capital, loans, investments, bank statements), like salary receipts. */
-const ADMIN_ONLY_ENTITIES: FileEntityType[] = ["liability", "capital", "investment", "bank_statement"];
+/** Every inventory page shows item photos, so seeing any of them is enough for a photo. */
+const INVENTORY_VIEWS = INVENTORY_RESOURCES.filter((r) => r.actions.includes("view")).map((r) => `${r.key}:view`);
+
+/** Purchase receipts belong to the stock movement; the purchase expense points at the same file. */
+const MOVEMENT_VIEWS = ["inventory.movements:view", "inventory.purchase:view", "finance.expenses:view"];
+
+/**
+ * Who may open a file attached to a record: anyone who may view that record (any one of the
+ * permissions is enough). Before roles, members saw every file except those on liabilities,
+ * capital, investments and bank statements; the Member defaults give the same result.
+ */
+export const FILE_VIEW_PERMISSIONS: Record<FileEntityType, string[]> = {
+  expense: ["finance.expenses:view"],
+  income: ["finance.income:view"],
+  invoice: ["finance.invoices:view"],
+  project: ["finance.projects:view"],
+  task: ["tasks.tasks:view"],
+  item: INVENTORY_VIEWS,
+  movement: MOVEMENT_VIEWS,
+  fixed_asset: ["finance.fixed_assets:view"],
+  liability: ["finance.liabilities:view"],
+  capital: ["finance.equity:view"],
+  investment: ["finance.investments:view"],
+  bank_statement: ["finance.bank_statements:view"],
+};
+
+/**
+ * Who may attach a new upload straight to a record (POST /api/files with entityType and entityId):
+ * anyone who may add or change that kind of record.
+ */
+export const FILE_ATTACH_PERMISSIONS: Record<UploadEntityType, string[]> = {
+  expense: ["finance.expenses:create", "finance.expenses:edit"],
+  income: ["finance.income:create", "finance.income:edit"],
+  task: ["tasks.tasks:create", "tasks.tasks:edit"],
+  project: ["finance.projects:create", "finance.projects:edit"],
+  movement: ["inventory.purchase:create"],
+};
+
+/** The record kinds an upload may name. */
+export type UploadEntityType = "expense" | "income" | "task" | "project" | "movement";
+export const UPLOAD_ENTITY_TYPES = ["expense", "income", "task", "project", "movement"] as const satisfies readonly UploadEntityType[];
+
+const canAny = (user: SessionUser, permissions: readonly string[]) => permissions.some((p) => can(user, p));
 
 type StoreOptions = {
   kind: FileKind;
@@ -131,21 +186,68 @@ export async function attachFiles(fileIds: string[], entity: { type: FileEntityT
   );
 }
 
+type FileRef = { _id: Types.ObjectId; kind?: string | null; entity?: { type?: string | null; id?: Types.ObjectId | null } | null };
+
 /**
- * Payslips and other salary receipts are admin-only, even for someone who knows the file id. Every route that
- * hands out a stored file or what is read from it (download, OCR) asks this first.
+ * The view permissions of the records that use a file not linked to a record (older files and
+ * fresh uploads). Null when no record uses it.
  */
-export async function isHiddenFromUser(fileId: Types.ObjectId | string, user: { role: string }, kind?: string): Promise<boolean> {
-  if (user.role === "admin") return false;
-  // Item photos can never be receipts (expenses only take files of kind "receipt"), so a list of
-  // thumbnails costs no extra query. Callers that hold the file record pass its kind.
-  if (kind === "photo") return false;
-  const id = new Types.ObjectId(String(fileId));
-  const [salary, adminOnly] = await Promise.all([
-    Expense.exists({ receipt: id, category: "salaries" }),
-    FileModel.exists({ _id: id, "entity.type": { $in: ADMIN_ONLY_ENTITIES } }),
+async function referencedBy(id: Types.ObjectId): Promise<string[] | null> {
+  const [expense, income, invoice, capital, movement, task, item, draft] = await Promise.all([
+    Expense.exists({ receipt: id }),
+    Income.exists({ receipt: id }),
+    Invoice.exists({ file: id }),
+    CapitalEntry.exists({ documents: id }),
+    InventoryMovement.exists({ receipt: id }),
+    Task.exists({ attachments: id }),
+    InventoryItem.exists({ photoFileId: id }),
+    ExpenseDraft.exists({ file: id }),
   ]);
-  return Boolean(salary || adminOnly);
+  const found = [
+    expense ? FILE_VIEW_PERMISSIONS.expense : [],
+    income ? FILE_VIEW_PERMISSIONS.income : [],
+    invoice ? FILE_VIEW_PERMISSIONS.invoice : [],
+    capital ? FILE_VIEW_PERMISSIONS.capital : [],
+    movement ? FILE_VIEW_PERMISSIONS.movement : [],
+    task ? FILE_VIEW_PERMISSIONS.task : [],
+    item ? FILE_VIEW_PERMISSIONS.item : [],
+    draft ? ["finance.import:view"] : [],
+  ].flat();
+  return found.length ? found : null;
+}
+
+/**
+ * True when the person may not open this file. A file on a record needs the view permission of
+ * that record (FILE_VIEW_PERMISSIONS). Payslips and other salary receipts also need
+ * "data.salaries", even for someone who knows the file id. A file no record uses yet (a fresh
+ * upload) stays open to signed-in people, as before, so the uploader can preview it.
+ */
+export async function isFileHidden(doc: FileRef, user: SessionUser): Promise<boolean> {
+  const type = doc.entity?.id ? (doc.entity.type as FileEntityType | undefined) : undefined;
+  const allowed = type && type in FILE_VIEW_PERMISSIONS ? FILE_VIEW_PERMISSIONS[type] : await referencedBy(doc._id);
+  if (allowed && !canAny(user, allowed)) return true;
+  // Item photos can never be receipts (expenses only take files of kind "receipt"), so a list of
+  // thumbnails costs no extra query.
+  if (doc.kind === "photo" || can(user, "data.salaries")) return false;
+  return Boolean(await Expense.exists({ receipt: doc._id, category: "salaries" }));
+}
+
+/**
+ * Every route that hands out a stored file or what is read from it (download, OCR) asks this first.
+ * Missing files count as hidden.
+ */
+export async function isHiddenFromUser(fileId: Types.ObjectId | string, user: SessionUser, kind?: string): Promise<boolean> {
+  if (!Types.ObjectId.isValid(String(fileId))) return true;
+  const doc = await FileModel.findById(String(fileId), { kind: 1, entity: 1 }).lean();
+  if (!doc) return true;
+  return isFileHidden({ _id: doc._id, kind: kind ?? doc.kind, entity: doc.entity }, user);
+}
+
+/** Drops the files this person may not open, for lists of files on a page. */
+export async function visibleFiles<T extends { id: string }>(files: T[], user: SessionUser): Promise<T[]> {
+  if (!files.length) return files;
+  const hidden = await Promise.all(files.map((f) => isHiddenFromUser(f.id, user)));
+  return files.filter((_, i) => !hidden[i]);
 }
 
 /** Deletes the record and its bytes. */

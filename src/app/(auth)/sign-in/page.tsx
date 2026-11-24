@@ -12,7 +12,7 @@ export default async function SignInPage({ searchParams }: PageProps<"/sign-in">
   if (await getCurrentUser()) {
     // Already signed in (for example right after Google): go where they were heading.
     const next = (await searchParams).next;
-    const target = typeof next === "string" && next.startsWith("/") && !next.startsWith("//") ? next : "/finance";
+    const target = typeof next === "string" && next.startsWith("/") && !next.startsWith("//") ? next : "/";
     redirect(target);
   }
   const firstRun = await isFirstRun().catch(() => false);

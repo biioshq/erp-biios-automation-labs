@@ -9,7 +9,10 @@ import { Money } from "@/components/shared/money";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatNumber, formatPercent } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { idParam } from "@/features/analytics/inventory/params";
 import { statusesParam, sumOf } from "@/features/analytics/projects/model";
 import { getResources } from "@/features/analytics/projects/resource-queries";
@@ -30,6 +33,9 @@ const LEVEL_LABEL = { out: "Out of stock", below_min: "At or below minimum", run
 export default async function ResourcesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
+  if (!can(user, ANALYTICS.projects)) return <NoAccess eyebrow="Analytics & Planning" title="Resource utilisation" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const statuses = statusesParam(sp);
   const data = await getResources(statuses);
@@ -58,11 +64,13 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
         actions={
           <>
             <ProjectStatusSelect statuses={statuses} />
-            <Button asChild variant="outline">
-              <Link href="/finance/employees">
-                <Users /> Employees
-              </Link>
-            </Button>
+            {open("/finance/employees") ? (
+              <Button asChild variant="outline">
+                <Link href="/finance/employees">
+                  <Users /> Employees
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -142,7 +150,7 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
 
           <Section title="Equipment on projects" description="Fixed assets placed with each project." contentClassName={equipment.length ? "p-0 sm:p-0" : undefined}>
             {equipment.length ? (
-              <EquipmentTable rows={equipment} linkAssets={user.role === "admin"} />
+              <EquipmentTable rows={equipment} linkAssets={can(user, "finance.fixed_assets:view") && can(user, ANALYTICS.financialPosition)} />
             ) : (
               <EmptyState compact icon={Wrench} title="No equipment placed with these projects" description="Set the project on a fixed asset to show it here." />
             )}

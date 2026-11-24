@@ -10,7 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatDate, formatNumber } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { analyticsViewer, userCanOpen } from "@/features/analytics/viewer";
 import { getVendorInsights } from "@/features/analytics/insights/vendors";
 import { DEFAULT_PERIOD, parsePeriod } from "@/features/analytics/insights/period";
 import { DetailsLink, Footnote, NotRecorded } from "@/features/analytics/dashboard/components/bits";
@@ -96,10 +99,13 @@ function VendorHistory({ selected, backHref }: { selected: NonNullable<VendorIns
 export default async function VendorPerformancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
+  if (!can(user, ANALYTICS.insights)) return <NoAccess eyebrow="Analytics & Planning" title="Vendor performance" />;
   const sp = await searchParams;
   const period = parsePeriod(sp.period);
   const vendor = first(sp.vendor);
-  const data = await getVendorInsights(period, vendor ?? null, { isAdmin: user.role === "admin" });
+  const data = await getVendorInsights(period, vendor ?? null, analyticsViewer(user));
+  // A card or chart shows only when its page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const t = data.totals;
   const periodParam = period === DEFAULT_PERIOD ? null : period;
   const base = "/analytics/insights/vendors";
@@ -141,29 +147,33 @@ export default async function VendorPerformancePage({ searchParams }: { searchPa
         </div>
       ) : null}
 
-      <Section title="Vendor-wise history" description="Every supplier with a bill in this period, by value. Open a vendor for its bills and stock purchases." contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/finance/expenses">Expenses</DetailsLink>}>
-        {data.vendors.length ? (
-          <>
-            <VendorTable rows={data.vendors} hrefOf={vendorHref} showOutstanding />
-            <Footnote className="px-4 pb-4 sm:px-5">
-              A supplier bill is any expense entered by hand, by a recurring schedule or by a stock purchase, except salaries. Names are matched without regard to case or spacing.
-            </Footnote>
-          </>
-        ) : (
-          <EmptyState icon={Store} compact className="m-4" title="No supplier bills in this period" description="Pick a longer period, or record expenses with a vendor name." />
-        )}
-      </Section>
+      {open("/finance/expenses") ? (
+        <Section title="Vendor-wise history" description="Every supplier with a bill in this period, by value. Open a vendor for its bills and stock purchases." contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/finance/expenses">Expenses</DetailsLink>}>
+          {data.vendors.length ? (
+            <>
+              <VendorTable rows={data.vendors} hrefOf={vendorHref} showOutstanding />
+              <Footnote className="px-4 pb-4 sm:px-5">
+                A supplier bill is any expense entered by hand, by a recurring schedule or by a stock purchase, except salaries. Names are matched without regard to case or spacing.
+              </Footnote>
+            </>
+          ) : (
+            <EmptyState icon={Store} compact className="m-4" title="No supplier bills in this period" description="Pick a longer period, or record expenses with a vendor name." />
+          )}
+        </Section>
+      ) : null}
 
-      <Section title="Price comparison across vendors" description="Items bought from two or more vendors in this period: average and latest price each paid, cheapest first." contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/analytics/insights/procurement">Procurement</DetailsLink>}>
-        {data.comparisons.length ? (
-          <>
-            <ComparisonTable rows={data.comparisons} />
-            <Footnote className="px-4 pb-4 sm:px-5">From stock entries with a unit price and a vendor name, before GST. Average price is value ÷ quantity.</Footnote>
-          </>
-        ) : (
-          <EmptyState icon={Layers} compact className="m-4" title="No item bought from more than one vendor" description="When the same item is bought from two vendors, their prices are compared here." />
-        )}
-      </Section>
+      {open("/analytics/insights/procurement") ? (
+        <Section title="Price comparison across vendors" description="Items bought from two or more vendors in this period: average and latest price each paid, cheapest first." contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/analytics/insights/procurement">Procurement</DetailsLink>}>
+          {data.comparisons.length ? (
+            <>
+              <ComparisonTable rows={data.comparisons} />
+              <Footnote className="px-4 pb-4 sm:px-5">From stock entries with a unit price and a vendor name, before GST. Average price is value ÷ quantity.</Footnote>
+            </>
+          ) : (
+            <EmptyState icon={Layers} compact className="m-4" title="No item bought from more than one vendor" description="When the same item is bought from two vendors, their prices are compared here." />
+          )}
+        </Section>
+      ) : null}
 
       <NotRecorded
         title="On-time deliveries, delays, delivery times and rejected material: not recorded"

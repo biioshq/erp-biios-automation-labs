@@ -4,7 +4,8 @@ import { getVendorNames } from "@/server/lookups";
 import { getLastPurchases, getLedgerItems, getRecentOperations } from "@/features/inventory/ledger/queries";
 import { PurchaseView } from "@/features/inventory/ledger/components/purchase-view";
 import { RecentOperations } from "@/features/inventory/ledger/components/recent-operations";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 
 export const metadata: Metadata = { title: "Purchase Stock" };
 
@@ -12,7 +13,8 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function PurchaseStockPage({ searchParams }: PageProps<"/inventory/purchase">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "inventory.purchase:view")) return <NoAccess eyebrow="Inventory" title="Purchase stock" />;
   const sp = await searchParams;
   const [items, vendors, recent, lastPurchases] = await Promise.all([
     getLedgerItems(),

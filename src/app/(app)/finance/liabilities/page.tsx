@@ -6,9 +6,9 @@ import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
 import { EmptyState } from "@/components/shared/empty-state";
-import { AdminOnly } from "@/components/shared/admin-only";
+import { NoAccess } from "@/components/shared/no-access";
 import { formatDate, formatNumber } from "@/lib/format";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
 import { AddSubgroupButton } from "@/features/finance/groups/components/add-subgroup-button";
 import { liabilitiesDashboard } from "@/features/finance/liabilities/queries";
 import { subgroupParents } from "@/features/finance/liabilities/groups";
@@ -19,8 +19,9 @@ export const metadata: Metadata = { title: "Liabilities" };
 export default async function LiabilitiesOverviewPage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Liabilities" />;
+  if (!can(user, "finance.liabilities:view")) return <NoAccess title="Liabilities" />;
   const data = await liabilitiesDashboard();
+  const canCreate = can(user, "finance.liabilities:create");
   const nothing = data.total === 0 && !data.overdueItems.length && !data.upcomingItems.length && !data.openLoans && !data.payablesCount;
 
   return (
@@ -31,16 +32,20 @@ export default async function LiabilitiesOverviewPage() {
         description="What the company owes: supplier bills, loans, taxes and other obligations. The totals are the balance sheet's, as of today."
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/finance/reports/balance-sheet">
-                <Scale /> Balance sheet
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="/finance/liabilities/loans?new=1">
-                <Plus /> Add loan
-              </Link>
-            </Button>
+            {can(user, "finance.statements:view") ? (
+              <Button asChild variant="outline">
+                <Link href="/finance/reports/balance-sheet">
+                  <Scale /> Balance sheet
+                </Link>
+              </Button>
+            ) : null}
+            {canCreate ? (
+              <Button asChild>
+                <Link href="/finance/liabilities/loans?new=1">
+                  <Plus /> Add loan
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -52,11 +57,13 @@ export default async function LiabilitiesOverviewPage() {
           description="Liabilities appear here from unpaid expenses (accounts payable), loans you add, customer advances and GST on invoices. Add a loan or record an expense On credit to start."
           action={
             <div className="flex flex-wrap justify-center gap-2">
-              <Button asChild>
-                <Link href="/finance/liabilities/loans?new=1">
-                  <Plus /> Add loan
-                </Link>
-              </Button>
+              {canCreate ? (
+                <Button asChild>
+                  <Link href="/finance/liabilities/loans?new=1">
+                    <Plus /> Add loan
+                  </Link>
+                </Button>
+              ) : null}
               <Button asChild variant="outline">
                 <Link href="/finance/liabilities/current">Current liabilities</Link>
               </Button>

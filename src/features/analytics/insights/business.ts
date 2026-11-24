@@ -10,13 +10,13 @@ import type { BusinessInsights } from "./types";
 const TOP = 8;
 
 /** 6.1 Overall business performance: projects, money committed and spent, stock, and what is owed. */
-export async function getBusinessInsights(viewer: { isAdmin: boolean }, now: Date = new Date()): Promise<BusinessInsights> {
+export async function getBusinessInsights(viewer: { salaries: boolean; cash: boolean }, now: Date = new Date()): Promise<BusinessInsights> {
   const fy = financialYearIST(now);
   const [projects, stock, inventory, payables, totals] = await Promise.all([
-    projectHealth(viewer.isAdmin, now),
+    projectHealth(viewer.salaries, now),
     stockOutlook(now),
     inventorySnapshot(),
-    viewerPayables(viewer.isAdmin, now),
+    viewerPayables(viewer.salaries, now),
     financeTotals({ from: fy.start, to: endOfDayIST(now) }),
   ]);
   const count = (s: string) => projects.filter((p) => p.status === s).length;
@@ -44,6 +44,6 @@ export async function getBusinessInsights(viewer: { isAdmin: boolean }, now: Dat
     requirements: stock.requirements.slice(0, TOP),
     requirementTotals: requirementTotals(stock.requirements),
     projects: live,
-    salariesHidden: !viewer.isAdmin,
+    salariesHidden: !viewer.salaries,
   };
 }

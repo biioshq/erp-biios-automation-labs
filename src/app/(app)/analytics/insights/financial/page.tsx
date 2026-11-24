@@ -10,7 +10,10 @@ import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { analyticsViewer, userCanOpen } from "@/features/analytics/viewer";
 import { getFinancialInsights } from "@/features/analytics/insights/financial";
 import { monthLabel } from "@/features/analytics/dashboard/rules";
 import { DetailsLink, Footnote, InsightCard } from "@/features/analytics/dashboard/components/bits";
@@ -112,8 +115,11 @@ function CashPosition({ cash }: { cash: NonNullable<FinancialInsights["cash"]> }
 export default async function FinancialPerformancePage() {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  const isAdmin = user.role === "admin";
-  const data = await getFinancialInsights({ isAdmin });
+  if (!can(user, ANALYTICS.insights)) return <NoAccess eyebrow="Analytics & Planning" title="Financial performance" />;
+  const viewer = analyticsViewer(user);
+  const data = await getFinancialInsights(viewer);
+  // A card or chart shows only when its page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const hasMonthly = data.monthly.some((m) => m.income > 0 || m.expenses > 0);
   const budgetRows = [...data.budget.rows].sort((a, b) => b.spent - a.spent).slice(0, BUDGET_ROWS);
 
@@ -123,18 +129,20 @@ export default async function FinancialPerformancePage() {
         eyebrow="Management insights"
         title="Financial performance"
         description={
-          isAdmin
+          data.pl
             ? `Income, spending, profit and cash for ${data.fyLabel} and the last 12 months, with what customers and suppliers still owe.`
             : `Income and spending for ${data.fyLabel} and the last 12 months, with what customers and suppliers still owe.`
         }
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/finance">
-                <BadgeIndianRupee /> Finance dashboard
-              </Link>
-            </Button>
-            {isAdmin ? (
+            {open("/finance") ? (
+              <Button asChild variant="outline">
+                <Link href="/finance">
+                  <BadgeIndianRupee /> Finance dashboard
+                </Link>
+              </Button>
+            ) : null}
+            {viewer.cash && open("/finance/reports/profit-loss") ? (
               <Button asChild variant="outline">
                 <Link href="/finance/reports/profit-loss">
                   <FileText /> Profit and loss
@@ -146,153 +154,179 @@ export default async function FinancialPerformancePage() {
       />
 
       <StatGrid>
-        <InsightCard href="/finance/income/summary" label={`Income received, ${data.fyLabel}`} value={<Money value={data.fy.income} />} icon={ArrowDownRight} tone="success" hint="From income records" linkLabel="Income summary" />
-        <InsightCard href="/finance/expenses/summary" label={`Expenses recorded, ${data.fyLabel}`} value={<Money value={data.fy.expenses} />} icon={ArrowUpRight} tone="warning" hint="Company expenses, by expense date" linkLabel="Expense summary" />
+        {open("/finance/income/summary") ? (
+          <InsightCard href="/finance/income/summary" label={`Income received, ${data.fyLabel}`} value={<Money value={data.fy.income} />} icon={ArrowDownRight} tone="success" hint="From income records" linkLabel="Income summary" />
+        ) : null}
+        {open("/finance/expenses/summary") ? (
+          <InsightCard href="/finance/expenses/summary" label={`Expenses recorded, ${data.fyLabel}`} value={<Money value={data.fy.expenses} />} icon={ArrowUpRight} tone="warning" hint="Company expenses, by expense date" linkLabel="Expense summary" />
+        ) : null}
         {data.pl ? (
-          <InsightCard
-            href={`/finance/reports/profit-loss?from=${data.pl.fy.from}&to=${data.pl.fy.to}`}
-            label={`Profit (P&L), ${data.fyLabel}`}
-            value={<Money value={data.pl.fy.profit} tone="auto" />}
-            icon={TrendingUp}
-            tone={data.pl.fy.profit < 0 ? "danger" : "success"}
-            hint={data.pl.fy.income > 0 ? `${formatPercent(data.pl.fy.profit / data.pl.fy.income)} of P&L income` : "No P&L income yet"}
-            linkLabel="Profit and loss"
-          />
+          open("/finance/reports/profit-loss") ? (
+            <InsightCard
+              href={`/finance/reports/profit-loss?from=${data.pl.fy.from}&to=${data.pl.fy.to}`}
+              label={`Profit (P&L), ${data.fyLabel}`}
+              value={<Money value={data.pl.fy.profit} tone="auto" />}
+              icon={TrendingUp}
+              tone={data.pl.fy.profit < 0 ? "danger" : "success"}
+              hint={data.pl.fy.income > 0 ? `${formatPercent(data.pl.fy.profit / data.pl.fy.income)} of P&L income` : "No P&L income yet"}
+              linkLabel="Profit and loss"
+            />
+          ) : null
         ) : null}
         {data.cash ? (
+          open("/finance/assets/cash") ? (
+            <InsightCard
+              href="/finance/assets/cash"
+              label="Cash and bank today"
+              value={<Money value={data.cash.closing} tone="auto" />}
+              icon={Landmark}
+              tone="brand"
+              hint={
+                <>
+                  <Money value={data.cash.netChange} tone="auto" /> since 1 April
+                </>
+              }
+              linkLabel="Cash and bank"
+            />
+          ) : null
+        ) : null}
+        {open("/finance/invoices?status=unpaid,partial,overdue") ? (
           <InsightCard
-            href="/finance/assets/cash"
-            label="Cash and bank today"
-            value={<Money value={data.cash.closing} tone="auto" />}
-            icon={Landmark}
-            tone="brand"
-            hint={
-              <>
-                <Money value={data.cash.netChange} tone="auto" /> since 1 April
-              </>
-            }
-            linkLabel="Cash and bank"
+            href="/finance/invoices?status=unpaid,partial,overdue"
+            label="Receivables outstanding"
+            value={<Money value={data.receivables.total} />}
+            icon={Receipt}
+            tone={data.receivables.overdue > 0 ? "danger" : "info"}
+            hint={data.receivables.count ? `${formatNumber(data.receivables.count)} open invoices, ${data.receivables.overdueCount} overdue` : "Every invoice is received"}
+            linkLabel="Invoices"
           />
         ) : null}
-        <InsightCard
-          href="/finance/invoices?status=unpaid,partial,overdue"
-          label="Receivables outstanding"
-          value={<Money value={data.receivables.total} />}
-          icon={Receipt}
-          tone={data.receivables.overdue > 0 ? "danger" : "info"}
-          hint={data.receivables.count ? `${formatNumber(data.receivables.count)} open invoices, ${data.receivables.overdueCount} overdue` : "Every invoice is received"}
-          linkLabel="Invoices"
-        />
-        <InsightCard
-          href="/finance/payments"
-          label="Payables outstanding"
-          value={<Money value={data.payables.total} />}
-          icon={Store}
-          tone={data.payables.overdue > 0 ? "danger" : "default"}
-          hint={data.payables.count ? `${formatNumber(data.payables.count)} unpaid bills, ${data.payables.overdueCount} overdue` : "Every bill is paid"}
-          linkLabel="Payments"
-        />
-        <InsightCard
-          href="/analytics/projects/budget?status=active"
-          label="Budget used (active projects with a budget)"
-          value={data.budget.total.usage === null ? "No budgets" : formatPercent(data.budget.total.usage)}
-          icon={Gauge}
-          tone={data.budget.total.usage !== null && data.budget.total.usage > 1 ? "danger" : "info"}
-          hint={
-            <>
-              <Money value={data.budget.total.spent} compact /> of <Money value={data.budget.total.budget} compact />
-            </>
-          }
-        />
+        {open("/finance/payments") ? (
+          <InsightCard
+            href="/finance/payments"
+            label="Payables outstanding"
+            value={<Money value={data.payables.total} />}
+            icon={Store}
+            tone={data.payables.overdue > 0 ? "danger" : "default"}
+            hint={data.payables.count ? `${formatNumber(data.payables.count)} unpaid bills, ${data.payables.overdueCount} overdue` : "Every bill is paid"}
+            linkLabel="Payments"
+          />
+        ) : null}
+        {open("/analytics/projects/budget?status=active") ? (
+          <InsightCard
+            href="/analytics/projects/budget?status=active"
+            label="Budget used (active projects with a budget)"
+            value={data.budget.total.usage === null ? "No budgets" : formatPercent(data.budget.total.usage)}
+            icon={Gauge}
+            tone={data.budget.total.usage !== null && data.budget.total.usage > 1 ? "danger" : "info"}
+            hint={
+              <>
+                <Money value={data.budget.total.spent} compact /> of <Money value={data.budget.total.budget} compact />
+              </>
+            }
+          />
+        ) : null}
       </StatGrid>
 
-      <Section
-        title="Revenue and expense trend"
-        description="Income received and expenses recorded each month, by the date on each record and GST included, whether a bill is paid yet or not. The same figures as the Finance dashboard."
-        actions={<DetailsLink href="/finance" />}
-      >
-        {hasMonthly ? (
-          <MonthChart
-            title="Income received and expenses recorded by month"
-            data={data.monthly}
-            series={[
-              { key: "income", label: "Income received", color: "var(--chart-3)" },
-              { key: "expenses", label: "Expenses recorded", color: "var(--chart-2)" },
-            ]}
-          />
-        ) : (
-          <EmptyState icon={ChartColumn} compact title="No income or expenses in the last 12 months" />
-        )}
-      </Section>
-
-      {data.pl ? (
+      {open("/finance") ? (
         <Section
-          title="Profitability trend"
-          description="Profit each month from the profit and loss statement: invoices as revenue, stock as cost when used, depreciation and loan interest included. It differs from the cash figures above."
-          actions={<DetailsLink href="/finance/reports/profit-loss">Profit and loss</DetailsLink>}
+          title="Revenue and expense trend"
+          description="Income received and expenses recorded each month, by the date on each record and GST included, whether a bill is paid yet or not. The same figures as the Finance dashboard."
+          actions={<DetailsLink href="/finance" />}
         >
-          {data.pl.months.some((m) => m.income !== 0 || m.expenses !== 0) ? (
-            <MonthChart title="P&L profit by month" data={data.pl.months} series={[{ key: "profit", label: "Profit", color: "var(--chart-1)" }]} />
+          {hasMonthly ? (
+            <MonthChart
+              title="Income received and expenses recorded by month"
+              data={data.monthly}
+              series={[
+                { key: "income", label: "Income received", color: "var(--chart-3)" },
+                { key: "expenses", label: "Expenses recorded", color: "var(--chart-2)" },
+              ]}
+            />
           ) : (
-            <EmptyState icon={TrendingUp} compact title="No income or expenses in the books for the last 12 months" />
+            <EmptyState icon={ChartColumn} compact title="No income or expenses in the last 12 months" />
           )}
-          <div className="-mx-4 mt-4 border-t sm:-mx-5">
-            <PlTable months={data.pl.months} fy={data.pl.fy} fyLabel={data.fyLabel} />
-          </div>
         </Section>
       ) : null}
 
+      {data.pl ? (
+        open("/finance/reports/profit-loss") ? (
+          <Section
+            title="Profitability trend"
+            description="Profit each month from the profit and loss statement: invoices as revenue, stock as cost when used, depreciation and loan interest included. It differs from the cash figures above."
+            actions={<DetailsLink href="/finance/reports/profit-loss">Profit and loss</DetailsLink>}
+          >
+            {data.pl.months.some((m) => m.income !== 0 || m.expenses !== 0) ? (
+              <MonthChart title="P&L profit by month" data={data.pl.months} series={[{ key: "profit", label: "Profit", color: "var(--chart-1)" }]} />
+            ) : (
+              <EmptyState icon={TrendingUp} compact title="No income or expenses in the books for the last 12 months" />
+            )}
+            <div className="-mx-4 mt-4 border-t sm:-mx-5">
+              <PlTable months={data.pl.months} fy={data.pl.fy} fyLabel={data.fyLabel} />
+            </div>
+          </Section>
+        ) : null
+      ) : null}
+
       {data.cash ? (
-        <Section
-          title="Cash flow position"
-          description={`Cash and bank movements from 1 April to today, by activity. Transfers between own accounts are left out.`}
-          actions={<DetailsLink href="/finance/reports/cash-flow">Cash flow statement</DetailsLink>}
-        >
-          <CashPosition cash={data.cash} />
-        </Section>
+        open("/finance/reports/cash-flow") ? (
+          <Section
+            title="Cash flow position"
+            description={`Cash and bank movements from 1 April to today, by activity. Transfers between own accounts are left out.`}
+            actions={<DetailsLink href="/finance/reports/cash-flow">Cash flow statement</DetailsLink>}
+          >
+            <CashPosition cash={data.cash} />
+          </Section>
+        ) : null
       ) : (
-        <EmptyState icon={ShieldCheck} compact title="Profit and cash figures are for admins" description="The profit and loss trend and the cash position are shown to admins only. Ask an admin if you need a figure from them." />
+        <EmptyState icon={ShieldCheck} compact title="Profit and cash figures are not shown for your role" description="The profit and loss trend and the cash position need permission to see the company's financial position. Ask an admin if you need a figure from them." />
       )}
 
-      <Section title="Budget utilisation" description="Open projects with the most spend: budget against spend to date." actions={<DetailsLink href="/analytics/projects/budget?status=planning,active,on_hold">Budget vs actual</DetailsLink>}>
-        {budgetRows.length ? (
-          <BarsChart
-            title="Budget and spend per open project"
-            data={budgetRows}
-            series={[
-              { key: "budget", label: "Budget", color: "var(--chart-3)" },
-              { key: "spent", label: "Spent", color: "var(--chart-1)" },
-            ]}
-          />
-        ) : (
-          <EmptyState icon={Gauge} compact title="No open project has a budget or spend yet" />
-        )}
-        <SalariesHiddenNote className="mt-3" />
-      </Section>
+      {open("/analytics/projects/budget?status=planning,active,on_hold") ? (
+        <Section title="Budget utilisation" description="Open projects with the most spend: budget against spend to date." actions={<DetailsLink href="/analytics/projects/budget?status=planning,active,on_hold">Budget vs actual</DetailsLink>}>
+          {budgetRows.length ? (
+            <BarsChart
+              title="Budget and spend per open project"
+              data={budgetRows}
+              series={[
+                { key: "budget", label: "Budget", color: "var(--chart-3)" },
+                { key: "spent", label: "Spent", color: "var(--chart-1)" },
+              ]}
+            />
+          ) : (
+            <EmptyState icon={Gauge} compact title="No open project has a budget or spend yet" />
+          )}
+          <SalariesHiddenNote className="mt-3" />
+        </Section>
+      ) : null}
 
       <div className="grid gap-5 sm:gap-6 xl:grid-cols-2">
-        <Section
-          title="Outstanding receivables"
-          description={`Customers with unpaid invoices. ${data.receivables.dueSoon > 0 ? "Some fall due in the next 30 days." : ""}`}
-          contentClassName="p-0 sm:p-0"
-          actions={<DetailsLink href="/finance/invoices?status=unpaid,partial,overdue">Open invoices</DetailsLink>}
-        >
-          {data.topClients.length ? (
-            <PartyTable rows={data.topClients} label="Customer" countLabel="Invoices" />
-          ) : (
-            <EmptyState icon={Receipt} compact className="m-4" title="No open invoices" description="Every issued invoice is fully received." />
-          )}
-        </Section>
-        <Section title="Outstanding payables" description={isAdmin ? "Unpaid bills by payee, largest first. Unpaid salary bills are included." : "Suppliers with unpaid bills, largest first."} contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/finance/payments">Payments</DetailsLink>}>
-          {data.topVendors.length ? (
-            <>
-              <PartyTable rows={data.topVendors} label="Vendor" countLabel="Bills" />
-              {data.payables.salariesLeftOut ? <Footnote className="px-4 pb-4 sm:px-5">Salary bills are left out.</Footnote> : null}
-            </>
-          ) : (
-            <EmptyState icon={Store} compact className="m-4" title="Nothing owed to vendors" description="Every recorded bill is paid." />
-          )}
-        </Section>
+        {open("/finance/invoices?status=unpaid,partial,overdue") ? (
+          <Section
+            title="Outstanding receivables"
+            description={`Customers with unpaid invoices. ${data.receivables.dueSoon > 0 ? "Some fall due in the next 30 days." : ""}`}
+            contentClassName="p-0 sm:p-0"
+            actions={<DetailsLink href="/finance/invoices?status=unpaid,partial,overdue">Open invoices</DetailsLink>}
+          >
+            {data.topClients.length ? (
+              <PartyTable rows={data.topClients} label="Customer" countLabel="Invoices" />
+            ) : (
+              <EmptyState icon={Receipt} compact className="m-4" title="No open invoices" description="Every issued invoice is fully received." />
+            )}
+          </Section>
+        ) : null}
+        {open("/finance/payments") ? (
+          <Section title="Outstanding payables" description={viewer.salaries ? "Unpaid bills by payee, largest first. Unpaid salary bills are included." : "Suppliers with unpaid bills, largest first."} contentClassName="p-0 sm:p-0" actions={<DetailsLink href="/finance/payments">Payments</DetailsLink>}>
+            {data.topVendors.length ? (
+              <>
+                <PartyTable rows={data.topVendors} label="Vendor" countLabel="Bills" />
+                {data.payables.salariesLeftOut ? <Footnote className="px-4 pb-4 sm:px-5">Salary bills are left out.</Footnote> : null}
+              </>
+            ) : (
+              <EmptyState icon={Store} compact className="m-4" title="Nothing owed to vendors" description="Every recorded bill is paid." />
+            )}
+          </Section>
+        ) : null}
       </div>
     </Page>
   );

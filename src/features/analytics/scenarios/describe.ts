@@ -19,7 +19,7 @@ const basis = (b: string) => PRICE_BASES.find((p) => p.value === b)?.label ?? b;
 const names = (ids: string[], map: Map<string, string>) => (ids.length ? ids.map((id) => map.get(id) ?? "Removed record").join(", ") : "None");
 const dept = (d: string | undefined) => (d ? labelOf(DEPARTMENTS, d as Department) : "Not set");
 
-export function describeInputs(spec: ScenarioSpec, lookup: NameLookup, options: { admin: boolean }): InputLine[] {
+export function describeInputs(spec: ScenarioSpec, lookup: NameLookup, options: { salaries: boolean }): InputLine[] {
   const i = spec.inputs;
   switch (spec.type) {
     case "demand": {
@@ -94,7 +94,7 @@ export function describeInputs(spec: ScenarioSpec, lookup: NameLookup, options: 
         { label: "Skill", value: v.skill ?? "Not set" },
         { label: "Required people", value: num(v.requiredCount) },
         { label: "Period", value: `${day(v.periodFrom)} to ${day(v.periodTo)}` },
-        ...(options.admin ? [{ label: "Monthly cost a person", value: v.monthlyCost === undefined ? "Department average" : money(v.monthlyCost) }] : []),
+        ...(options.salaries ? [{ label: "Monthly cost a person", value: v.monthlyCost === undefined ? "Department average" : money(v.monthlyCost) }] : []),
         { label: "Overtime", value: v.overtimeHours ? `${formatNumber(v.overtimeHours)} hours a month at ${money(v.overtimeRate)}` : "None" },
       ];
     }

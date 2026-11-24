@@ -11,7 +11,7 @@ import { DataTable, DataTableColumnHeader, type FilterDef } from "@/components/d
 import { EmptyState } from "@/components/shared/empty-state";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { cn } from "@/lib/utils";
 import { RECURRING_FREQUENCIES, RECURRING_STATUSES, labelOf } from "@/lib/constants";
@@ -91,7 +91,9 @@ export function RecurringView({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const isAdmin = useIsAdmin();
+  const canCreate = useCan("finance.recurring:create");
+  const canEdit = useCan("finance.recurring:edit");
+  const canRemove = useCan("finance.recurring:delete");
   const [detail, setDetail] = useState<RecurringDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [version, setVersion] = useState(0);
@@ -99,14 +101,14 @@ export function RecurringView({
   const [tabPending, startTab] = useTransition();
 
   const panel: Panel = useMemo(() => {
-    // Only admins can open the forms; members get the read-only drawer.
-    if (searchParams.get("new") === "1" && isAdmin) return { kind: "new" };
+    // The forms open only with the create or edit permission; otherwise the read-only drawer.
+    if (searchParams.get("new") === "1" && canCreate) return { kind: "new" };
     const edit = searchParams.get("edit");
-    if (edit && isAdmin) return { kind: "edit", id: edit };
-    const view = searchParams.get("view") ?? (edit && !isAdmin ? edit : null);
+    if (edit && canEdit) return { kind: "edit", id: edit };
+    const view = searchParams.get("view") ?? (edit && !canEdit ? edit : null);
     if (view) return { kind: "view", id: view };
     return null;
-  }, [searchParams, isAdmin]);
+  }, [searchParams, canCreate, canEdit]);
   const template = searchParams.get("template");
   const group = searchParams.get("group") ?? "all";
 
@@ -330,7 +332,7 @@ export function RecurringView({
                 <DropdownMenuItem onSelect={() => setPanel({ kind: "view", id: row.original.id })}>
                   <Eye /> View
                 </DropdownMenuItem>
-                {isAdmin ? (
+                {canEdit ? (
                   <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
                     <Pencil /> Edit
                   </DropdownMenuItem>
@@ -342,7 +344,7 @@ export function RecurringView({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchParams, isAdmin],
+    [searchParams, canEdit],
   );
 
   const filters: FilterDef[] = useMemo(
@@ -368,7 +370,7 @@ export function RecurringView({
       title="No recurring expenses yet"
       description="A schedule posts the same expense on a rhythm, such as salaries, rent, internet and software subscriptions."
       action={
-        isAdmin ? (
+        canCreate ? (
           <div className="flex flex-wrap justify-center gap-2">
             {RECURRING_TEMPLATES.map((t) => (
               <Button key={t.key} variant="outline" onClick={() => setPanel({ kind: "new" }, { template: t.key })}>
@@ -377,7 +379,7 @@ export function RecurringView({
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">An admin can add the first schedule.</p>
+          <p className="text-xs text-muted-foreground">Someone with permission to add schedules can add the first one.</p>
         )
       }
     />
@@ -492,7 +494,8 @@ export function RecurringView({
         ) : panel?.kind === "view" && detail ? (
           <RecurringDetailView
             schedule={detail}
-            isAdmin={isAdmin}
+            canEdit={canEdit}
+            canRemove={canRemove}
             justPosted={justPosted?.scheduleId === detail.id ? justPosted.result : null}
             onEdit={() => setPanel({ kind: "edit", id: detail.id })}
             onPostNext={postNext}

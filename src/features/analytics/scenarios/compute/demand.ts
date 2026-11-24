@@ -18,6 +18,7 @@ import {
   stat,
   sumOf,
   wholeUp,
+  viewOf,
 } from "./common";
 
 export type DemandFacts = {
@@ -232,7 +233,7 @@ export function computeDemand(inputs: DemandInputs, facts: DemandFacts, ctx: Com
       ? "The extra cost is split across the chosen projects in proportion to what each already used of the material."
       : "None of the chosen projects has used these materials yet, so the extra cost is split equally between them.",
   ];
-  if (!ctx.admin) notes.push(SALARIES_NOTE);
+  if (!ctx.salaries) notes.push(SALARIES_NOTE);
   if (missing > 0) notes.push(`${missing} material${missing === 1 ? " is" : "s are"} no longer in inventory and left out.`);
 
   const stats = [
@@ -257,7 +258,7 @@ export function computeDemand(inputs: DemandInputs, facts: DemandFacts, ctx: Com
     version: 1,
     type: "demand",
     computedAt: new Date().toISOString(),
-    view: ctx.admin ? "admin" : "member",
+    view: viewOf(ctx),
     headline,
     stats,
     comparison,

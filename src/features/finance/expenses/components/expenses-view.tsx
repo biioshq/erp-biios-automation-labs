@@ -21,7 +21,7 @@ import { FormSheet } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { DEPARTMENTS, EXPENSE_NATURES, EXPENSE_SOURCES, PAYMENT_METHODS, PAYMENT_STATUSES, PROJECT_STAGES, labelOf } from "@/lib/constants";
 import { DEFAULT_EXPENSE_CATEGORIES, expenseCategoryFilterOptions, type ExpenseCategoryOption } from "@/lib/expense-categories";
@@ -57,7 +57,8 @@ export function ExpensesView({
   /** Open bank and cash accounts, for "Paid from" and Record payment. */
   accounts?: BankAccountOption[];
 }) {
-  const isAdmin = useIsAdmin();
+  const canDelete = useCan("finance.expenses:delete");
+  const canEdit = useCan("finance.expenses:edit");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -352,10 +353,12 @@ export function ExpensesView({
                 </DropdownMenuItem>
                 {!isGeneratedExpense(row.original.source) ? (
                   <>
-                    <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
-                      <Pencil /> Edit
-                    </DropdownMenuItem>
-                    {isAdmin ? (
+                    {canEdit ? (
+                      <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
+                        <Pencil /> Edit
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canDelete ? (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(row.original)}>
@@ -372,7 +375,7 @@ export function ExpensesView({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchParams, isAdmin],
+    [searchParams, canDelete, canEdit],
   );
 
   const filters: FilterDef[] = useMemo(
@@ -504,7 +507,7 @@ export function ExpensesView({
             accounts={accounts}
             onEdit={() => setPanel({ kind: "edit", id: detail.id })}
             onDelete={() => remove(detail)}
-            canDelete={isAdmin}
+            canDelete={canDelete}
           />
         ) : null}
       </FormSheet>

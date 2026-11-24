@@ -9,7 +9,8 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { formatDate, formatNumber } from "@/lib/format";
 import { fromDateInput } from "@/lib/dates";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { incomeSummary, summaryRange } from "@/features/finance/income/summary";
 import { SummaryRange } from "@/features/finance/income/components/summary-range";
 import { SummaryChart } from "@/features/finance/income/components/summary-chart";
@@ -24,7 +25,8 @@ const dateParam = (v: string | string[] | undefined) => {
 
 export default async function IncomeSummaryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.income:view")) return <NoAccess title="Income summary" />;
   const sp = await searchParams;
   const from = dateParam(sp.from);
   const to = dateParam(sp.to);

@@ -9,7 +9,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { formatCompactCurrency, formatPercent } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { SPEND_TYPES } from "@/lib/project-cost-types";
 import { BUDGET_USE_RULE, budgetUse, statusesParam, sumOf } from "@/features/analytics/projects/model";
 import { MIN_PROJECT_DAYS, PROJECT_FORECAST_RULE } from "@/features/analytics/project-forecast";
@@ -31,7 +34,10 @@ const TYPE_COLORS: Record<string, string> = {
 
 export default async function ProjectCostPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.projects)) return <NoAccess eyebrow="Analytics & Planning" title="Project cost analysis" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const statuses = statusesParam(await searchParams);
   const { rows, total, salariesHidden } = await loadProjectCosts(statuses);
 
@@ -81,11 +87,13 @@ export default async function ProjectCostPage({ searchParams }: { searchParams: 
         actions={
           <>
             <ProjectStatusSelect statuses={statuses} />
-            <Button asChild variant="outline">
-              <Link href="/analytics/projects/budget">
-                <Gauge /> Budget vs actual
-              </Link>
-            </Button>
+            {open("/analytics/projects/budget") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/projects/budget">
+                  <Gauge /> Budget vs actual
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -96,9 +104,11 @@ export default async function ProjectCostPage({ searchParams }: { searchParams: 
           title="No projects yet"
           description="Create a project with a budget. Its expenses and the stock assigned to it then show here by cost type."
           action={
-            <Button asChild>
-              <Link href="/finance/projects?new=1">New project</Link>
-            </Button>
+            open("/finance/projects?new=1") ? (
+              <Button asChild>
+                <Link href="/finance/projects?new=1">New project</Link>
+              </Button>
+            ) : null
           }
         />
       ) : rows.length === 0 ? (

@@ -10,7 +10,8 @@ import { formatNumber } from "@/lib/format";
 import { EMPLOYEE_FILTER_KEYS } from "@/features/employees/schemas";
 import { getEmployeeSummary, getUserLinkOptions, hasEmployees, listEmployees } from "@/features/employees/queries";
 import { EmployeesView } from "@/features/employees/components/employees-view";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Employees" };
 
@@ -18,7 +19,8 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
 
 export default async function EmployeesPage({ searchParams }: PageProps<"/finance/employees">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.employees:view")) return <NoAccess title="Employees" />;
   const sp = await searchParams;
   const params = parseListParams(sp, { filterKeys: EMPLOYEE_FILTER_KEYS });
   const needsUsers = Boolean(first(sp.new) || first(sp.edit));
@@ -36,7 +38,7 @@ export default async function EmployeesPage({ searchParams }: PageProps<"/financ
         title="Employees"
         description="Who works here, which projects they are on and what the team costs each month."
         actions={
-          any ? (
+          any && can(user, "finance.employees:create") ? (
             <Button asChild className="w-full sm:w-auto">
               <Link href="?new=1" scroll={false}>
                 <Plus /> Add employee

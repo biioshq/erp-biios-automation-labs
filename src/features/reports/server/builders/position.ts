@@ -6,6 +6,7 @@ import { equityOverview, liabilitiesOverview, liabilityRows, payablesSummary, re
 import { effectiveAsOf } from "@/server/accounting/ledger";
 import { descendantsOf, loadFinanceGroups } from "@/server/finance-groups";
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
+import { canSeeSalaries } from "@/server/auth/session";
 import { CAPITAL_ENTRY_TYPES, EQUITY_HOLDER_KINDS, INVESTOR_INSTRUMENTS, LIABILITY_STATUSES, PAYMENT_METHODS, PAYMENT_STATUSES, labelOf } from "@/lib/constants";
 import type { EquityHolderKind, InvestorInstrument, LiabilityStatus, PaymentMethod, PaymentStatus } from "@/lib/constants";
 import { fromDateInput, toDateInput } from "@/lib/dates";
@@ -102,7 +103,7 @@ export async function buildPayablesReport(f: ReportFilters): Promise<ReportData>
   await connectDB();
   const now = new Date();
   const today = toDateInput(now);
-  const [p, categoryLabel] = await Promise.all([payablesSummary(now), getExpenseCategoryLabeler()]);
+  const [p, categoryLabel] = await Promise.all([payablesSummary(now, { includeSalaries: await canSeeSalaries() }), getExpenseCategoryLabeler()]);
   const names = await projectNames(p.rows.map((x) => x.project));
 
   const vendorColumns: ReportColumn[] = [

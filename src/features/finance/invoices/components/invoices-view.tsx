@@ -19,7 +19,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -54,7 +54,8 @@ export function InvoicesView({
   invoiceClients: string[];
   accounts: BankAccountOption[];
 }) {
-  const isAdmin = useIsAdmin();
+  const canDelete = useCan("finance.invoices:delete");
+  const canEdit = useCan("finance.invoices:edit");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -258,12 +259,12 @@ export function InvoicesView({
                 <DropdownMenuItem onSelect={() => setPanel({ kind: "view", id: row.original.id })}>
                   <Eye /> View
                 </DropdownMenuItem>
-                {row.original.status === "cancelled" ? null : (
+                {row.original.status === "cancelled" || !canEdit ? null : (
                   <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
                     <Pencil /> Edit
                   </DropdownMenuItem>
                 )}
-                {isAdmin && row.original.received === 0 ? (
+                {canDelete && row.original.received === 0 ? (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(row.original)}>
@@ -278,7 +279,7 @@ export function InvoicesView({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchParams, isAdmin],
+    [searchParams, canDelete, canEdit],
   );
 
   const filters: FilterDef[] = useMemo(
@@ -387,7 +388,7 @@ export function InvoicesView({
           <InvoiceDetailView
             invoice={detail}
             accounts={accounts}
-            isAdmin={isAdmin}
+            canDelete={canDelete}
             onEdit={() => setPanel({ kind: "edit", id: detail.id })}
             onChanged={reloadViewing}
             onDelete={() => remove(detail)}

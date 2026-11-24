@@ -10,13 +10,15 @@ import { getInventoryItemOptions, getProjectOptions } from "@/server/lookups";
 import { listMovements } from "@/features/inventory/movements/queries";
 import { MOVEMENT_FILTER_KEYS, MOVEMENT_SORT_KEYS } from "@/features/inventory/movements/schemas";
 import { MovementsView } from "@/features/inventory/movements/components/movements-view";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 
 export const metadata: Metadata = { title: "Movements" };
 
 export default async function MovementsPage({ searchParams }: PageProps<"/inventory/movements">) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "inventory.movements:view")) return <NoAccess eyebrow="Inventory" title="Stock movement" />;
   const params = parseListParams(await searchParams, {
     filterKeys: MOVEMENT_FILTER_KEYS,
     sortable: MOVEMENT_SORT_KEYS,

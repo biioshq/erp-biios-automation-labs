@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
 import { rateLimit } from "@/server/rate-limit";
 import { connectDB } from "@/server/db";
 import { UploadError } from "@/server/storage";
 import { FILE_KINDS } from "@/server/models";
-import { storeFile, toFileDTO } from "@/features/files/server";
+import { FILE_ATTACH_PERMISSIONS, UPLOAD_ENTITY_TYPES, storeFile, toFileDTO } from "@/features/files/server";
 import { bumpChanges } from "@/server/changes";
 import { PROJECT_DOCUMENT_TYPES, valuesOf } from "@/lib/constants";
 
@@ -13,7 +13,7 @@ const metaSchema = z.object({
   kind: z.enum(FILE_KINDS),
   documentType: z.enum(valuesOf(PROJECT_DOCUMENT_TYPES)).optional(),
   projectId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
-  entityType: z.enum(["expense", "income", "task", "project", "movement"]).optional(),
+  entityType: z.enum(UPLOAD_ENTITY_TYPES).optional(),
   entityId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
 });
 
@@ -41,6 +41,11 @@ export async function POST(request: NextRequest) {
     entityId: form.get("entityId") || undefined,
   });
   if (!meta.success) return NextResponse.json({ error: "Invalid upload details." }, { status: 400 });
+  // A file named for a record is attached to it at once, so it needs the right to add or change that
+  // kind of record. Uploads for a form that is not saved yet stay open to everyone signed in.
+  if (meta.data.entityType && meta.data.entityId && !FILE_ATTACH_PERMISSIONS[meta.data.entityType].some((p) => can(user, p))) {
+    return NextResponse.json({ error: "You do not have permission to do this." }, { status: 403 });
+  }
 
   try {
     await connectDB();

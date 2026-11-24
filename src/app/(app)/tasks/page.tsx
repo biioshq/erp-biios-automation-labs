@@ -6,7 +6,8 @@ import { Progress } from "@/components/ui/progress";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
 import { addDays, toDateInput } from "@/lib/dates";
 import { formatNumber } from "@/lib/format";
 import { getTasksDashboard } from "@/features/tasks/queries";
@@ -20,6 +21,7 @@ const card = "block rounded-xl focus-visible:ring-3 focus-visible:ring-ring/50 f
 
 export default async function TasksDashboardPage() {
   const user = await requireUser();
+  if (!can(user, "tasks.tasks:view")) return <NoAccess eyebrow="Tasks" title="Tasks dashboard" />;
   const d = await getTasksDashboard(user.id);
   const total = d.byStatus.reduce((sum, s) => sum + s.count, 0);
   const today = toDateInput(new Date());
@@ -33,11 +35,13 @@ export default async function TasksDashboardPage() {
         title="Tasks dashboard"
         description="What is open, what is late and who has room."
         actions={
-          <Button asChild className="max-sm:w-full">
-            <Link href="/tasks/all?new=1" scroll={false}>
-              <Plus /> New task
-            </Link>
-          </Button>
+          can(user, "tasks.tasks:create") ? (
+            <Button asChild className="max-sm:w-full">
+              <Link href="/tasks/all?new=1" scroll={false}>
+                <Plus /> New task
+              </Link>
+            </Button>
+          ) : null
         }
       />
 
@@ -72,11 +76,13 @@ export default async function TasksDashboardPage() {
           title="No tasks yet"
           description="Create the first task to see status, priority and workload charts here."
           action={
-            <Button asChild>
-              <Link href="/tasks/all?new=1" scroll={false}>
-                <Plus /> New task
-              </Link>
-            </Button>
+            can(user, "tasks.tasks:create") ? (
+              <Button asChild>
+                <Link href="/tasks/all?new=1" scroll={false}>
+                  <Plus /> New task
+                </Link>
+              </Button>
+            ) : undefined
           }
         />
       ) : (

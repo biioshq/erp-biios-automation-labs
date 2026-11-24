@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentUser } from "@/server/auth/session";
+import { can, getCurrentUser } from "@/server/auth/session";
+import { ANALYTICS } from "@/features/analytics/links";
+import { analyticsViewer } from "@/features/analytics/viewer";
 import { renderPdf } from "@/features/reports/server/render-pdf";
 import { renderXlsx } from "@/features/reports/server/render-xlsx";
 import { getScenarioDetail } from "@/features/analytics/scenarios/queries";
@@ -19,13 +21,16 @@ const CONTENT_TYPES = {
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!can(user, ANALYTICS.scenarios.view) || !can(user, ANALYTICS.scenarios.export)) {
+    return NextResponse.json({ error: "You do not have permission to do this." }, { status: 403 });
+  }
   const { id } = await params;
   const format = request.nextUrl.searchParams.get("format") === "pdf" ? "pdf" : "xlsx";
   const wantSaved = request.nextUrl.searchParams.get("basis") === "saved";
 
   try {
-    // The same redaction as the page: members get no salary or cash figures.
-    const detail = await getScenarioDetail(id, { admin: user.role === "admin" });
+    // The same redaction as the page: salary and cash figures only with the matching data permission.
+    const detail = await getScenarioDetail(id, analyticsViewer(user));
     if (!detail) return NextResponse.json({ error: "That scenario no longer exists." }, { status: 404 });
     const basis = wantSaved && detail.saved ? "saved" : "today";
     const results = basis === "saved" ? detail.saved : detail.live;

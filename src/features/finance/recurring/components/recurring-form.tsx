@@ -30,6 +30,7 @@ import { ordinal } from "../format";
 import { RECURRING_TEMPLATES, recurringFormSchema, type RecurringFormInput, type RecurringFormValues, type RecurringTemplate } from "../schemas";
 import type { RecurringDetail } from "../types";
 import { formValidation } from "@/components/forms/form-options";
+import { useCan } from "@/components/current-user";
 
 const PAYMENT_OPTIONS = PAYMENT_METHODS.filter((m) => m.value !== "stock");
 const DAY_OPTIONS = [...Array.from({ length: 28 }, (_, i) => ({ value: i + 1, label: `${ordinal(i + 1)} of the month` })), { value: 31, label: "Last day of the month" }];
@@ -107,15 +108,17 @@ export function RecurringForm({
   onCancel: () => void;
 }) {
   const isEdit = Boolean(schedule);
-  // Schedules are admin-only, so salaries are always offered; "inventory" never is (stock assignments write it).
+  // Salaries are offered with the salaries data permission (the actions check it too); "inventory" never is
+  // (stock assignments write it).
+  const seesSalaries = useCan("data.salaries");
   const currentCategory = schedule?.category;
   const currentLabel = schedule?.categoryLabel;
   const categoryOptions = useMemo(
     () =>
-      expenseCategoryChoices(categories, { current: currentCategory }).map((c) =>
+      expenseCategoryChoices(categories, { current: currentCategory, allowSalaries: seesSalaries }).map((c) =>
         c.value === currentCategory && c.label === currentCategory && currentLabel ? { ...c, label: currentLabel } : c,
       ),
-    [categories, currentCategory, currentLabel],
+    [categories, currentCategory, currentLabel, seesSalaries],
   );
   const offered = (value: string) => categoryOptions.some((c) => c.value === value);
   const [pending, startTransition] = useTransition();

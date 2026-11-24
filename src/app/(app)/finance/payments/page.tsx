@@ -7,7 +7,8 @@ import { Money } from "@/components/shared/money";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
 import { formatNumber, round2 } from "@/lib/format";
 import { parseListParams, type SearchParams } from "@/lib/list-params";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { getBankAccountOptions } from "@/server/lookups";
 import { getPaymentTracking } from "@/features/finance/expenses/payment-queries";
 import { parsePaymentTab } from "@/features/finance/expenses/payment-tabs";
@@ -19,7 +20,8 @@ const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n
 
 export default async function PaymentsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, "finance.payments:view")) return <NoAccess title="Payment tracking" />;
   const sp = await searchParams;
   const tab = parsePaymentTab(sp.tab);
   const params = parseListParams(sp, { sortable: ["date", "amount", "outstanding", "due", "vendor"] });

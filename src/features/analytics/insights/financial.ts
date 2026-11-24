@@ -29,17 +29,17 @@ async function monthlyPl(asOf: Date, now: Date) {
   return months;
 }
 
-/** 6.2 Financial performance. P&L and cash figures are computed for admins only. */
-export async function getFinancialInsights(viewer: { isAdmin: boolean }, now: Date = new Date()): Promise<FinancialInsights> {
+/** 6.2 Financial performance. P&L and cash figures are computed only for viewers who see the financial position. */
+export async function getFinancialInsights(viewer: { salaries: boolean; cash: boolean }, now: Date = new Date()): Promise<FinancialInsights> {
   const fy = financialYearIST(now);
   const asOf = endOfDayIST(now);
   const [monthly, totals, budgets, rec, pay, admin] = await Promise.all([
     monthlyIncomeExpense(TREND_MONTHS),
     financeTotals({ from: fy.start, to: asOf }),
-    budgetUsage({ status: OPEN_PROJECT_STATUSES }, { includeSalaries: viewer.isAdmin }),
+    budgetUsage({ status: OPEN_PROJECT_STATUSES }, { includeSalaries: viewer.salaries }),
     receivables(now),
-    viewerPayables(viewer.isAdmin, now),
-    viewer.isAdmin
+    viewerPayables(viewer.salaries, now),
+    viewer.cash
       ? Promise.all([monthlyPl(asOf, now), profitAndLoss(fy.start, asOf), cashFlow(fy.start, asOf), cashBalances(asOf)])
       : Promise.resolve(null),
   ]);
@@ -78,6 +78,6 @@ export async function getFinancialInsights(viewer: { isAdmin: boolean }, now: Da
     topClients: rec.byClient.slice(0, TOP),
     payables: pay.totals,
     topVendors: pay.byVendor.slice(0, TOP),
-    salariesHidden: !viewer.isAdmin,
+    salariesHidden: !viewer.salaries,
   };
 }

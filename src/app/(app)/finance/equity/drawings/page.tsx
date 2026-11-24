@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowUpFromLine, CalendarDays, Plus, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IfCan } from "@/features/finance/equity/components/if-can";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { equityOverview } from "@/server/finance/summaries";
 import { financialYearIST } from "@/lib/dates";
 import { formatDate, round2 } from "@/lib/format";
@@ -20,7 +21,7 @@ export const metadata: Metadata = { title: "Drawings" };
 
 export default async function DrawingsPage() {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Drawings" />;
+  if (!can(user, "finance.equity:view")) return <NoAccess title="Drawings" />;
   const [overview, drawings, panel] = await Promise.all([equityOverview(), listEntries({ types: ["drawing"] }), getPanelData()]);
   const fy = financialYearIST();
   const thisYear = drawings.filter((d) => new Date(d.date).getTime() >= fy.start.getTime());
@@ -34,11 +35,13 @@ export default async function DrawingsPage() {
         title="Drawings"
         description="Money owners took out of the business for personal use. A drawing reduces the owner's capital balance. It is not an expense and does not change profit."
         actions={
-          <Button asChild>
-            <Link href="?new=drawing" scroll={false}>
-              <Plus /> Record drawing
-            </Link>
-          </Button>
+          <IfCan permission="finance.equity:create">
+            <Button asChild>
+              <Link href="?new=drawing" scroll={false}>
+                <Plus /> Record drawing
+              </Link>
+            </Button>
+          </IfCan>
         }
       />
 
@@ -61,11 +64,13 @@ export default async function DrawingsPage() {
               title="No drawings recorded"
               description="Record each withdrawal an owner makes, with its purpose and how it was paid."
               action={
-                <Button asChild>
-                  <Link href="?new=drawing" scroll={false}>
-                    <Plus /> Record drawing
-                  </Link>
-                </Button>
+                <IfCan permission="finance.equity:create">
+                  <Button asChild>
+                    <Link href="?new=drawing" scroll={false}>
+                      <Plus /> Record drawing
+                    </Link>
+                  </Button>
+                </IfCan>
               }
             />
           }

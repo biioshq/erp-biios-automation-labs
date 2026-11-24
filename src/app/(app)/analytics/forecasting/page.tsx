@@ -9,7 +9,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
 import { formatDate, formatNumber, round2 } from "@/lib/format";
 import { endOfDayIST, fromDateInput } from "@/lib/dates";
-import { requireUser } from "@/server/auth/session";
+import { can, requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { ANALYTICS } from "@/features/analytics/links";
+import { userCanOpen } from "@/features/analytics/viewer";
 import { MIN_HISTORY_DAYS, MIN_MOVEMENTS, METHOD_DEMAND, OVERSTOCK_DAYS, SEASONAL_MIN_MONTHS } from "@/features/analytics/forecasting/constants";
 import { parseFilters, resolveWindow, type SearchParams } from "@/features/analytics/forecasting/params";
 import { demandForecast } from "@/features/analytics/forecasting/server/demand";
@@ -31,7 +34,10 @@ type Props = { searchParams: Promise<SearchParams> };
 
 export default async function DemandForecastPage({ searchParams }: Props) {
   // Every page checks the session itself: client navigations can skip the layout's check.
-  await requireUser();
+  const user = await requireUser();
+  if (!can(user, ANALYTICS.forecasting.view)) return <NoAccess eyebrow="Analytics & Planning" title="Inventory demand forecast" />;
+  // Links show only when their page can be opened.
+  const open = (href: string) => userCanOpen(user, href);
   const sp = await searchParams;
   const window = resolveWindow(sp);
   const filters = parseFilters(sp);
@@ -61,11 +67,13 @@ export default async function DemandForecastPage({ searchParams }: Props) {
         actions={
           <>
             <SaveForecastButton />
-            <Button asChild>
-              <Link href="/analytics/forecasting/purchases">
-                <PackagePlus /> Purchase requirements
-              </Link>
-            </Button>
+            {open("/analytics/forecasting/purchases") ? (
+              <Button asChild>
+                <Link href="/analytics/forecasting/purchases">
+                  <PackagePlus /> Purchase requirements
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -77,9 +85,11 @@ export default async function DemandForecastPage({ searchParams }: Props) {
           title="No inventory items yet"
           description="Forecasts start once items are added and stock is assigned to projects."
           action={
-            <Button asChild>
-              <Link href="/inventory/items">Go to items</Link>
-            </Button>
+            open("/inventory/items") ? (
+              <Button asChild>
+                <Link href="/inventory/items">Go to items</Link>
+              </Button>
+            ) : null
           }
         />
       ) : rows.length === 0 ? (
@@ -88,9 +98,11 @@ export default async function DemandForecastPage({ searchParams }: Props) {
           title="No materials match these filters"
           description={filters.project ? "This project has no stock movements recorded. Pick another project or clear the filter." : "Clear a filter to see more materials."}
           action={
-            <Button asChild variant="outline">
-              <Link href="/analytics/forecasting">Clear filters</Link>
-            </Button>
+            open("/analytics/forecasting") ? (
+              <Button asChild variant="outline">
+                <Link href="/analytics/forecasting">Clear filters</Link>
+              </Button>
+            ) : null
           }
         />
       ) : (

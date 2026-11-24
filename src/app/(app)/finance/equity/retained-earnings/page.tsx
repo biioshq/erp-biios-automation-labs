@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { BadgeIndianRupee, History, Plus, TriangleAlert, TrendingUp, Vault } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IfCan } from "@/features/finance/equity/components/if-can";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
-import { AdminOnly } from "@/components/shared/admin-only";
-import { requireUser } from "@/server/auth/session";
+import { NoAccess } from "@/components/shared/no-access";
+import { can, requireUser } from "@/server/auth/session";
 import { formatCurrency } from "@/lib/format";
 import { getPanelData, getRetainedEarnings } from "@/features/finance/equity/queries";
 import { EquityPanels } from "@/features/finance/equity/components/equity-panels";
@@ -24,7 +25,7 @@ function Less({ value }: { value: number }) {
 
 export default async function RetainedEarningsPage() {
   const user = await requireUser();
-  if (user.role !== "admin") return <AdminOnly title="Retained earnings" />;
+  if (!can(user, "finance.equity:view")) return <NoAccess title="Retained earnings" />;
   const [data, panel] = await Promise.all([getRetainedEarnings(), getPanelData()]);
   const opening = data.entries.filter((e) => e.type === "opening_retained");
 
@@ -36,16 +37,20 @@ export default async function RetainedEarningsPage() {
         description="Profit the business has kept: what it had before the books started, plus each financial year's profit or loss, less dividends paid and amounts moved to reserves."
         actions={
           <>
-            <Button asChild variant="outline">
-              <Link href="/finance/equity/reserves?new=reserve_transfer" scroll={false}>
-                <Vault /> Transfer to reserve
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="?new=dividend" scroll={false}>
-                <Plus /> Record dividend
-              </Link>
-            </Button>
+            <IfCan permission="finance.equity:create">
+              <Button asChild variant="outline">
+                <Link href="/finance/equity/reserves?new=reserve_transfer" scroll={false}>
+                  <Vault /> Transfer to reserve
+                </Link>
+              </Button>
+            </IfCan>
+            <IfCan permission="finance.equity:create">
+              <Button asChild>
+                <Link href="?new=dividend" scroll={false}>
+                  <Plus /> Record dividend
+                </Link>
+              </Button>
+            </IfCan>
           </>
         }
       />
@@ -161,11 +166,13 @@ export default async function RetainedEarningsPage() {
         title="Retained earnings before the books started"
         description="The accumulated profit (or loss) from the last balance sheet before this ERP, dated the day before the first records here. Enter a loss as a negative amount."
         actions={
-          <Button asChild size="sm" variant={opening.length ? "outline" : "default"}>
-            <Link href="?new=opening_retained" scroll={false}>
-              <Plus /> {opening.length ? "Add a correction" : "Enter opening figure"}
-            </Link>
-          </Button>
+          <IfCan permission="finance.equity:create">
+            <Button asChild size="sm" variant={opening.length ? "outline" : "default"}>
+              <Link href="?new=opening_retained" scroll={false}>
+                <Plus /> {opening.length ? "Add a correction" : "Enter opening figure"}
+              </Link>
+            </Button>
+          </IfCan>
         }
         contentClassName="p-3 sm:p-4"
       >

@@ -15,14 +15,18 @@ import type { ExpenseDetail } from "../types";
 import { PaymentStatusBadge } from "./expense-badges";
 import { RecordPaymentButton } from "./record-payment-dialog";
 import { BankLineLink } from "@/features/finance/bank-statements/components/bank-line-link";
+import { useCan } from "@/components/current-user";
 
 /**
  * The Payment section of the expense drawer: paid, still owed, due date and every payment
- * recorded, with Record payment and (admins) delete. Older expenses show what their method implies.
+ * recorded, with Record payment and delete (each with its payments permission). Older expenses show
+ * what their method implies.
  */
-export function PaymentsPanel({ expense, accounts, isAdmin }: { expense: ExpenseDetail; accounts: BankAccountOption[]; isAdmin: boolean }) {
+export function PaymentsPanel({ expense, accounts }: { expense: ExpenseDetail; accounts: BankAccountOption[] }) {
   const p = expense.payment;
-  const canPay = takesPayments(expense.source) && !expense.countedAtPurchase && p.outstanding > 0 && p.status !== "stock";
+  const canRecord = useCan("finance.payments:create");
+  const canDelete = useCan("finance.payments:delete");
+  const canPay = canRecord && takesPayments(expense.source) && !expense.countedAtPurchase && p.outstanding > 0 && p.status !== "stock";
 
   async function remove(paymentId: string) {
     const result = await deleteExpensePayment({ id: expense.id, paymentId });
@@ -93,9 +97,9 @@ export function PaymentsPanel({ expense, accounts, isAdmin }: { expense: Expense
                       </span>
                     ) : null}
                   </p>
-                  {isAdmin ? <BankLineLink id={pay.bankTransactionId} label="Unmatch it in Bank statements" /> : null}
+                  <BankLineLink id={pay.bankTransactionId} label="Unmatch it in Bank statements" />
                 </div>
-                {isAdmin && !pay.fromBankStatement && takesPayments(expense.source) ? (
+                {canDelete && !pay.fromBankStatement && takesPayments(expense.source) ? (
                   <ConfirmDialog
                     title="Delete this payment?"
                     description={`${formatDate(pay.date)}, ${labelOf(PAYMENT_METHODS, pay.paymentMethod)}. The amount goes back to what is owed on ${expense.number}.`}

@@ -24,7 +24,7 @@ import {
 import type { ReportType } from "@/lib/constants";
 import { REPORT_CATALOG, REPORT_GROUPS, type ReportInfo } from "./catalog";
 
-export { REPORT_GROUPS, isAdminReport, isLegacyReport, type ReportFilterKey, type ReportGroup } from "./catalog";
+export { REPORT_GROUPS, isLegacyReport, mayExportReport, reportPermissions, type ReportFilterKey, type ReportGroup } from "./catalog";
 
 const ICONS: Record<ReportType, LucideIcon> = {
   finance: TrendingUp,
@@ -83,14 +83,17 @@ const CARD_ORDER: ReportType[] = [
   "cash_budget",
 ];
 
-/** The report cards a viewer may open, under their group headings. Groups with no card are left out. */
-export function reportGroupsFor(isAdmin: boolean) {
+/**
+ * The report cards a viewer may open, under their group headings. Groups with no card are left out.
+ * `allowed` is the set of report types the viewer may build (see mayExportReport).
+ */
+export function reportGroupsFor(allowed: ReadonlySet<ReportType>) {
   const rank = (t: ReportType) => {
     const i = CARD_ORDER.indexOf(t);
     return i < 0 ? CARD_ORDER.length : i;
   };
   return REPORT_GROUPS.map((g) => ({
     ...g,
-    reports: REPORT_META.filter((m) => m.group === g.key && (isAdmin || !m.adminOnly)).sort((a, b) => rank(a.type) - rank(b.type)),
+    reports: REPORT_META.filter((m) => m.group === g.key && allowed.has(m.type)).sort((a, b) => rank(a.type) - rank(b.type)),
   })).filter((g) => g.reports.length > 0);
 }

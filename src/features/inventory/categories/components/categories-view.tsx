@@ -20,7 +20,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { useIsAdmin } from "@/components/current-user";
+import { useCan } from "@/components/current-user";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { emitDataChanged } from "@/lib/events";
 import { formatNumber } from "@/lib/format";
@@ -35,7 +35,8 @@ export function CategoriesView({ rows: initial, uncategorized }: { rows: Categor
   const searchParams = useSearchParams();
   const [rows, removeRow] = useOptimistic(initial, (state, id: string) => state.filter((r) => r.id !== id));
   const [deleting, setDeleting] = useState<CategoryRow | null>(null);
-  const isAdmin = useIsAdmin();
+  const canEdit = useCan("inventory.categories:edit");
+  const canDelete = useCan("inventory.categories:delete");
   const mobile = useIsMobile();
 
   const editId = searchParams.get("edit");
@@ -87,10 +88,12 @@ export function CategoriesView({ rows: initial, uncategorized }: { rows: Categor
                 <ExternalLink /> View items
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => open("edit", c.id)}>
-              <Pencil /> Edit
-            </DropdownMenuItem>
-            {isAdmin ? (
+            {canEdit ? (
+              <DropdownMenuItem onSelect={() => open("edit", c.id)}>
+                <Pencil /> Edit
+              </DropdownMenuItem>
+            ) : null}
+            {canDelete ? (
               <>
                 <DropdownMenuSeparator />
                 {inUse ? (
@@ -182,7 +185,7 @@ export function CategoriesView({ rows: initial, uncategorized }: { rows: Categor
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchParams, isAdmin],
+    [searchParams, canEdit, canDelete],
   );
 
   return (

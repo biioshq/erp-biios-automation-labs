@@ -5,19 +5,41 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { USER_ROLES, labelOf } from "@/lib/constants";
 import { formatNumber, initials } from "@/lib/format";
-import type { TeamRow } from "../types";
+import type { RoleOption, TeamRow } from "../types";
+import { MemberActions } from "./member-actions";
 
-/** Read-only members table. Everyone sees it; only admins get the Add member button (in the page header). */
-export function TeamList({ members, isAdmin }: { members: TeamRow[]; isAdmin: boolean }) {
+/** A team row with its role name and what the viewer may change (the server checks again). */
+export type TeamListRow = TeamRow & {
+  roleName: string;
+  /** The person's role key has no role (it was deleted): they have no access until given one. */
+  roleMissing: boolean;
+  isSelf: boolean;
+  canRename: boolean;
+  canChangeRole: boolean;
+  canSetPassword: boolean;
+};
+
+function RoleBadge({ m }: { m: TeamListRow }) {
+  return (
+    <StatusBadge tone={m.roleMissing ? "warning" : m.role === "admin" ? "brand" : "neutral"}>
+      {m.roleName}
+    </StatusBadge>
+  );
+}
+
+/**
+ * The team. Everyone with "settings.team:view" sees it; people who may edit get a menu on each row
+ * (change role, edit name, set a new password).
+ */
+export function TeamList({ members, roles, canManage }: { members: TeamListRow[]; roles: RoleOption[]; canManage: boolean }) {
   return (
     <div className="space-y-4">
-      {isAdmin ? null : (
+      {canManage ? null : (
         <Alert>
           <Info />
           <AlertTitle>View only</AlertTitle>
-          <AlertDescription>Only an admin can add team members. Ask an admin if someone is missing.</AlertDescription>
+          <AlertDescription>Your role can view the team but not change it. Ask an admin if someone is missing.</AlertDescription>
         </Alert>
       )}
       {members.length === 0 ? (
@@ -36,7 +58,8 @@ export function TeamList({ members, isAdmin }: { members: TeamRow[]; isAdmin: bo
                   <p className="truncate text-sm font-medium">{m.name}</p>
                   <p className="truncate text-xs text-muted-foreground">{m.email}</p>
                 </div>
-                <StatusBadge tone={m.role === "admin" ? "brand" : "neutral"}>{labelOf(USER_ROLES, m.role)}</StatusBadge>
+                <RoleBadge m={m} />
+                <MemberActions member={m} roles={roles} />
               </div>
               {m.openTasks ? (
                 <Link
@@ -66,7 +89,10 @@ export function TeamList({ members, isAdmin }: { members: TeamRow[]; isAdmin: bo
                   <TableHead className="h-10 pl-4 text-xs">Member</TableHead>
                   <TableHead className="h-10 text-xs">Email</TableHead>
                   <TableHead className="h-10 text-xs">Role</TableHead>
-                  <TableHead className="h-10 pr-4 text-right text-xs">Open tasks</TableHead>
+                  <TableHead className="h-10 text-right text-xs">Open tasks</TableHead>
+                  <TableHead className="h-10 w-12 pr-4 text-right text-xs">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -83,9 +109,9 @@ export function TeamList({ members, isAdmin }: { members: TeamRow[]; isAdmin: bo
                     </TableCell>
                     <TableCell className="text-muted-foreground">{m.email}</TableCell>
                     <TableCell>
-                      <StatusBadge tone={m.role === "admin" ? "brand" : "neutral"}>{labelOf(USER_ROLES, m.role)}</StatusBadge>
+                      <RoleBadge m={m} />
                     </TableCell>
-                    <TableCell className="pr-4 text-right">
+                    <TableCell className="text-right">
                       {m.openTasks ? (
                         <Link
                           href={`/tasks/all?assignee=${m.id}&status=pending,in_progress,review`}
@@ -97,6 +123,9 @@ export function TeamList({ members, isAdmin }: { members: TeamRow[]; isAdmin: bo
                       ) : (
                         <span className="tabular text-muted-foreground">0</span>
                       )}
+                    </TableCell>
+                    <TableCell className="pr-4 text-right">
+                      <MemberActions member={m} roles={roles} />
                     </TableCell>
                   </TableRow>
                 ))}

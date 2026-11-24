@@ -6,7 +6,8 @@ import type { ProjectTab } from "../schemas";
 import type { ProjectDetail } from "../types";
 
 /** Name, code, client and quick actions. Links keep the page server-rendered. */
-export function ProjectHeader({ project, tab }: { project: ProjectDetail; tab: ProjectTab }) {
+/** `can` is the viewer's permission check from the server: each button shows only with the permission its page or action needs. */
+export function ProjectHeader({ project, tab, can }: { project: ProjectDetail; tab: ProjectTab; can: (permission: string) => boolean }) {
   return (
     <div className="space-y-4">
       <Link href="/finance/projects" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
@@ -27,26 +28,34 @@ export function ProjectHeader({ project, tab }: { project: ProjectDetail; tab: P
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center xl:shrink-0 xl:justify-end">
-          <Button asChild variant="outline">
-            <Link href={`?tab=${tab}&edit=${project.id}`} scroll={false}>
-              <Pencil /> Edit
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="?tab=documents" scroll={false}>
-              <FileUp /> Upload document
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`/inventory/assign?project=${project.id}`}>
-              <Boxes /> Assign inventory
-            </Link>
-          </Button>
-          <Button asChild>
-            <Link href="?tab=expenses&expense=new" scroll={false}>
-              <Plus /> Add expense
-            </Link>
-          </Button>
+          {can("finance.projects:edit") ? (
+            <>
+              <Button asChild variant="outline">
+                <Link href={`?tab=${tab}&edit=${project.id}`} scroll={false}>
+                  <Pencil /> Edit
+                </Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="?tab=documents" scroll={false}>
+                  <FileUp /> Upload document
+                </Link>
+              </Button>
+            </>
+          ) : null}
+          {can("inventory.movement:create") ? (
+            <Button asChild variant="outline">
+              <Link href={`/inventory/assign?project=${project.id}`}>
+                <Boxes /> Assign inventory
+              </Link>
+            </Button>
+          ) : null}
+          {can("finance.expenses:create") ? (
+            <Button asChild>
+              <Link href="?tab=expenses&expense=new" scroll={false}>
+                <Plus /> Add expense
+              </Link>
+            </Button>
+          ) : null}
         </div>
       </div>
     </div>

@@ -2,7 +2,7 @@
 
 import { connectDB } from "@/server/db";
 import { Expense, Income, InventoryItem, Project, Task } from "@/server/models";
-import { getCurrentUser, salaryScope } from "@/server/auth/session";
+import { can, getCurrentUser, salaryScope } from "@/server/auth/session";
 import { searchRegex } from "@/lib/list-params";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { getExpenseCategories } from "@/server/expense-categories";
@@ -11,21 +11,33 @@ import { expenseCategoryLabel, type ExpenseCategoryOption } from "@/lib/expense-
 export type SearchHit = { id: string; title: string; subtitle: string; href: string };
 export type SearchGroups = { projects: SearchHit[]; expenses: SearchHit[]; income: SearchHit[]; inventory: SearchHit[]; tasks: SearchHit[] };
 
-/** Command palette search across modules. Five hits per module. */
+/** The page each group of hits opens; a group is searched only for people who may view it. */
+const SEARCH_GROUP_PERMISSIONS: Record<keyof SearchGroups, string> = {
+  projects: "finance.projects:view",
+  expenses: "finance.expenses:view",
+  income: "finance.income:view",
+  inventory: "inventory.items:view",
+  tasks: "tasks.tasks:view",
+};
+
+/** Command palette search across modules. Five hits per module, only from modules the person may view. */
 export async function globalSearch(query: string): Promise<SearchGroups> {
   const empty: SearchGroups = { projects: [], expenses: [], income: [], inventory: [], tasks: [] };
   const q = query.trim().slice(0, 80);
-  if (q.length < 2 || !(await getCurrentUser())) return empty;
+  const user = await getCurrentUser();
+  if (q.length < 2 || !user) return empty;
+  const allowed = (group: keyof SearchGroups) => can(user, SEARCH_GROUP_PERMISSIONS[group]);
   await connectDB();
   const re = searchRegex(q);
-  const categories = await getExpenseCategories();
+  const categories = allowed("expenses") ? await getExpenseCategories() : [];
+  const none = Promise.resolve([]);
 
   const [projects, expenses, income, items, tasks] = await Promise.all([
-    Project.find({ $or: [{ name: re }, { code: re }, { client: re }] }).limit(5).lean(),
-    searchExpenses(re, categories),
-    Income.find({ $or: [{ client: re }, { number: re }, { reference: re }] }).sort({ date: -1 }).limit(5).lean(),
-    InventoryItem.find({ archivedAt: null, $or: [{ name: re }, { sku: re }, { vendor: re }] }).limit(5).lean(),
-    Task.find({ $or: [{ title: re }, { number: re }] }).sort({ updatedAt: -1 }).limit(5).lean(),
+    allowed("projects") ? Project.find({ $or: [{ name: re }, { code: re }, { client: re }] }).limit(5).lean() : none,
+    allowed("expenses") ? searchExpenses(re, categories) : none,
+    allowed("income") ? Income.find({ $or: [{ client: re }, { number: re }, { reference: re }] }).sort({ date: -1 }).limit(5).lean() : none,
+    allowed("inventory") ? InventoryItem.find({ archivedAt: null, $or: [{ name: re }, { sku: re }, { vendor: re }] }).limit(5).lean() : none,
+    allowed("tasks") ? Task.find({ $or: [{ title: re }, { number: re }] }).sort({ updatedAt: -1 }).limit(5).lean() : none,
   ]);
 
   return {

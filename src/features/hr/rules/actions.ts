@@ -7,7 +7,7 @@ import { HrHoliday, HrSettings } from "@/server/models";
 import { fromDateInput, toDateInput } from "@/lib/dates";
 import { formatDate, formatNumber } from "@/lib/format";
 import { holidayIdSchema, holidaySchema, hrRulesSchema } from "../schemas";
-import { assertMonthsOpen, monthOf } from "../server";
+import { assertMonthsOpen, ensureHrIndexes, monthOf } from "../server";
 import { leaveCodeUsage } from "./queries";
 
 const REVALIDATE: [string, "layout"][] = [["/hr", "layout"]];
@@ -22,6 +22,8 @@ const dayCount = (n: number) => `${formatNumber(n)} ${n === 1 ? "day" : "days"}`
 export const saveHrRules = defineAction(
   hrRulesSchema,
   async (rules, user) => {
+    // The upsert below relies on the unique key index for a single rules document.
+    await ensureHrIndexes();
     const orphaned = Object.entries(await leaveCodeUsage(rules.leaveTypes.map((t) => t.code))).sort(([a], [b]) => a.localeCompare(b));
     if (orphaned.length) {
       const list = orphaned.map(([code, days]) => `${code} is used on ${dayCount(days)} of attendance`).join("; ");

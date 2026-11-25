@@ -2,7 +2,7 @@ import "server-only";
 
 import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
-import { Attendance, Employee, HrHoliday, HrSettings, PayrollRun } from "@/server/models";
+import { Attendance, Employee, HrHoliday, HrSettings, PayrollAdjustment, PayrollRun } from "@/server/models";
 import { AppError } from "@/server/errors";
 import { fromDateInput, toDateInput } from "@/lib/dates";
 import { DEFAULT_HR_RULES, type HrRules } from "./constants";
@@ -13,6 +13,24 @@ import { addMonths, daysInMonth, leaveYearStart, type CalcEmployee, type CalcHol
  * Shared server reads and checks for HR. Every HR page and action goes through these, so the
  * daily sheet, the register, leaves and salary agree on who is employed, the rules and the locks.
  */
+
+const globalForHr = globalThis as unknown as { __hrIndexes?: Promise<void> };
+
+/**
+ * Makes sure the HR collections have their indexes (one mark per person per day, one run per month,
+ * one holiday per date, one rules document). On Vercel the startup setup does not run and Mongoose
+ * builds no indexes in production, so HR builds its own the first time it is used in a process.
+ * Only the new HR collections are touched. A failure is logged and retried later; it never blocks HR.
+ */
+export function ensureHrIndexes(): Promise<void> {
+  globalForHr.__hrIndexes ??= Promise.all([Attendance, HrHoliday, HrSettings, PayrollAdjustment, PayrollRun].map((m) => m.createIndexes()))
+    .then(() => undefined)
+    .catch((error) => {
+      console.error("[hr] could not create the HR indexes; will try again", error);
+      globalForHr.__hrIndexes = undefined;
+    });
+  return globalForHr.__hrIndexes;
+}
 
 /** Today in India, "YYYY-MM-DD". */
 export function todayIST(): string {
@@ -30,6 +48,7 @@ export function monthRange(month: string): { from: string; to: string } {
 /** The attendance rules: the saved ones, or the defaults when none were saved. Never writes. */
 export async function getHrRules(): Promise<{ rules: HrRules; saved: boolean; updatedAt: string | null }> {
   await connectDB();
+  await ensureHrIndexes();
   const doc = await HrSettings.findOne({ key: "default" }).lean();
   if (!doc) return { rules: DEFAULT_HR_RULES, saved: false, updatedAt: null };
   const parsed = hrRulesSchema.safeParse({ ...DEFAULT_HR_RULES, ...(doc.rules as Partial<HrRules>) });
@@ -144,6 +163,7 @@ export async function leaveUsedBefore(month: string, leaveYearStartMonth: number
 /** The months ("YYYY-MM") among these that are finalised. */
 export async function finalisedMonths(months: string[]): Promise<Set<string>> {
   await connectDB();
+  await ensureHrIndexes();
   if (!months.length) return new Set();
   const rows = await PayrollRun.find({ month: { $in: [...new Set(months)] }, status: "finalised" }, { month: 1 }).lean();
   return new Set(rows.map((r) => r.month));

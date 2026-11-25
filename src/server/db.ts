@@ -22,7 +22,9 @@ export async function connectDB(): Promise<typeof mongoose> {
       bufferCommands: false,
       maxPoolSize: process.env.VERCEL ? 10 : 20,
       serverSelectionTimeoutMS: 8000,
-      // In production indexes are built once at boot by ensureDatabase() (src/server/setup-db.ts).
+      // In production indexes are built once at boot by ensureDatabase() (src/server/setup-db.ts), except
+      // on Vercel, where boot skips it: the newer collections build their own on first use instead
+      // (src/server/new-indexes.ts, ensureHrIndexes in src/features/hr/server.ts).
       autoIndex: process.env.NODE_ENV !== "production",
       appName: "biios-project-manager",
     })

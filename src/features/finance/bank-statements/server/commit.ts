@@ -3,6 +3,7 @@ import "server-only";
 import { Types } from "mongoose";
 import { AccountTransfer, BankAccount, BankStatement, BankTransaction, CapitalEntry, Expense, Income, Liability, Project } from "@/server/models";
 import { AppError, isDuplicateKeyError, notFound } from "@/server/errors";
+import { requireIndexes } from "@/server/new-indexes";
 import { nextNumber } from "@/server/services/numbering";
 import { assertExpenseCategoryAllowed } from "@/server/expense-categories";
 import { createCapitalEntry } from "@/features/finance/equity/server";
@@ -22,7 +23,8 @@ import { describeLinks, linkExists, type LinkRef } from "./links";
  * rest. Every line first claims its BankTransaction (unique per account and line hash): a second
  * click, a second tab or a second upload of the same statement finds the claim and adds nothing.
  * The record a line becomes stores the claim's id, so a line interrupted half way (a timeout after
- * the record was saved) is finished on the next try instead of being added twice.
+ * the record was saved) is finished on the next try instead of being added twice. All of this rests
+ * on the unique index, so nothing is added until that index is confirmed (requireIndexes).
  */
 
 const MATCH_DAYS = 3;
@@ -495,6 +497,7 @@ async function addOne(l: AddLineValues, ctx: Ctx): Promise<{ result: Omit<AddLin
 
 /** Adds a batch of reviewed lines for one account. Safe to repeat: lines already added are reported, not added again. */
 export async function addStatementLines(input: AddLinesValues, userId: string): Promise<AddBatchResult> {
+  await requireIndexes(BankTransaction);
   const account = await BankAccount.findById(input.accountId, { kind: 1, archivedAt: 1, name: 1 }).lean();
   if (!account) throw notFound("The bank account");
   if (account.archivedAt) throw new AppError(`${account.name} is archived. Restore it on Cash & bank before adding its statement.`, "invalid");

@@ -3,6 +3,7 @@ import "server-only";
 import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
 import { Expense, ForecastSnapshot } from "@/server/models";
+import { requireIndexes } from "@/server/new-indexes";
 import { usageByItem } from "@/server/analytics/core";
 import { addDays, endOfDayIST, fromDateInput, monthKeyIST, startOfDayIST, toDateInput } from "@/lib/dates";
 import { formatCurrency, formatDate, formatNumber, round2 } from "@/lib/format";
@@ -69,6 +70,8 @@ async function projectSnapshots(now: Date): Promise<SnapshotInput[]> {
 /** Inserts the snapshots this month does not have yet. Returns how many were added. */
 async function insertMissing(inputs: SnapshotInput[], month: string): Promise<number> {
   if (!inputs.length) return 0;
+  // Without the unique kind+key+month index two first views at once could each store a full set.
+  await requireIndexes(ForecastSnapshot);
   const result = await ForecastSnapshot.bulkWrite(
     inputs.map((s) => ({
       updateOne: {

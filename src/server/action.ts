@@ -3,6 +3,7 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { connectDB } from "@/server/db";
+import { ensureNewCollectionIndexes } from "@/server/new-indexes";
 import { AppError, isDuplicateKeyError } from "@/server/errors";
 import { assertUser, can, type SessionUser } from "@/server/auth/session";
 import type { ActionResult } from "@/lib/action-result";
@@ -55,6 +56,8 @@ export function defineAction<S extends z.ZodType, R>(
         };
       }
       await connectDB();
+      // The collections added with Finance, Roles and Analytics get their indexes before their first write.
+      if (!options.readOnly) await ensureNewCollectionIndexes();
       const data = await handler(parsed.data, user);
       for (const path of options.revalidate ?? []) {
         if (Array.isArray(path)) revalidatePath(path[0], path[1]);

@@ -7,7 +7,7 @@ export const SETTINGS_RESOURCES: PermissionResource[] = [
     module: "settings",
     group: "Settings",
     label: "Team members",
-    description: "See the team. Create adds people, edit changes a person's role, name or password.",
+    description: "See the team. Create adds people, edit changes a person's role or name. Only admins can set a new password for someone.",
     actions: ["view", "create", "edit"],
     // Everyone could see the team list before roles existed; only admins could add people.
     memberDefault: ["view"],

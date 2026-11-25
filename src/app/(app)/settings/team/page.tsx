@@ -46,7 +46,8 @@ export default async function TeamPage() {
       isSelf: m.id === user.id,
       canRename: canEdit && (user.isAdmin || m.role !== ADMIN_ROLE || m.id === user.id),
       canChangeRole: manageable,
-      canSetPassword: manageable,
+      // Setting someone's password is for admins only, whatever their role allows.
+      canSetPassword: user.isAdmin && m.id !== user.id,
     };
   });
 

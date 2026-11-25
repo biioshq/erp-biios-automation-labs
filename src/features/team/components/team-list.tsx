@@ -30,7 +30,7 @@ function RoleBadge({ m }: { m: TeamListRow }) {
 
 /**
  * The team. Everyone with "settings.team:view" sees it; people who may edit get a menu on each row
- * (change role, edit name, set a new password).
+ * (change role, edit name, and for admins only, set a new password).
  */
 export function TeamList({ members, roles, canManage }: { members: TeamListRow[]; roles: RoleOption[]; canManage: boolean }) {
   return (

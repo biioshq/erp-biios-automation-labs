@@ -32,7 +32,7 @@ import type { TeamListRow } from "./team-list";
 
 type Dialogs = "role" | "name" | "password" | null;
 
-/** The menu on a team row: change role, edit name, set a new password. Only the allowed items show. */
+/** The menu on a team row: change role, edit name, set a new password (admins only). Only the allowed items show. */
 export function MemberActions({ member, roles }: { member: TeamListRow; roles: RoleOption[] }) {
   const [open, setOpen] = useState<Dialogs>(null);
   if (!member.canRename && !member.canChangeRole && !member.canSetPassword) return null;

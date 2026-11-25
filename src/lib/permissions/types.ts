@@ -10,7 +10,7 @@ export type PermissionAction = "view" | "create" | "edit" | "delete" | "export" 
 export type PermissionResource = {
   /** Stable key, stored in roles. Never rename one. */
   key: string;
-  module: "finance" | "inventory" | "analytics" | "tasks" | "settings";
+  module: "finance" | "inventory" | "analytics" | "tasks" | "hr" | "settings";
   /** Heading the resource sits under in the roles matrix. */
   group: string;
   label: string;

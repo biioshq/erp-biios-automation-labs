@@ -11,6 +11,7 @@ import { FINANCE_BOOKS_RESOURCES } from "./finance-books";
 import { INVENTORY_RESOURCES } from "./inventory";
 import { ANALYTICS_RESOURCES } from "./analytics";
 import { TASKS_RESOURCES } from "./tasks";
+import { HR_RESOURCES } from "./hr";
 import { DATA_PERMISSIONS, SETTINGS_RESOURCES } from "./settings";
 
 export type { DataPermission, Permission, PermissionAction, PermissionResource } from "./types";
@@ -35,6 +36,7 @@ export const MODULE_LABELS: Record<PermissionResource["module"], string> = {
   inventory: "Inventory",
   analytics: "Analytics & Planning",
   tasks: "Tasks",
+  hr: "HR",
   settings: "Settings",
 };
 
@@ -45,6 +47,7 @@ export const ALL_RESOURCES: PermissionResource[] = [
   ...INVENTORY_RESOURCES,
   ...ANALYTICS_RESOURCES,
   ...TASKS_RESOURCES,
+  ...HR_RESOURCES,
   ...SETTINGS_RESOURCES,
 ];
 

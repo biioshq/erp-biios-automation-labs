@@ -25,6 +25,9 @@ import "server-only";
  *   equityHolders ─< capitalEntries (capital, drawings, dividends, reserves)
  *   financeGroups (subgroups admins add under the built-in asset, liability and equity groups)
  * Analytics: scenarios (hypothetical only), forecastSnapshots (forecasts kept to compare with actuals)
+ * HR: attendance (one mark per employee per day) >── employees, hrHolidays, hrSettings (attendance rules),
+ *   payrollAdjustments (bonus / deduction per person per month), payrollRuns (finalised months). None of these
+ *   post to Expenses: salary expenses still come from the salary schedules in recurringExpenses.
  *
  * Money is stored in rupees as numbers rounded to paise (see round2).
  * Project spend, budget usage and inventory value are always computed from
@@ -59,3 +62,7 @@ export { Liability, type LiabilityDoc } from "./liability";
 export { EquityHolder, type EquityHolderDoc, CapitalEntry, type CapitalEntryDoc } from "./equity";
 export { Invoice, type InvoiceDoc } from "./invoice";
 export { Scenario, type ScenarioDoc, ForecastSnapshot, type ForecastSnapshotDoc } from "./scenario";
+export { Attendance, type AttendanceDoc } from "./attendance";
+export { HrHoliday, type HrHolidayDoc } from "./hr-holiday";
+export { HrSettings, type HrSettingsDoc } from "./hr-settings";
+export { PayrollAdjustment, type PayrollAdjustmentDoc, PayrollRun, type PayrollRunDoc } from "./payroll";

@@ -11,7 +11,8 @@ import { missingFrom } from "@/features/roles/model";
 /**
  * The rules for managing people, checked on the server for every change:
  * - nobody changes their own role, or sets their own password here;
- * - only the built-in Admin role gives the Admin role, or changes an admin's role or password;
+ * - only the built-in Admin role sets a new password for someone (setMemberPassword checks it first);
+ * - only the built-in Admin role gives the Admin role, or changes an admin's role;
  * - someone who is not an admin cannot give a role, or manage a person whose role, can do
  *   anything their own role cannot;
  * - there is always at least one admin.

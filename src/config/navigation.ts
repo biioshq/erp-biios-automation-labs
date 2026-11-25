@@ -5,7 +5,9 @@ import {
   ArrowUpFromLine,
   BadgeIndianRupee,
   Boxes,
+  CalendarCheck,
   CalendarDays,
+  CalendarX,
   CircleCheckBig,
   CircleDashed,
   CircleSlash,
@@ -40,6 +42,7 @@ import {
   FlaskConical,
   Gauge,
   HandCoins,
+  IdCard,
   History,
   Hourglass,
   IndianRupee,
@@ -52,6 +55,7 @@ import {
   PiggyBank,
   Plus,
   Scale,
+  Settings2,
   ShieldCheck,
   Store,
   Target,
@@ -65,8 +69,8 @@ import {
 
 /**
  * The single source of truth for navigation: the sidebar, breadcrumbs and the
- * command palette all read this. A future module (HR, CRM, Payroll …) is one
- * more entry in MODULES.
+ * command palette all read this. A future module (CRM …) is one more entry
+ * in MODULES.
  */
 
 export type NavItem = {
@@ -376,6 +380,29 @@ export const MODULES: NavModule[] = [
       { title: "Calendar", href: "/tasks/calendar", permission: "tasks.tasks:view", icon: CalendarDays, keywords: ["schedule", "due dates"] },
     ],
   },
+  {
+    // Last in the list, so nobody's start page moves: it is the first module a role opens.
+    id: "hr",
+    title: "HR",
+    icon: IdCard,
+    href: "/hr",
+    items: [
+      {
+        title: "Attendance",
+        href: "/hr/attendance",
+        permission: "hr.attendance:view",
+        icon: CalendarCheck,
+        keywords: ["hr", "attendance", "present", "absent", "in time", "out time", "leave", "salary"],
+        children: [
+          { title: "Daily attendance", tab: "Daily", href: "/hr/attendance", permission: "hr.attendance:view", icon: CalendarCheck, keywords: ["mark attendance", "in time", "out time", "present", "absent", "half day", "late"] },
+          { title: "Monthly register", tab: "Monthly", href: "/hr/attendance/register", permission: "hr.attendance:view", icon: CalendarDays, keywords: ["muster roll", "attendance register", "month"] },
+          { title: "Leaves", href: "/hr/attendance/leaves", permission: "hr.leaves:view", icon: CalendarX, keywords: ["leave", "casual leave", "sick leave", "leave balance", "time off"] },
+          { title: "Salary from attendance", tab: "Salary", href: "/hr/attendance/salary", permission: "hr.salary:view", icon: IndianRupee, keywords: ["payroll", "salary", "loss of pay", "lop", "overtime", "payable days"] },
+          { title: "Attendance rules", tab: "Rules", href: "/hr/attendance/rules", permission: "hr.settings:view", icon: Settings2, keywords: ["office hours", "holidays", "weekly off", "leave types", "late", "overtime"] },
+        ],
+      },
+    ],
+  },
 ];
 
 /**
@@ -405,6 +432,8 @@ export const QUICK_ACTIONS: NavItem[] = [
   { title: "Record capital", href: "/finance/equity/owners?new=1", permission: "finance.equity:create", icon: Landmark, keywords: ["owner", "investor", "investment"] },
   { title: "Record wastage", href: "/inventory/wastage", permission: "inventory.wastage:create", icon: Trash2, keywords: ["damaged", "expired", "lost"] },
   { title: "New what-if scenario", href: "/analytics/scenarios/new", permission: "analytics.scenarios:create", icon: FlaskConical, keywords: ["simulate", "plan"] },
+  { title: "Mark attendance", href: "/hr/attendance", permission: "hr.attendance:create", icon: CalendarCheck, keywords: ["present", "absent", "in time", "out time", "hr"] },
+  { title: "Record leave", href: "/hr/attendance/leaves?new=1", permission: "hr.leaves:create", icon: CalendarX, keywords: ["leave", "time off", "hr"] },
 ];
 
 const matches = (href: string, exact: boolean | undefined, pathname: string) =>

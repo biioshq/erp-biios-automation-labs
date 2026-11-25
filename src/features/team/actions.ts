@@ -49,9 +49,11 @@ export const renameMember = defineAction(
   { permission: "settings.team:edit", revalidate: REVALIDATE, message: "Name changed" },
 );
 
+/** Admins only: no role, however it is set up, can set another person's password. */
 export const setMemberPassword = defineAction(
   setPasswordSchema,
   async (input, user) => {
+    if (!user.isAdmin) throw new AppError("Only an admin can set a new password for someone.", "forbidden");
     const target = await loadTarget(input.userId);
     await assertMayManage(user, target, "password");
     const result = await setUserPassword(target.id, input.password, { signOut: input.signOutOthers, actorId: user.id });

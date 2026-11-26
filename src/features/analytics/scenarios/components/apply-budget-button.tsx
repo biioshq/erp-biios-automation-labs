@@ -49,7 +49,7 @@ export function ApplyBudgetButton({ target }: { target: ScenarioBudgetTarget }) 
         </span>
       }
       onConfirm={async () => {
-        const result = await applyScenarioBudget({ id: target.scenarioId, expectedBudget: target.currentBudget });
+        const result = await applyScenarioBudget({ id: target.scenarioId, expectedBudget: target.currentBudget, expectedProposed: target.proposedBudget });
         if (!result.ok) {
           toast.error(result.error);
           return false;

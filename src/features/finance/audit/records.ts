@@ -4,6 +4,7 @@ import type { Types } from "mongoose";
 import { diffSnapshots, snapshotChanges, type AuditChange, type AuditEntry } from "@/server/audit";
 import { formatCurrency, round2 } from "@/lib/format";
 import { totalTax } from "@/lib/gst";
+import { paymentState } from "@/lib/payments";
 
 /**
  * What the audit trail records about expenses, income and invoices: a flat snapshot of the fields
@@ -32,6 +33,7 @@ type ExpenseLike = {
   gst?: Gst;
   receipt?: unknown;
   prepaid?: { from?: Date | null; to?: Date | null } | null;
+  payments?: { date: Date; amount: number; paymentMethod?: string | null }[] | null;
 };
 
 export const isSalary = (...categories: (string | null | undefined)[]) => categories.includes("salaries");
@@ -53,6 +55,8 @@ export function expenseSnapshot(e: ExpenseLike): Record<string, unknown> {
     department: e.department,
     paymentMethod: e.paymentMethod,
     account: e.account,
+    // What is paid so far, by the shared rule (no payments list: paid in full unless On credit).
+    paid: paymentState({ amount: e.amount, date: e.date, paymentMethod: e.paymentMethod ?? "", payments: e.payments?.map((p) => ({ ...p, paymentMethod: p.paymentMethod ?? "" })) }).paid,
     gstin: g?.gstin,
     invoiceNumber: g?.invoiceNumber,
     taxableAmount: g ? round2(g.taxableAmount ?? 0) : null,
@@ -65,7 +69,7 @@ export function expenseSnapshot(e: ExpenseLike): Record<string, unknown> {
 }
 
 /** What a new or deleted expense is remembered by. */
-const EXPENSE_KEY_FIELDS = ["vendor", "description", "amount", "date", "dueDate", "category", "project", "stage", "paymentMethod", "account"];
+const EXPENSE_KEY_FIELDS = ["vendor", "description", "amount", "date", "dueDate", "category", "project", "stage", "paymentMethod", "account", "paid"];
 
 const pick = (snap: Record<string, unknown>, fields: string[]) => Object.fromEntries(fields.map((f) => [f, snap[f]]));
 

@@ -87,6 +87,7 @@ export const AUDIT_FIELDS: Record<string, { label: string; kind: AuditFieldKind 
   interState: { label: "Inter-state", kind: "bool" },
   lines: { label: "Lines", kind: "text" },
   status: { label: "Status", kind: "text" },
+  paid: { label: "Paid", kind: "money" },
   paidAmount: { label: "Payment", kind: "money" },
   paidOn: { label: "Paid on", kind: "date" },
   bankLine: { label: "Bank line", kind: "text" },

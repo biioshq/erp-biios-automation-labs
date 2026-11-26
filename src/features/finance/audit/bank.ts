@@ -7,7 +7,7 @@ import type { AuditEntityType } from "@/lib/audit";
 import { toDateInput } from "@/lib/dates";
 import { describeLinks, type LinkRef } from "@/features/finance/bank-statements/server/links";
 import type { AddLineValues } from "@/features/finance/bank-statements/schemas";
-import { expenseLabel, incomeLabel, isSalary } from "./records";
+import { expenseLabel, incomeLabel, invoiceLabel, isSalary } from "./records";
 
 /**
  * Audit entries for bank statement lines: one per record a line created, paid or was matched to
@@ -19,7 +19,16 @@ const oid = (id: string) => new Types.ObjectId(id);
 const validIds = (ids: string[]) => [...new Set(ids)].filter((id) => Types.ObjectId.isValid(id)).map(oid);
 
 /** The record a link points at, as the audit trail names it (a payment belongs to its expense, a repayment to its loan). */
-type Target = { type: AuditEntityType; id: string; label: string | null; salary: boolean; payment?: string; invoice?: string | null };
+type Target = {
+  type: AuditEntityType;
+  id: string;
+  label: string | null;
+  salary: boolean;
+  payment?: string;
+  /** The invoice an income record settles: its number for the entry, and the invoice for its own History. */
+  invoice?: string | null;
+  invoiceRef?: { id: string; label: string } | null;
+};
 
 const ENTITY_OF: Record<string, AuditEntityType> = {
   expense: "expense",
@@ -44,8 +53,8 @@ async function resolveTargets(refs: LinkRef[]): Promise<Map<string, Target>> {
     describeLinks(refs.filter((r) => ["capitalEntry", "liability", "accountTransfer"].includes(r.kind))),
   ]);
   const invoiceIds = incomes.flatMap((i) => (i.invoice ? [i.invoice] : []));
-  const invoiceNumbers = new Map(
-    invoiceIds.length ? (await Invoice.find({ _id: { $in: invoiceIds } }, { number: 1 }).lean()).map((v) => [String(v._id), v.number]) : [],
+  const invoices = new Map(
+    invoiceIds.length ? (await Invoice.find({ _id: { $in: invoiceIds } }, { number: 1, client: 1 }).lean()).map((v) => [String(v._id), v]) : [],
   );
   for (const e of expenses) {
     const t = { type: "expense" as const, id: String(e._id), label: expenseLabel(e), salary: isSalary(e.category) };
@@ -53,12 +62,14 @@ async function resolveTargets(refs: LinkRef[]): Promise<Map<string, Target>> {
     for (const p of e.payments ?? []) out.set(`expensePayment:${p._id}`, { ...t, payment: String(p._id) });
   }
   for (const i of incomes) {
+    const invoice = i.invoice ? invoices.get(String(i.invoice)) : undefined;
     out.set(`income:${i._id}`, {
       type: "income",
       id: String(i._id),
       label: incomeLabel(i),
       salary: false,
-      invoice: i.invoice ? (invoiceNumbers.get(String(i.invoice)) ?? null) : null,
+      invoice: invoice?.number ?? null,
+      invoiceRef: invoice ? { id: String(invoice._id), label: invoiceLabel(invoice) } : null,
     });
   }
   for (const l of loans) {
@@ -128,7 +139,19 @@ export async function auditStatementLines(
       const target = targets.get(`${r.link!.kind}:${r.link!.id}`);
       if (!target) return [];
       const entry = lineEntry(l, r, target, accountId);
-      return [{ ...entry, source: "bank_statement" as const, ref: { ...entry.ref, statement: statementId ? String(statementId) : undefined, line: lineOf.get(r.hash) } }];
+      const ref = { statement: statementId ? String(statementId) : undefined, line: lineOf.get(r.hash) };
+      const out: AuditEntry[] = [{ ...entry, source: "bank_statement", ref: { ...entry.ref, ...ref } }];
+      // A receipt added from the statement and applied to an invoice shows on the invoice too.
+      if (r.status === "added" && target.invoiceRef) {
+        out.push({
+          action: "linked",
+          entity: { type: "invoice", id: target.invoiceRef.id, label: target.invoiceRef.label },
+          note: `Receipt ${target.label ?? target.id} applied from the bank statement`,
+          source: "bank_statement",
+          ref: { ...ref, income: target.id },
+        });
+      }
+      return out;
     });
   });
 }

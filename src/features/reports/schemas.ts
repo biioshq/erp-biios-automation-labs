@@ -65,6 +65,8 @@ const filtersSchema = z.object({
   status: knownList(valuesOf(PAYMENT_STATUSES)),
   nature: knownList(valuesOf(EXPENSE_NATURES)),
   department: knownList(["none", ...valuesOf(DEPARTMENTS)]),
+  /** Only expenses from or paid through a bank statement line. */
+  bank: knownList(["yes"]),
 });
 
 export const reportQuerySchema = filtersSchema.extend({ format: reportFormatSchema.default("pdf") });
@@ -94,7 +96,7 @@ export function parseReportFilters(sp: URLSearchParams | Record<string, string |
 export function filtersForReport(type: ReportType, filters: ReportFilters): ReportFilters {
   if (isLegacyReport(type)) {
     // Payment status, direct / indirect and department narrow the expense report only.
-    const expenseOnly = { status: [], nature: [], department: [], customer: [] };
+    const expenseOnly = { status: [], nature: [], department: [], customer: [], bank: [] };
     if (type === "expense") return { ...filters, customer: [] };
     if (type !== "ca") return { ...filters, ...expenseOnly };
     return { ...filters, ...expenseOnly, q: "", stage: [], paymentMethod: [], source: [], movementType: [], item: [], movements: false };
@@ -159,6 +161,7 @@ export function reportQueryString(filters: Partial<ReportFilters>, format?: Repo
     ["status", filters.status],
     ["nature", filters.nature],
     ["department", filters.department],
+    ["bank", filters.bank],
   ];
   for (const [key, values] of lists) if (values?.length) p.set(key, values.join(","));
   if (filters.q) p.set("q", filters.q);

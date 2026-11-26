@@ -81,6 +81,7 @@ export async function buildExpenseReport(f: ReportFilters): Promise<ReportData> 
         ...(f.status?.length ? { status: f.status } : {}),
         ...(f.nature?.length ? { nature: f.nature } : {}),
         ...(f.department?.length ? { department: f.department } : {}),
+        ...(f.bank?.length ? { bank: f.bank } : {}),
       },
     },
     now,

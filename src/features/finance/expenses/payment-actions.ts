@@ -5,7 +5,8 @@ import { AppError } from "@/server/errors";
 import { expensePaymentIdSchema, expensePaymentSchema, markExpensePaidSchema, markExpensesPaidSchema, undoExpensePaymentsSchema } from "./schemas";
 import { applyExpensePayment, removeExpensePayment } from "./payment-core";
 
-const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
+// Analytics shows paid and outstanding per project too.
+const REVALIDATE: [string, "layout"][] = [["/finance", "layout"], ["/analytics", "layout"]];
 
 /**
  * Records a payment against an expense (Record payment). The guarded write is applyExpensePayment

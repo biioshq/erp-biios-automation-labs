@@ -434,7 +434,7 @@ export function ProjectsView({
               </p>
             </div>
           )}
-          initialHidden={["received", "remaining"]}
+          initialHidden={["received"]}
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">

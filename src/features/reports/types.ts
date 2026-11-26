@@ -76,6 +76,8 @@ export type ReportFilters = {
   status?: string[];
   nature?: string[];
   department?: string[];
+  /** Expense report only: "yes" keeps expenses from or paid through a bank statement line. */
+  bank?: string[];
 };
 
 export type ReportPreviewSection = ReportSection & { totalRows: number };

@@ -61,13 +61,13 @@ export const addStatementBatch = defineAction(
     assertMayAddLines(user, input.lines);
     return addStatementLines(input, user.id, { salaries: can(user, "data.salaries") });
   },
-  { permission: "finance.bank_statements:create", revalidate: [["/finance", "layout"]] },
+  { permission: "finance.bank_statements:create", revalidate: [["/finance", "layout"], ["/analytics", "layout"]] },
 );
 
 /** Unties a line from its record. The record itself is never changed or deleted (see server/unmatch.ts). */
 export const unmatchStatementLine = defineAction(statementLineIdSchema, async ({ id }, user) => unmatchLine(id, user.id), {
   permission: "finance.bank_statements:edit",
-  revalidate: [["/finance", "layout"]],
+  revalidate: [["/finance", "layout"], ["/analytics", "layout"]],
 });
 
 /**

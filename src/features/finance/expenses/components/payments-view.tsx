@@ -100,7 +100,15 @@ function ViewLink({ id }: { id: string }) {
 /** "No due date" when none was saved: the status still counts the expense date as due. */
 function DueDateCell({ row }: { row: ExpenseRow }) {
   if (row.payment.outstanding <= 0) return <span className="text-muted-foreground/60">-</span>;
-  if (!row.dueDate) return <span className="whitespace-nowrap text-xs text-muted-foreground">No due date</span>;
+  if (!row.dueDate) {
+    return (
+      <div className="whitespace-nowrap text-xs text-muted-foreground">
+        <p>No due date</p>
+        {/* The status counts from the expense date when no due date was saved. */}
+        {row.payment.status === "overdue" ? <p className="text-[11px]">Counted from {formatDate(row.date)}</p> : null}
+      </div>
+    );
+  }
   return (
     <span className={cn("whitespace-nowrap", row.payment.status === "overdue" ? "font-medium text-danger" : "text-muted-foreground")}>
       {formatDate(row.dueDate)}

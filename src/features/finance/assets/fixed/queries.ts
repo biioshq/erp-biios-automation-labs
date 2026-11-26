@@ -302,6 +302,11 @@ function buildSchedule(a: AssetLean, now: Date): { years: ScheduleYear[]; cut: b
   return { years, cut };
 }
 
+/** One expense that can be linked as a new asset's purchase, or null when it cannot (taken, salary, stock...). */
+export async function findLinkableExpense(id: string): Promise<LinkableExpense | null> {
+  return (await findLinkableExpenses(undefined, undefined, id))[0] ?? null;
+}
+
 export async function getAsset(id: string): Promise<AssetDetail | null> {
   if (!Types.ObjectId.isValid(id)) return null;
   await connectDB();
@@ -356,8 +361,9 @@ export async function getAsset(id: string): Promise<AssetDetail | null> {
  * Company expenses that can be linked as an asset's purchase: manual or recurring ones, not salary,
  * not prepaid, not already the purchase of another asset. Newest first.
  */
-export async function findLinkableExpenses(q: string | undefined, assetId?: string): Promise<LinkableExpense[]> {
+export async function findLinkableExpenses(q: string | undefined, assetId?: string, onlyId?: string): Promise<LinkableExpense[]> {
   await connectDB();
+  if (onlyId !== undefined && !Types.ObjectId.isValid(onlyId)) return [];
   const self = assetId && Types.ObjectId.isValid(assetId) ? oid(assetId) : null;
   const taken = await FixedAsset.find({ "funding.expense": { $type: "objectId" }, ...(self ? { _id: { $ne: self } } : {}) }, { funding: 1 }).lean();
   const takenIds = taken.map((t) => t.funding?.expense).filter((v): v is Types.ObjectId => Boolean(v));
@@ -373,6 +379,8 @@ export async function findLinkableExpenses(q: string | undefined, assetId?: stri
     const re = searchRegex(q);
     (filter.$and as Record<string, unknown>[]).push({ $or: [{ number: re }, { vendor: re }, { description: re }, { "gst.invoiceNumber": re }] });
   }
+  // One expense by id (a link that opens the form prefilled), under the same rules as the search.
+  if (onlyId !== undefined) (filter.$and as Record<string, unknown>[]).push({ _id: oid(onlyId) });
   const docs = await Expense.find(filter)
     .select({ number: 1, vendor: 1, date: 1, amount: 1, gst: 1, category: 1, description: 1, paymentMethod: 1, payments: 1, dueDate: 1 })
     .sort({ date: -1, _id: -1 })

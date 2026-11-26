@@ -9,6 +9,7 @@ import { round2 } from "@/lib/format";
 import type { SearchParams } from "@/lib/list-params";
 import { labelsFor, type AssetKind } from "../labels";
 import { loadAssetPage } from "../page-data";
+import { findLinkableExpense } from "../queries";
 import { depreciationSummary } from "@/features/finance/assets/depreciation/queries";
 import { AssetsView } from "./assets-view";
 import { can, requireUser } from "@/server/auth/session";
@@ -18,6 +19,9 @@ export async function AssetRegisterPage({ kind, searchParams }: { kind: AssetKin
   const labels = labelsFor(kind);
   const user = await requireUser();
   const { register, groups, layout, options } = await loadAssetPage(kind, searchParams);
+  // ?new=1&expense=<id> (from a bank statement's results): the form opens funded by that expense.
+  const expenseParam = typeof searchParams.expense === "string" ? searchParams.expense : null;
+  const fromExpense = searchParams.new === "1" && expenseParam && can(user, "finance.fixed_assets:create") ? await findLinkableExpense(expenseParam) : null;
   const t = register.totals;
   const fy = financialYearIST();
   // Unfiltered, the charge comes from the depreciation summary, which also counts assets disposed
@@ -60,7 +64,12 @@ export async function AssetRegisterPage({ kind, searchParams }: { kind: AssetKin
         <StatCard label={`${labels.accumulated}${suffix}`} value={<Money value={t.accumulated} compact />} icon={Layers} hint="Charged so far on assets held" />
         <StatCard label={`${labels.charge} in ${fy.label}${suffix}`} value={<Money value={chargedThisYear} compact />} icon={TrendingDown} hint="In the P&L this financial year" />
       </StatGrid>
-      <AssetsView kind={kind} register={register} groups={groups} options={options} layout={layout} />
+      {expenseParam && searchParams.new === "1" && !fromExpense ? (
+        <p className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm" role="status">
+          That expense cannot be linked to a new asset: it may already be another asset&apos;s purchase, or it is not a company purchase. Pick the expense in the form instead.
+        </p>
+      ) : null}
+      <AssetsView kind={kind} register={register} groups={groups} options={options} layout={layout} fromExpense={fromExpense} />
     </Page>
   );
 }

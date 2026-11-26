@@ -16,6 +16,7 @@ import type { LineDecision, ReviewLine, StatementMethod, StatementPickers } from
 import { STATEMENT_METHOD_OPTIONS } from "../schemas";
 import { actionsFor, amountOf, decisionProblem, isWithdrawal, withAction } from "../review-state";
 import { CheckBadge } from "./line-badges";
+import { lineKindLabel, lineKindOf } from "../kinds";
 
 const NONE = "__none";
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -115,7 +116,7 @@ export function LineEditor({
       {line && decision ? (
         <>
           <FormSheetBody className="space-y-5">
-            <LineFacts line={line} />
+            <LineFacts line={line} decision={decision} />
             {line.imported ? (
               <p className="rounded-lg border bg-muted/40 p-3 text-sm">
                 Imported from an earlier statement on {formatDate(line.imported.on)}. Nothing is added for it again.
@@ -145,7 +146,8 @@ export function LineEditor({
   );
 }
 
-function LineFacts({ line }: { line: ReviewLine }) {
+function LineFacts({ line, decision }: { line: ReviewLine; decision: LineDecision }) {
+  const kind = lineKindOf(isWithdrawal(line) ? "dr" : "cr", line.narrationKind ?? null, line.imported ? line.imported.action : decision.action);
   return (
     <div className="space-y-3 rounded-lg border p-3 text-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -154,6 +156,20 @@ function LineFacts({ line }: { line: ReviewLine }) {
       </div>
       <p className="[overflow-wrap:anywhere]">{line.narration || "No narration"}</p>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <dt>Type</dt>
+        <dd className="text-foreground">{lineKindLabel(kind)}</dd>
+        {line.vendor ? (
+          <>
+            <dt>Vendor column</dt>
+            <dd className="[overflow-wrap:anywhere] text-foreground">{line.vendor}</dd>
+          </>
+        ) : null}
+        {line.category ? (
+          <>
+            <dt>Category column</dt>
+            <dd className="[overflow-wrap:anywhere] text-foreground">{line.category}</dd>
+          </>
+        ) : null}
         {line.reference ? (
           <>
             <dt>Reference</dt>

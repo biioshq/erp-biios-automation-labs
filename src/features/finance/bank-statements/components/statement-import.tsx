@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, RefreshCw, Upload } from "lucide-react";
+import { ArrowRight, FileText, Landmark, RefreshCw, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -19,7 +19,7 @@ import type { BankAccountOption } from "@/server/lookups";
 import type { BankLineAction } from "@/lib/constants";
 import { addStatementBatch, reviewStatement } from "../actions";
 import { ADD_BATCH } from "../schemas";
-import { autoMapping, mappingProblems } from "../parse/columns";
+import { amountLayout, autoMapping, mappingProblems } from "../parse/columns";
 import { buildStatement } from "../parse/statement";
 import type { AddLineResult, ColumnRole, LineDecision, ParsedStatement, ReadStatementResult, ReviewLine, StatementPickers } from "../types";
 import { REVIEW_FILTERS, actionFits, amountOf, decisionProblem, inFilter, notAddedCsv, toWire, wireDecision, withAction, type ReviewFilter } from "../review-state";
@@ -28,11 +28,14 @@ import { StatementOverview } from "./statement-overview";
 import { ReviewTable, type TableRowState } from "./review-table";
 import { LineEditor } from "./line-editor";
 import { BulkBar, type BulkChange } from "./bulk-bar";
-import { AddResult, type NotAdded } from "./add-result";
+import { AddResult, type AssetCandidate, type NotAdded } from "./add-result";
+import { StatementPreview } from "./statement-preview";
 
 /** Like the Excel import: below Vercel's 4.5 MB request limit. */
 const MAX_BYTES = 4 * 1024 * 1024;
 const PAGE_SIZE = 50;
+/** Lines shown under the columns before the review, to check they are read right. */
+const PREVIEW_ROWS = 5;
 const ACCEPT = ".csv,.txt,.xlsx,.xls,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
 
 type Review = { accountId: string; statement: ParsedStatement; lines: ReviewLine[]; pickers: StatementPickers };
@@ -93,6 +96,9 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   const inputRef = useRef<HTMLInputElement>(null);
 
   const problemsOfMapping = headerIndex >= 0 ? mappingProblems(mapping) : ["no header"];
+  const layout = headerIndex >= 0 ? amountLayout(mapping) : null;
+  // Before the review the columns are always open for a check; after it, on request.
+  const mappingOpen = !review || showMapping;
   const parsed = useMemo(
     () => (file && headerIndex >= 0 && mappingProblems(mapping).length === 0 ? buildStatement(file.grid, headerIndex, mapping) : null),
     [file, headerIndex, mapping],
@@ -183,9 +189,8 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
       setFile({ ...read, size: f.size });
       setHeaderIndex(read.headerIndex);
       setMapping(read.mapping);
-      const ok = read.headerIndex >= 0 && mappingProblems(read.mapping).length === 0;
-      setShowMapping(!ok);
-      if (ok) await runReview(buildStatement(read.grid, read.headerIndex, read.mapping), accountId);
+      // The columns are always shown for a check first; the review starts with Continue to review.
+      setShowMapping(true);
     } catch (error) {
       setFileError(error instanceof Error ? error.message : "This statement could not be read.");
     } finally {
@@ -209,7 +214,7 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   function changeAccount(next: string) {
     setAccountId(next);
     // Matches and suggestions belong to one account: check the lines again for the new one.
-    if (parsed) void runReview(parsed, next);
+    if (parsed && review) void runReview(parsed, next);
   }
 
   function setDecision(index: number, d: LineDecision) {
@@ -330,6 +335,29 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
     return out;
   }, [review, run, selected, problems]);
 
+  // Lines that pay an unpaid bill: the bill is marked paid with the statement's date, no expense is made.
+  const billSummary = useMemo(
+    () =>
+      rows.reduce(
+        (t, r) => (!r.line.imported && r.decision.action === "match" && r.decision.matchKey?.startsWith("bill:") ? { count: t.count + 1, amount: t.amount + amountOf(r.line), ticked: t.ticked + (r.selected ? 1 : 0) } : t),
+        { count: 0, amount: 0, ticked: 0 },
+      ),
+    [rows],
+  );
+
+  // New equipment expenses, offered for the asset register on the results screen.
+  const assets: AssetCandidate[] = useMemo(() => {
+    if (!review || !run) return [];
+    const index = new Map(review.lines.map((l, i) => [l.hash, i]));
+    return run.results.flatMap((r) => {
+      const i = index.get(r.hash);
+      const d = i === undefined ? undefined : decisions[i];
+      return r.status === "added" && r.recordKind === "expense" && r.recordId && d?.action === "expense" && d.category === "equipment"
+        ? [{ id: r.recordId, label: r.label ?? "Expense", line: r.line }]
+        : [];
+    });
+  }, [review, run, decisions]);
+
   if (!accounts.length) {
     return <EmptyState title="No bank account is set up" description="Add the account on Cash & bank first." />;
   }
@@ -339,6 +367,7 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
       <AddResult
         results={run.results}
         notAdded={notAdded}
+        assets={assets}
         statementId={run.statementId}
         onDownload={() => download(`${file?.fileName.replace(/\.[^.]+$/, "") ?? "statement"}-not-added.csv`, notAddedCsv(notAdded))}
         onReset={resetAll}
@@ -439,8 +468,8 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
       {file ? (
         <div className="space-y-3 rounded-xl border p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold">Columns</p>
+            <div className="min-w-0 space-y-0.5">
+              <p className="text-sm font-semibold">{review ? "Columns" : "Step 1 of 2: check the columns"}</p>
               <p className="text-xs text-muted-foreground">
                 {problemsOfMapping.length
                   ? "Some columns could not be recognised. Pick them below."
@@ -449,33 +478,49 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
                       .filter(Boolean)
                       .join(", ")}`}
               </p>
+              {layout ? (
+                <p className="text-xs">
+                  <span className="font-medium">{layout}.</span>{" "}
+                  <span className="text-muted-foreground">
+                    {mapping.includes("vendor") ? "Vendor from its own column." : "Vendor read from the narration."}
+                    {mapping.includes("category") ? " Category from its own column." : ""}
+                  </span>
+                </p>
+              ) : null}
             </div>
-            <Button type="button" size="sm" variant="outline" onClick={() => setShowMapping((v) => !v)} disabled={busy}>
-              {showMapping ? "Hide columns" : "Correct the columns"}
-            </Button>
+            {review ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => setShowMapping((v) => !v)} disabled={busy}>
+                {showMapping ? "Hide columns" : "Correct the columns"}
+              </Button>
+            ) : null}
           </div>
-          {showMapping ? (
+          {mappingOpen ? (
             <MappingPanel grid={file.grid} headerIndex={headerIndex} mapping={mapping} onHeaderChange={changeHeader} onMappingChange={changeMapping} disabled={busy} />
           ) : null}
           {file.notes.length ? <p className="text-sm text-muted-foreground">{file.notes.join(" ")}</p> : null}
+          {parsed && !review ? <StatementPreview lines={parsed.lines.slice(0, PREVIEW_ROWS)} total={parsed.lines.length} mapping={mapping} /> : null}
+          {!review ? (
+            <div className="flex flex-wrap items-center gap-3 border-t pt-3">
+              <Button type="button" onClick={() => parsed && void runReview(parsed, accountId)} disabled={busy || !parsed || !parsed.lines.length}>
+                {reviewing ? <Spinner /> : <ArrowRight />}
+                Continue to review
+              </Button>
+              <p className="min-w-0 flex-1 basis-56 text-xs text-muted-foreground">
+                {parsed
+                  ? `${plural(parsed.lines.length, "line", "lines")} will be checked against expenses, income, unpaid bills, loans and transfers. Nothing is saved yet.`
+                  : "Pick the columns above to read the lines."}
+              </p>
+              {reviewError ? (
+                <p className="w-full text-sm text-danger" role="alert">
+                  {reviewError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
       {parsed ? <StatementOverview statement={parsed} bank={file?.bank ?? null} /> : null}
-
-      {parsed && !review && !reviewing ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" onClick={() => void runReview(parsed, accountId)} disabled={busy || !parsed.lines.length}>
-            <RefreshCw />
-            Check {plural(parsed.lines.length, "line", "lines")} against the books
-          </Button>
-          {reviewError ? (
-            <p className="text-sm text-danger" role="alert">
-              {reviewError}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
 
       {reviewing ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
@@ -485,6 +530,19 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
 
       {review && ctx ? (
         <div className="space-y-3">
+          {billSummary.count ? (
+            <p className="flex items-start gap-2 rounded-lg border border-brand/30 bg-brand/5 px-3 py-2 text-sm" role="status">
+              <Landmark className="mt-0.5 size-4 shrink-0 text-brand-ink" aria-hidden />
+              <span>
+                <span className="font-medium">
+                  {plural(billSummary.count, "line settles", "lines settle")} outstanding payments (<Money value={billSummary.amount} exact />).
+                </span>{" "}
+                <span className="text-muted-foreground">
+                  {billSummary.ticked === billSummary.count ? "All are ticked." : `${formatNumber(billSummary.ticked)} ticked.`} Each bill is marked paid on the statement&apos;s date; no new expense is made.
+                </span>
+              </span>
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <ToggleGroup
               type="single"

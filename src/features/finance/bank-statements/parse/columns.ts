@@ -22,6 +22,8 @@ export const COLUMN_ROLES: { value: ColumnRole; label: string }[] = [
   { value: "drcr", label: "Dr / Cr of the amount" },
   { value: "balance", label: "Balance" },
   { value: "balanceSide", label: "Dr / Cr of the balance" },
+  { value: "vendor", label: "Vendor / beneficiary / payer" },
+  { value: "category", label: "Category" },
 ];
 
 /** The header rows are looked for in the first rows only; bank statements start with a few lines about the account. */
@@ -54,7 +56,7 @@ export function roleOf(header: string): ColumnRole | null {
  * The role of every column. A role is given once (the first column wins), except that a Dr / Cr
  * column right after the balance is the balance's side (Kotak prints one after each).
  */
-export function autoMapping(headers: string[]): (ColumnRole | null)[] {
+function baseMapping(headers: string[]): (ColumnRole | null)[] {
   const used = new Set<ColumnRole>();
   const out: (ColumnRole | null)[] = [];
   headers.forEach((h, i) => {
@@ -81,6 +83,40 @@ export function autoMapping(headers: string[]): (ColumnRole | null)[] {
   return out;
 }
 
+/** Words around a name that make the column a number or a bank, not the party ("Beneficiary Account No", "Payee IFSC"). */
+const NOT_A_NAME = /(^| )(account|acct|a c|ac|ifsc|bank|branch|no|number|id|code|vpa|upi|mobile|phone|email|address|type)( |$)/;
+
+/**
+ * The optional columns some files carry: the vendor, beneficiary or payer, and a category. Only
+ * looked at for columns the reader does not use otherwise, so finding the header row, reading a
+ * PDF's columns and every line's hash stay exactly as they were.
+ */
+export function optionalRoleOf(header: string): "vendor" | "category" | null {
+  const k = headerKey(header);
+  if (!k) return null;
+  if (/(^| )categor(y|ies)( |$)|^(expense|income|ledger) head$|^head$|^tags?$/.test(k)) return "category";
+  if (NOT_A_NAME.test(k)) return null;
+  if (/(^| )(beneficiary|payee|payer|party|remitter|counterparty|counter party|vendor|supplier|merchant)( |$)|^name$|^(paid to|received from)$/.test(k)) return "vendor";
+  return null;
+}
+
+/**
+ * The role of every column: the columns a statement is read with (see baseMapping), then the
+ * optional vendor and category columns among the ones left over, the first of each.
+ */
+export function autoMapping(headers: string[]): (ColumnRole | null)[] {
+  const out = baseMapping(headers);
+  const used = new Set<ColumnRole>();
+  headers.forEach((h, i) => {
+    if (out[i] !== null) return;
+    const role = optionalRoleOf(h);
+    if (!role || used.has(role)) return;
+    used.add(role);
+    out[i] = role;
+  });
+  return out;
+}
+
 /** Problems that stop the lines being read with this mapping, in plain words. */
 export function mappingProblems(mapping: (ColumnRole | null)[]): string[] {
   const has = (r: ColumnRole) => mapping.includes(r);
@@ -91,9 +127,20 @@ export function mappingProblems(mapping: (ColumnRole | null)[]): string[] {
   return problems;
 }
 
+/** How the amounts are laid out, in plain words, for the mapping step. Null until the amount columns are picked. */
+export function amountLayout(mapping: (ColumnRole | null)[]): string | null {
+  const has = (r: ColumnRole) => mapping.includes(r);
+  if (has("withdrawal") && has("deposit")) return "Separate withdrawal and deposit columns";
+  if (has("amount")) return has("drcr") ? "One amount column with Dr/Cr" : "One amount column with signs";
+  if (has("withdrawal")) return "Only a withdrawal column: its sign tells the side";
+  if (has("deposit")) return "Only a deposit column: its sign tells the side";
+  return null;
+}
+
 /** How well a row reads as the column names: the roles found, and whether it is enough to read lines. */
 export function headerScore(cells: string[]): { score: number; usable: boolean } {
-  const mapping = autoMapping(cells);
+  // The optional vendor and category columns never count here, so the header row found stays the same.
+  const mapping = baseMapping(cells);
   const roles = new Set(mapping.filter((r): r is ColumnRole => Boolean(r)));
   return { score: roles.size, usable: roles.size >= 3 && mappingProblems(mapping).length === 0 };
 }

@@ -3,6 +3,7 @@ import "server-only";
 import {
   AccountTransfer,
   BankAccount,
+  BankPartyRule,
   BankStatement,
   BankTransaction,
   CapitalEntry,
@@ -32,6 +33,7 @@ type IndexedModel = { modelName: string; createIndexes(): Promise<unknown> };
 const NEW_COLLECTION_MODELS: IndexedModel[] = [
   AccountTransfer,
   BankAccount,
+  BankPartyRule,
   BankStatement,
   BankTransaction,
   CapitalEntry,

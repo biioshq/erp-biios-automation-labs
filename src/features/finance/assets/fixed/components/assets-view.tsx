@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { deleteFixedAsset, fetchFixedAsset } from "../actions";
 import { labelsFor, type AssetKind } from "../labels";
 import { ASSET_STATUSES } from "../schemas";
-import type { AssetDetail, AssetGroupNode, AssetRegister, AssetRow } from "../types";
+import type { AssetDetail, AssetGroupNode, AssetRegister, AssetRow, LinkableExpense } from "../types";
 import { ConditionBadge, methodText } from "./asset-badges";
 import { AssetDetailSkeleton, AssetDetailView } from "./asset-detail";
 import { AssetForm, type AssetFormOptions } from "./asset-form";
@@ -167,6 +167,7 @@ export function AssetsView({
   groups,
   options,
   layout,
+  fromExpense = null,
 }: {
   kind: AssetKind;
   register: AssetRegister;
@@ -174,6 +175,8 @@ export function AssetsView({
   groups: GroupOption[];
   options: AssetFormOptions;
   layout: RegisterLayout;
+  /** The expense a new asset is funded by, from ?new=1&expense=<id>. */
+  fromExpense?: LinkableExpense | null;
 }) {
   const labels = labelsFor(kind);
   // These only hide controls; every action checks the same permission on the server.
@@ -198,7 +201,7 @@ export function AssetsView({
 
   const setPanel = (next: Panel) => {
     const params = new URLSearchParams(searchParams.toString());
-    ["new", "view", "edit", "group"].forEach((k) => params.delete(k));
+    ["new", "view", "edit", "group", "expense"].forEach((k) => params.delete(k));
     if (next?.kind === "new") {
       params.set("new", "1");
       if (next.group) params.set("group", next.group);
@@ -410,7 +413,7 @@ export function AssetsView({
         description={panel?.kind === "new" ? "One record per purchase. Quantity covers several identical units." : detail ? `${detail.code} · ${detail.groupLabel}` : undefined}
       >
         {panel?.kind === "new" ? (
-          <AssetForm kind={kind} options={{ ...options, groups: rootGroups }} defaultGroup={panel.group} onDone={(id) => setPanel({ kind: "view", id })} onCancel={() => setPanel(null)} />
+          <AssetForm kind={kind} options={{ ...options, groups: rootGroups }} defaultGroup={panel.group} fromExpense={fromExpense} onDone={(id) => setPanel({ kind: "view", id })} onCancel={() => setPanel(null)} />
         ) : panel && detail?.id !== panel.id ? (
           <AssetDetailSkeleton />
         ) : panel?.kind === "edit" && detail ? (

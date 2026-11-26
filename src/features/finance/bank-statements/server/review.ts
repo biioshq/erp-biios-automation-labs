@@ -8,14 +8,26 @@ import { COMPANY } from "@/config/company";
 import { maybeUnpaidFilter, paymentState } from "@/lib/payments";
 import { addDays, fromDateInput, toDateInput } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
-import type { BankLineAction } from "@/lib/constants";
+import { invoiceBalances } from "@/server/finance/summaries";
+import { INCOME_CATEGORIES, type BankLineAction, type IncomeCategory, type ProjectStage } from "@/lib/constants";
 import type { LineDecision, MatchKind, MatchOption, ReviewLine, StatementLine, StatementPickers } from "../types";
 import { STATEMENT_METHODS } from "../schemas";
-import { analyseNarration, categoryFromWords, containsName, nameKey, nameSimilarity } from "../parse/narration";
+import { analyseNarration, categoryFromWords, containsName, nameKey, nameSimilarity, type NarrationInfo } from "../parse/narration";
 import { lineHash, occurrences } from "./hash";
 import { isReopenable } from "./claims";
 import { describeLinks } from "./links";
-import { loadClientNames, loadOwnAccounts, loadPickers, loadVendorHistory, type OwnAccount, type VendorHistory } from "./context";
+import {
+  loadClientNames,
+  loadOwnAccounts,
+  loadPickers,
+  loadProjectHistory,
+  loadVendorHistory,
+  type OwnAccount,
+  type ProjectRef,
+  type VendorHistory,
+  type VendorProjects,
+} from "./context";
+import { findRule, loadRules, type PartyRule, type RuleBook } from "./rules";
 
 /**
  * The review of a statement before anything is saved: which lines were imported before, which
@@ -180,21 +192,26 @@ function toOption(c: Candidate, score: number): MatchOption {
   return { key: c.key, kind: c.kind, id: c.id, parentId: c.parentId, label: c.label, detail: c.detail, href: c.href, amount: c.amount, date: c.date, score: Math.round(score), otherAccount: c.otherAccount };
 }
 
-/** The narration names the record's party, or carries one of its numbers. */
-function namedIn(line: StatementLine, c: Candidate): { sim: number; refHit: boolean } {
+/**
+ * The narration names the record's party, or carries one of its numbers. `alias` is what else is
+ * known about the line's party: the file's vendor column and the remembered party it stands for
+ * (a payee once matched to vendor X's bill names X from then on).
+ */
+function namedIn(line: StatementLine, c: Candidate, alias = ""): { sim: number; refHit: boolean } {
   const text = `${line.narration} ${line.reference ?? ""}`;
   const hay = alnum(text);
-  return { sim: c.party ? nameSimilarity(c.party, text) : 0, refHit: c.refs.some((r) => alnum(r).length >= 4 && hay.includes(alnum(r))) };
+  const named = alias ? `${text} ${alias}` : text;
+  return { sim: c.party ? nameSimilarity(c.party, named) : 0, refHit: c.refs.some((r) => alnum(r).length >= 4 && hay.includes(alnum(r))) };
 }
 
 /** How well a record fits a line, or null when it cannot be the same payment. */
-function pairScore(line: StatementLine, c: Candidate): number | null {
+function pairScore(line: StatementLine, c: Candidate, alias = ""): number | null {
   if (c.side !== sideOf(line)) return null;
   // Part of an unpaid bill: a line for less than what is still owed, when the narration names the vendor.
   const part = c.kind === "bill" && amountOf(line) < c.amount - 0.005;
   if (!part && Math.abs(c.amount - amountOf(line)) >= 0.005) return null;
   const days = dayNumber(line.date) - dayNumber(c.date);
-  const { sim, refHit } = namedIn(line, c);
+  const { sim, refHit } = namedIn(line, c, alias);
   if (c.kind === "bill") {
     // A bill is paid on or after its date; long after only when the narration names the vendor.
     if (days < -MATCH_DAYS) return null;
@@ -217,10 +234,107 @@ type Context = {
   pickers: StatementPickers;
   holders: { id: string; name: string; kind: string }[];
   loans: { id: string; lender: string; name: string; installment: number | null }[];
+  rules: RuleBook;
+  /** The rule found for each line, so a line is looked up once per review. */
+  ruleCache: WeakMap<StatementLine, PartyRule | null>;
+  projects: ProjectRef[];
+  vendorProjects: Map<string, VendorProjects>;
+  /** Each project's most used stage in recent expenses. */
+  projectStage: Map<string, string>;
+  /** Customer invoices with money still owed on them. */
+  invoices: { id: string; number: string; client: string; project: string | null; total: number; outstanding: number }[];
 };
 
 const allowedCategory = (ctx: Context, value: string | null | undefined) =>
   value && ctx.pickers.categories.some((c) => c.value === value) ? value : null;
+
+/** The remembered party of a line, looked up once per line. */
+function ruleFor(ctx: Context, line: StatementLine, info: NarrationInfo): PartyRule | null {
+  if (ctx.ruleCache.has(line)) return ctx.ruleCache.get(line) ?? null;
+  const rule = findRule(ctx.rules, sideOf(line) === "dr" ? "out" : "in", line, info);
+  ctx.ruleCache.set(line, rule);
+  return rule;
+}
+
+const vendorKey = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Projects that still take expenses and suggestions: not completed, not cancelled. */
+const OPEN_PROJECT = new Set(["planning", "active", "on_hold"]);
+const openProject = (ctx: Context, id: string | null | undefined) => (id ? ctx.projects.find((p) => p.id === id && OPEN_PROJECT.has(p.status)) : undefined);
+
+/** A vendor's recent expenses point at one project when at least this many, and this share of all of them, went to it. */
+const DOMINANT_MIN = 2;
+const DOMINANT_SHARE = 0.6;
+
+/** Narration words that read like buying equipment or another asset that lasts. */
+const ASSET_RE =
+  /\blaptops?\b|\bmacbook|\bcomputers?\b|\bdesktop\b|\bmonitors?\b|\bprinters?\b|\b3d ?print|\bmachine(ry|s)?\b|\bequipment\b|\bfurniture\b|\boscilloscope|\bmultimeter|\bsoldering\b|\bcnc\b|\blathe\b|\bgenerator\b|\binverter\b|\bair ?condition|\bvehicle\b|\bcamera\b|\bcapital goods?\b|\bfixed asset/i;
+
+/**
+ * The file's own category for the line, matched to the category values or names (any case):
+ * expense categories for withdrawals, income categories for deposits. `unknown` is a value that
+ * matches none, which leaves the suggestion as it is.
+ */
+function columnCategory(ctx: Context, line: StatementLine): { value: string } | { unknown: string } | null {
+  const raw = line.category?.trim();
+  if (!raw) return null;
+  const k = nameKey(raw);
+  const list = sideOf(line) === "dr" ? ctx.pickers.categories : INCOME_CATEGORIES.map((c) => ({ value: c.value, label: c.label }));
+  const hit = list.find((c) => nameKey(c.value) === k || nameKey(c.label) === k);
+  return hit ? { value: hit.value } : { unknown: raw.slice(0, 60) };
+}
+
+type ProjectPick = { projectId?: string; stage?: ProjectStage; note: string };
+
+/**
+ * The project an expense line most likely belongs to: the one remembered for its party, else the
+ * vendor's project in most of its recent expenses, else a project whose code or name is in the
+ * narration. Never a completed or cancelled project. An expense needs a stage with its project, so
+ * a project without a known stage is only named in a note.
+ */
+function suggestProject(ctx: Context, line: StatementLine, party: string | null, rule: PartyRule | null): ProjectPick | null {
+  const remembered = openProject(ctx, rule?.projectId);
+  if (remembered && rule?.stage) return { projectId: remembered.id, stage: rule.stage, note: `Project ${remembered.name} remembered from your earlier choice.` };
+
+  const history = party ? ctx.vendorProjects.get(vendorKey(party)) : undefined;
+  if (history && history.total > 0) {
+    const top = [...history.projects.entries()].sort((a, b) => b[1].count - a[1].count)[0];
+    const project = top ? openProject(ctx, top[0]) : undefined;
+    if (top && project && top[1].count >= DOMINANT_MIN && top[1].count / history.total >= DOMINANT_SHARE) {
+      const stage = [...top[1].stages.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] as ProjectStage | undefined;
+      const why = `${top[1].count} of the ${history.total} expenses with ${party} in the last 180 days were for ${project.name}`;
+      return stage ? { projectId: project.id, stage, note: `Project suggested: ${why}.` } : { note: `${why}. Set the project and stage if this one is too.` };
+    }
+  }
+
+  const hay = ` ${nameKey(line.narration)} `;
+  const flat = alnum(line.narration);
+  const named = ctx.projects.find(
+    (p) => OPEN_PROJECT.has(p.status) && ((alnum(p.code).length >= 5 && flat.includes(alnum(p.code))) || (nameKey(p.name).replace(/ /g, "").length >= 6 && containsName(p.name, hay))),
+  );
+  if (named) {
+    const stage = ctx.projectStage.get(named.id) as ProjectStage | undefined;
+    return stage
+      ? { projectId: named.id, stage, note: `The narration names project ${named.code} ${named.name}. Stage taken from its recent expenses; check it.` }
+      : { note: `The narration names project ${named.code} ${named.name}. Set it and the stage if this expense belongs to it.` };
+  }
+  return null;
+}
+
+/** An open customer invoice the deposit pays: its number is in the narration, or its client is named and the amount is what it owes (or its total). */
+function openInvoiceFor(ctx: Context, line: StatementLine): Context["invoices"][number] | null {
+  const amount = line.deposit;
+  const hay = alnum(`${line.narration} ${line.reference ?? ""}`);
+  const text = `${line.narration} ${line.vendor ?? ""}`;
+  let best: { inv: Context["invoices"][number]; score: number } | null = null;
+  for (const inv of ctx.invoices) {
+    const refHit = alnum(inv.number).length >= 4 && hay.includes(alnum(inv.number)) && amount <= inv.outstanding + 0.005;
+    const exact = Math.abs(inv.outstanding - amount) < 0.005 || Math.abs(inv.total - amount) < 0.005;
+    const score = refHit ? 2 : exact && containsName(inv.client, text) ? 1 : 0;
+    if (score && (!best || score > best.score)) best = { inv, score };
+  }
+  return best?.inv ?? null;
+}
 
 /** The longest known name whose distinctive words all appear in the narration. */
 function knownName(names: string[], narration: string): string | null {
@@ -305,23 +419,43 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
       notes.push("Looks like a tax payment (GST, TDS, PF or similar). Tax that settles an amount already owed is not an expense; check before adding it.");
       attention = true;
     }
+    // Who it was paid to: the file's vendor column, else a remembered party, else a vendor in the books, else the narration's payee.
+    const rule = ruleFor(ctx, line, info);
     const known = knownName(ctx.vendors.map((v) => v.name), line.narration);
-    const party = known ?? info.payee;
-    const history = party ? ctx.vendorByKey.get(party.toLowerCase().replace(/\s+/g, " ")) : undefined;
-    const category =
-      (info.kind === "salary" ? allowedCategory(ctx, "salaries") : null) ??
-      allowedCategory(ctx, history?.category) ??
-      allowedCategory(ctx, categoryFromWords(line.narration)) ??
-      allowedCategory(ctx, "other") ??
-      ctx.pickers.categories[0]?.value;
-    if (history) notes.push(`Category from ${history.count === 1 ? "an earlier expense" : `${history.count} earlier expenses`} with ${history.name}.`);
+    const party = line.vendor ?? rule?.party ?? known ?? info.payee;
+    const history = party ? ctx.vendorByKey.get(vendorKey(party)) : undefined;
+    const column = columnCategory(ctx, line);
+    if (column && "unknown" in column) notes.push(`The file's category "${column.unknown}" is not one of your expense categories, so the suggestion is kept. Change it if needed.`);
+    // Remembered parties first, then the vendor's earlier expenses, then the narration's words.
+    const fromColumn = column && "value" in column ? allowedCategory(ctx, column.value) : null;
+    const fromRule = allowedCategory(ctx, rule?.category);
+    const fromSalary = info.kind === "salary" ? allowedCategory(ctx, "salaries") : null;
+    const fromHistory = allowedCategory(ctx, history?.category);
+    const fromWords = allowedCategory(ctx, categoryFromWords(line.narration));
+    const category = fromColumn ?? fromRule ?? fromSalary ?? fromHistory ?? fromWords ?? allowedCategory(ctx, "other") ?? ctx.pickers.categories[0]?.value;
+    if (rule) notes.push(`Remembered from your earlier choice: ${rule.party}${fromRule && !fromColumn ? `, ${ctx.pickers.categories.find((c) => c.value === fromRule)?.label ?? fromRule}` : ""}.`);
+    if (fromColumn) notes.push("Category from the file's category column.");
+    else if (!fromRule && !fromSalary && fromHistory && history) notes.push(`Category from ${history.count === 1 ? "an earlier expense" : `${history.count} earlier expenses`} with ${history.name}.`);
+    else if (!fromRule && !fromSalary && !fromHistory && !fromWords) {
+      notes.push("No remembered party, earlier expense or keyword gives this payment a category, so it is set to Other. Pick the right category.");
+      attention = true;
+    }
     if (!party) {
       notes.push("The narration has no payee name. Check the vendor.");
       attention = true;
     }
     const owner = party ? ctx.holders.find((h) => h.kind === "owner" && containsName(h.name, line.narration)) : undefined;
     if (owner) notes.push(`Paid to ${owner.name}, an owner. If it was a drawing, choose Owner drawing.`);
-    return { decision: decide("expense", { party: party ?? cleanNarration(line.narration), category, holderId: owner?.id }), notes, attention };
+    const project = suggestProject(ctx, line, party, rule);
+    if (project) notes.push(project.note);
+    if (category === "equipment" || ASSET_RE.test(line.narration)) {
+      notes.push("Could be a fixed asset. Once it is added, you can put it on the asset register from the results.");
+    }
+    return {
+      decision: decide("expense", { party: party ?? cleanNarration(line.narration), category, holderId: owner?.id, projectId: project?.projectId, stage: project?.stage }),
+      notes,
+      attention,
+    };
   }
 
   // Deposits.
@@ -342,19 +476,42 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
     notes.push("Looks like a refund or reversal. If it reverses a withdrawal, choose Ignore, or match it, instead of income.");
     attention = true;
   }
-  const known = knownName(ctx.clients, line.narration);
-  const party = known ?? info.payee;
+  // Income is pre-ticked only when the payer is a known customer, a remembered party, or the line pays an open invoice.
+  const rule = ruleFor(ctx, line, info);
+  const known = (line.vendor ? knownName(ctx.clients, line.vendor) : null) ?? knownName(ctx.clients, line.narration);
+  const invoice = openInvoiceFor(ctx, line);
+  const party = line.vendor ?? rule?.party ?? invoice?.client ?? known ?? info.payee;
+  const column = columnCategory(ctx, line);
+  if (column && "unknown" in column) notes.push(`The file's category "${column.unknown}" is not one of the income categories, so the suggestion is kept. Change it if needed.`);
+  const isIncomeCategory = (v: string | null | undefined): v is IncomeCategory => Boolean(v && INCOME_CATEGORIES.some((c) => c.value === v));
+  const fromColumn = column && "value" in column && isIncomeCategory(column.value) ? column.value : null;
+  const fromRule = isIncomeCategory(rule?.category) ? rule.category : null;
+  const incomeCategory: IncomeCategory = fromColumn ?? fromRule ?? "project_payment";
+  if (rule) notes.push(`Remembered from your earlier choice: ${rule.party}.`);
+  if (fromColumn) notes.push("Category from the file's category column.");
+  if (invoice) {
+    notes.push(
+      `Looks like a payment of invoice ${invoice.number} (${invoice.client}, ${invoice.outstanding.toFixed(2)} still owed). After adding, link this receipt to the invoice on the income record so the invoice shows as paid.`,
+    );
+  }
+  if (!rule && !known && !invoice) {
+    notes.push(
+      "The payer is not a known customer. Choose New income only if this pays for a sale or a service; otherwise choose Capital introduced, Loan received or Transfer between own accounts.",
+    );
+    attention = true;
+  }
   if (!party) {
     notes.push("The narration has no payer name. Check the client.");
     attention = true;
   }
-  return { decision: decide("income", { party: party ?? cleanNarration(line.narration), incomeCategory: "project_payment" }), notes, attention };
+  const projectId = openProject(ctx, rule?.projectId)?.id ?? openProject(ctx, invoice?.project)?.id;
+  return { decision: decide("income", { party: party ?? cleanNarration(line.narration), incomeCategory, projectId }), notes, attention };
 }
 
 async function loadContext(accountId: string): Promise<{ ctx: Context; book: AccountBook }> {
   const account = await BankAccount.findById(accountId, { name: 1, bankName: 1, openingDate: 1 }).lean();
   if (!account) throw notFound("The bank account");
-  const [book, own, history, clients, pickers, holders, loans] = await Promise.all([
+  const [book, own, history, clients, pickers, holders, loans, rules, projectHistory, receivables] = await Promise.all([
     loadAccountBook(),
     loadOwnAccounts(),
     loadVendorHistory(),
@@ -362,6 +519,9 @@ async function loadContext(accountId: string): Promise<{ ctx: Context; book: Acc
     loadPickers(),
     EquityHolder.find({ archivedAt: null }, { name: 1, kind: 1 }).lean(),
     Liability.find({ archivedAt: null }, { name: 1, lender: 1, installment: 1 }).lean(),
+    loadRules(),
+    loadProjectHistory(),
+    invoiceBalances(),
   ]);
   return {
     book,
@@ -376,6 +536,14 @@ async function loadContext(accountId: string): Promise<{ ctx: Context; book: Acc
       pickers,
       holders: holders.map((h) => ({ id: String(h._id), name: h.name, kind: h.kind })),
       loans: loans.map((l) => ({ id: String(l._id), lender: l.lender, name: l.name, installment: l.installment ?? null })),
+      rules,
+      ruleCache: new WeakMap(),
+      projects: projectHistory.projects,
+      vendorProjects: projectHistory.byVendor,
+      projectStage: projectHistory.stageOf,
+      invoices: receivables
+        .filter((r) => r.outstanding > 0)
+        .map((r) => ({ id: r.id, number: r.number, client: r.client, project: r.project, total: r.total, outstanding: r.outstanding })),
     },
   };
 }
@@ -477,11 +645,21 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
     candidates = candidates.filter((c) => !taken.has(c.kind === "bill" ? `expense:${c.id}` : c.key));
   }
 
+  // What each line's narration says, and who else is known to be its party (the file's vendor column, a remembered party).
+  const infos: NarrationInfo[] = lines.map((l) => analyseNarration(l.narration, sideOf(l), { exclude: [COMPANY.name] }));
+  const remembered = new Map<number, PartyRule>();
+  for (const i of fresh) {
+    const rule = ruleFor(ctx, lines[i]!, infos[i]!);
+    if (rule) remembered.set(i, rule);
+  }
+  const aliasOf = (i: number) => [lines[i]!.vendor, remembered.get(i)?.party].filter(Boolean).join(" ");
+
   // Every possible pair, best first; each line and each record is used once.
   const pairs: { i: number; c: Candidate; score: number }[] = [];
   for (const i of fresh) {
+    const alias = aliasOf(i);
     for (const c of candidates) {
-      const score = pairScore(lines[i]!, c);
+      const score = pairScore(lines[i]!, c, alias);
       if (score !== null) pairs.push({ i, c, score });
     }
   }
@@ -491,10 +669,16 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
   // A bill is picked for a line only when the narration names its vendor or number. Same amount
   // alone is common (round sums), and paying the wrong bill would drop this payment's own expense
   // from the P&L; such bills stay offered, and the line is flagged instead (see sameAmountBills).
+  // A payee remembered as the bill's vendor (from an earlier match) names it too.
   const unnamedBill = (i: number, c: Candidate) => {
     if (c.kind !== "bill") return false;
-    const n = namedIn(lines[i]!, c);
+    const n = namedIn(lines[i]!, c, aliasOf(i));
     return n.sim < 0.5 && !n.refHit;
+  };
+  /** The vendor was not in the narration itself, only in the file's vendor column or the remembered party. */
+  const namedByAliasOnly = (i: number, c: Candidate) => {
+    const plain = namedIn(lines[i]!, c);
+    return plain.sim < 0.5 && !plain.refHit;
   };
   for (const p of pairs) {
     if (chosen.has(p.i) || used.has(p.c.key) || unnamedBill(p.i, p.c)) continue;
@@ -521,7 +705,7 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
 
   const out = lines.map((line, i): ReviewLine => {
     const hash = hashes[i]!;
-    const base = { ...line, hash, occurrence: occ[i]! };
+    const base = { ...line, hash, occurrence: occ[i]!, narrationKind: infos[i]!.kind };
     const prior = byHash.get(hash);
     if (prior) {
       const info = prior.link ? linkInfo.get(`${prior.link.kind}:${prior.link.id}`) : undefined;
@@ -575,6 +759,14 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
       const notes = [
         ...(match.otherAccount ? [`${match.label} is counted in ${match.otherAccount}, since it names no account. If it was paid from this account, set its account on the record.`] : []),
         ...(partBill ? [`Part payment: ${amountOf(line).toFixed(2)} of the ${match.amount.toFixed(2)} still owed on ${match.label.replace(/^Pays /, "")}. Check it is this bill.`] : []),
+        ...(match.kind === "bill"
+          ? [
+              `Paid as shown on the statement: settles the outstanding payment ${match.label.replace(/^Pays /, "")}, marked paid on ${formatDate(line.date)} from this account. No new expense is made.`,
+              ...(namedByAliasOnly(i, match)
+                ? [remembered.has(i) ? `The vendor is remembered from your earlier choice (${remembered.get(i)!.party}).` : "The vendor is named in the file's vendor column."]
+                : []),
+            ]
+          : []),
       ];
       return {
         ...base,

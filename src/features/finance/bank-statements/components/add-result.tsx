@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { CircleCheck, Download, RotateCcw } from "lucide-react";
+import { CircleCheck, Download, Package, RotateCcw } from "lucide-react";
+import { useCan } from "@/components/current-user";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatNumber } from "@/lib/format";
@@ -9,6 +10,8 @@ import { cn } from "@/lib/utils";
 import type { AddLineResult, ReviewLine } from "../types";
 
 export type NotAdded = { line: ReviewLine; reason: string };
+/** A new expense in category Equipment, which may belong on the asset register. */
+export type AssetCandidate = { id: string; label: string; line: number };
 
 const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`;
 
@@ -16,12 +19,14 @@ const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n
 export function AddResult({
   results,
   notAdded,
+  assets = [],
   statementId,
   onDownload,
   onReset,
 }: {
   results: AddLineResult[];
   notAdded: NotAdded[];
+  assets?: AssetCandidate[];
   statementId: string | null;
   onDownload: () => void;
   onReset: () => void;
@@ -32,6 +37,7 @@ export function AddResult({
   const ignored = count("ignored");
   const done = results.filter((r) => r.href && (r.status === "added" || r.status === "matched"));
   const any = added + matched + ignored > 0;
+  const canAddAssets = useCan("finance.fixed_assets:create");
 
   return (
     <div className="space-y-4">
@@ -59,6 +65,29 @@ export function AddResult({
                   {line.narration.slice(0, 80)}
                   <span className="text-muted-foreground"> · {reason}</span>
                 </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {assets.length && canAddAssets ? (
+        <div className="space-y-2 rounded-lg border p-3 text-sm">
+          <p className="flex items-center gap-2 font-medium">
+            <Package className="size-4 text-muted-foreground" aria-hidden />
+            {assets.length === 1 ? "One new expense is equipment" : `${formatNumber(assets.length)} new expenses are equipment`}
+          </p>
+          <p className="text-muted-foreground">
+            Equipment that lasts belongs on the asset register, where it depreciates. Adding it there links the expense, so its cost is not counted twice.
+          </p>
+          <ul className="space-y-1">
+            {assets.map((a) => (
+              <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="font-mono text-xs text-muted-foreground">Row {a.line}</span>
+                <span className="min-w-0 flex-1 basis-40 [overflow-wrap:anywhere]">{a.label}</span>
+                <Link href={`/finance/assets/fixed?new=1&expense=${a.id}`} className="font-medium text-brand-ink underline-offset-2 hover:underline">
+                  Add to asset register
+                </Link>
               </li>
             ))}
           </ul>

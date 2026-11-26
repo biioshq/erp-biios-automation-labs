@@ -4,6 +4,8 @@
  */
 
 import type { BankLineAction, IncomeCategory, ProjectStage } from "@/lib/constants";
+import type { LineKind } from "./parse/narration";
+import type { BankLineKind } from "./kinds";
 
 /** Payment methods a statement line can carry (see STATEMENT_METHODS). */
 export type StatementMethod = "bank_transfer" | "upi" | "card" | "cheque" | "cash" | "other";
@@ -24,7 +26,11 @@ export type ColumnRole =
   | "amount"
   | "drcr"
   | "balance"
-  | "balanceSide";
+  | "balanceSide"
+  /** Optional: the vendor, beneficiary or payer, when the file has its own column for it. */
+  | "vendor"
+  /** Optional: the file's own expense or income category. */
+  | "category";
 
 /** The API route's answer: the file's rows and the columns it found. */
 export type ReadStatementResult = {
@@ -59,6 +65,10 @@ export type StatementLine = {
   balance: number | null;
   check: BalanceCheck;
   issues: string[];
+  /** From a mapped vendor column: the line's party, ahead of the name read from the narration. Not part of the hash. */
+  vendor?: string;
+  /** From a mapped category column, as written in the file. Not part of the hash. */
+  category?: string;
 };
 
 export type ParsedStatement = {
@@ -144,6 +154,8 @@ export type ReviewLine = StatementLine & {
   suggestion: LineDecision;
   notes: string[];
   attention: boolean;
+  /** What the narration says the line is (charges, interest, ATM...), for the line's type in the review. */
+  narrationKind?: LineKind;
 };
 
 export type Picker = { value: string; label: string; description?: string };
@@ -165,6 +177,9 @@ export type AddLineResult = {
   message: string;
   label?: string | null;
   href?: string | null;
+  /** The record the line became or was tied to, for follow-up links on the results screen. */
+  recordKind?: string | null;
+  recordId?: string | null;
 };
 
 export type AddBatchResult = { statementId: string | null; results: AddLineResult[] };
@@ -208,9 +223,30 @@ export type StoredLine = {
   /** When an admin unmatched the line from its record, and who (null when the user was removed since). */
   unmatchedAt: string | null;
   unmatchedBy: string | null;
+  /** The line's type and its row in the uploaded file, on lines added since they are stored. */
+  kind?: BankLineKind | null;
+  row?: number | null;
 };
 
-export type UnmatchResult = { status: "unmatched" | "already"; message: string };
+/** A remembered party, for the Remembered parties list. */
+export type PartyRuleRow = {
+  id: string;
+  /** "out": a payee of withdrawals (a vendor); "in": a payer of deposits (a client). */
+  side: "in" | "out";
+  /** The name (or UPI handle) as the statement shows it. */
+  key: string;
+  token: string | null;
+  party: string;
+  category: string | null;
+  categoryLabel: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  stage: ProjectStage | null;
+  hits: number;
+  lastUsedAt: string | null;
+};
+
+export type UnmatchResult ={ status: "unmatched" | "already"; message: string };
 
 /** A stored line reviewed again on its statement's page, to be added again. */
 export type StoredLineReview = { accountId: string; statementId: string | null; line: ReviewLine; pickers: StatementPickers };

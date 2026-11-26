@@ -29,7 +29,7 @@ export function BudgetTab({ project }: { project: ProjectDetail }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 2xl:grid-cols-6">
         <StatCard
           className={KPI}
           label="Allocated budget"

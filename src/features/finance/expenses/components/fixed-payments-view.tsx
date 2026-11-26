@@ -149,7 +149,8 @@ export function FixedPurchasesTable({
       },
       {
         id: "actions",
-        meta: { align: "right" },
+        // Stays in view on narrow screens: the tick is the main action of these lists.
+        meta: { align: "right", className: "sticky right-0 z-10 bg-card shadow-[-6px_0_6px_-6px_rgb(0_0_0_/_0.12)]", headerClassName: "sticky right-0 z-10 bg-card" },
         header: () => <span className="sr-only">Actions</span>,
         enableHiding: false,
         enableSorting: false,

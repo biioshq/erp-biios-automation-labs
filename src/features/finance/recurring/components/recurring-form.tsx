@@ -34,7 +34,7 @@ import { useCan } from "@/components/current-user";
 
 // "On credit" keeps its stored value; here it says what it does to each posted expense.
 const PAYMENT_OPTIONS = PAYMENT_METHODS.filter((m) => m.value !== "stock").map((m) =>
-  m.value === "credit" ? { value: m.value, label: "Post as unpaid (appears in Outstanding payments until paid)" } : { value: m.value, label: m.label },
+  m.value === "credit" ? { value: m.value, label: "On credit (no planned method)" } : { value: m.value, label: m.label },
 );
 const DAY_OPTIONS = [...Array.from({ length: 28 }, (_, i) => ({ value: i + 1, label: `${ordinal(i + 1)} of the month` })), { value: 31, label: "Last day of the month" }];
 

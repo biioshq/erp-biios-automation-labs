@@ -182,7 +182,6 @@ export function FixedPurchasesTable({
       searchPlaceholder="Search vendor, invoice, number…"
       getRowId={(r) => r.id}
       onRowClick={(r) => router.push(viewHref(r.id))}
-      initialHidden={["description"]}
       renderMobileRow={(r) => (
         <div className="space-y-2">
           <ExpenseMobileCard row={r} showPaymentState />

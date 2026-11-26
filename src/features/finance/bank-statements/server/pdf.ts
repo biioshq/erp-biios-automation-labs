@@ -222,9 +222,32 @@ type Layout = {
   bands: Band[];
   /** Where the text of a text column starts on most rows. */
   starts: (number | null)[];
+  /** What the references of a reference column look like, from the rows where they stand alone. */
+  shapes: (RefShape | null)[];
   /** False when the rows gave nothing to go by: the names' positions alone, as before. */
   fromBody: boolean;
 };
+
+/** References of one column: their lengths, and whether they are digits only or which other characters they use. */
+type RefShape = { min: number; max: number; digitsOnly: boolean; chars: Set<string> };
+
+const classOf = (c: string) => (/\d/.test(c) ? "9" : /[A-Z]/.test(c) ? "A" : /[a-z]/.test(c) ? "a" : c);
+
+function shapeOf(refs: string[]): RefShape | null {
+  // Too few to tell what the column's references look like.
+  if (refs.length < 3) return null;
+  const lengths = refs.map((r) => r.length);
+  const digits = refs.filter((r) => /^\d+$/.test(r)).length;
+  return { min: Math.min(...lengths), max: Math.max(...lengths), digitsOnly: digits >= refs.length * 0.8, chars: new Set(refs.join("").split("").map(classOf)) };
+}
+
+/** A half of a cut piece that reads as a reference of this column: the usual length, the usual characters. */
+function fitsShape(s: string, shape: RefShape | null): boolean {
+  if (!shape) return true;
+  if (s.length < shape.min - 1 || s.length > shape.max + 1) return false;
+  if (shape.digitsOnly) return /^\d+$/.test(s);
+  return s.split("").every((c) => shape.chars.has(classOf(c)));
+}
 
 /** The amounts of one column overlap each other; amounts of two columns do not. Null when a band holds two amounts of one row. */
 function bandsOf(amounts: { w: Word; row: number }[]): Omit<Band, "col">[] | null {
@@ -354,6 +377,7 @@ function headerLayout(header: Word[]): Layout {
     bounds: header.slice(0, -1).map((c, i) => (c.x2 + header[i + 1]!.x1) / 2),
     bands: [],
     starts: header.map(() => null),
+    shapes: header.map(() => null),
     fromBody: false,
   };
 }
@@ -436,7 +460,20 @@ function layoutOf(names: Word[], body: PdfLine[]): Layout {
     for (const [x, n] of m) if (n > top) [top, starts[k]] = [n, x];
   });
 
-  return { header, roles, mapping: autoMapping(header.map((h) => h.text)), bounds, bands, starts, fromBody: true };
+  // The references that stand alone in their column, to tell a reference glued to a narration from a narration running long.
+  const refs = header.map(() => [] as string[]);
+  rows.forEach((ws, row) => {
+    if (!dated[row]) return;
+    for (const w of ws) {
+      const k = colAt(bounds, middle(w));
+      const tol = Math.max(1, w.size * 0.5);
+      if (roles[k] !== "reference" || /\s/.test(w.text) || !/\d/.test(w.text)) continue;
+      if (w.x1 >= (k > 0 ? bounds[k - 1]! : -Infinity) - tol && w.x2 <= (k < bounds.length ? bounds[k]! : Infinity) + tol) refs[k]!.push(w.text);
+    }
+  });
+  const shapes = refs.map(shapeOf);
+
+  return { header, roles, mapping: autoMapping(header.map((h) => h.text)), bounds, bands, starts, shapes, fromBody: true };
 }
 
 function colAt(bounds: number[], x: number): number {
@@ -445,10 +482,10 @@ function colAt(bounds: number[], x: number): number {
 }
 
 /** Whether a half of a cut piece reads as what its column holds; columns the reader does not use are never cut into. */
-function fits(s: string, role: ColumnRole | null): boolean {
+function fits(s: string, role: ColumnRole | null, shape: RefShape | null): boolean {
   if (!s) return false;
   if (role === "date" || role === "valueDate") return isDateText(s);
-  if (role === "reference") return /^\S{3,}$/.test(s) && /\d/.test(s);
+  if (role === "reference") return /^\S{3,}$/.test(s) && /\d/.test(s) && fitsShape(s, shape);
   if (role === "narration") return /[A-Za-z]/.test(s);
   if (role && MONEY_ROLES.has(role)) return AMOUNT_ONLY.test(s);
   return false;
@@ -476,7 +513,7 @@ function cutAcross(w: Word, k: number, L: Layout): [Word, Word] | null {
     const x = edges[at]!;
     // Elsewhere ("...-881406434764" glued to "0000828374") only right where the column starts.
     if (target !== null ? Math.abs(x - target) > (joint ? reach : 0.2 * w.size) : !joint || x < from) continue;
-    if (!fits(w.text.slice(0, at).trim(), left) || !fits(w.text.slice(at).trim(), right)) continue;
+    if (!fits(w.text.slice(0, at).trim(), left, L.shapes[k] ?? null) || !fits(w.text.slice(at).trim(), right, L.shapes[k + 1] ?? null)) continue;
     // Nearest the column's start (a space before a letter-digit join, a join before anything else); an amount as long as it reads.
     const score = target !== null ? Math.abs(x - target) + (space ? 0 : joint ? 0.15 * w.size : 0.3 * w.size) : at;
     if (!best || score < best.score) best = { at, score };

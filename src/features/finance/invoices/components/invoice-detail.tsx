@@ -21,6 +21,7 @@ import { InvoiceStatusBadge } from "./invoice-status-badge";
 import { RecordReceiptButton } from "./record-receipt-dialog";
 import { ApplyAdvanceButton } from "./apply-advance-dialog";
 import { useCan } from "@/components/current-user";
+import { AuditHistory } from "@/features/finance/audit/components/audit-history";
 
 export function InvoiceDetailSkeleton() {
   return (
@@ -300,6 +301,8 @@ export function InvoiceDetailView({
             <p className="text-sm whitespace-pre-wrap text-muted-foreground">{invoice.notes}</p>
           </section>
         ) : null}
+
+        <AuditHistory key={invoice.id} type="invoice" id={invoice.id} number={invoice.number} />
 
         <p className="text-xs text-muted-foreground">
           Created {formatDateTime(invoice.createdAt)}

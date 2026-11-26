@@ -236,6 +236,7 @@ export const MODULES: NavModule[] = [
           { title: "Trial balance", href: "/finance/reports/trial-balance", permission: "finance.statements:view", icon: ListChecks, keywords: ["ledger", "debit", "credit"] },
         ],
       },
+      { title: "Audit trail", href: "/finance/audit", permission: "finance.audit:view", icon: History, keywords: ["audit", "history", "log", "who changed", "edited", "imported", "deleted"] },
     ],
   },
   {

@@ -13,6 +13,8 @@ import { incomeFormSchema, incomeIdSchema, type IncomeFormValues } from "./schem
 import { getIncome } from "./queries";
 import { assertAccount, assertReceiptLink } from "@/features/finance/invoices/server";
 import type { IncomeDetail } from "./types";
+import { auditSafely } from "@/server/audit";
+import { incomeCreated, incomeDeleted, incomeEdited } from "@/features/finance/audit/records";
 
 const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
 
@@ -103,6 +105,7 @@ export const createIncome = defineAction(
     const number = await nextNumber("income", undefined, doc.date);
     const created = await Income.create({ ...doc, number, createdBy: new Types.ObjectId(user.id) });
     if (input.receiptId) await attachFiles([input.receiptId], { type: "income", id: String(created._id) }, input.projectId);
+    await auditSafely(() => incomeCreated(created.toObject()));
     return { id: String(created._id), number };
   },
   { revalidate: REVALIDATE, message: "Income recorded", permission: "finance.income:create" },
@@ -145,6 +148,10 @@ export const updateIncome = defineAction(
       // tagged to the old project, or deleting that project would delete this receipt too.
       if (!input.projectId) await FileModel.updateOne({ _id: new Types.ObjectId(input.receiptId) }, { $unset: { project: 1 } });
     }
+    await auditSafely(async () => {
+      const after = await Income.findById(existing._id).lean();
+      return after ? incomeEdited(existing, after) : null;
+    });
     return { id: input.id };
   },
   { revalidate: REVALIDATE, message: "Income updated", permission: "finance.income:edit" },
@@ -157,6 +164,7 @@ export const deleteIncome = defineAction(
     if (!existing) throw notFound("The income record");
     await Income.deleteOne({ _id: existing._id });
     if (existing.receipt) await removeFile(String(existing.receipt));
+    await auditSafely(() => incomeDeleted(existing));
     return { id };
   },
   { revalidate: REVALIDATE, message: "Income deleted", permission: "finance.income:delete" },

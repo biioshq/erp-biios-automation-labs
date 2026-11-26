@@ -5,6 +5,8 @@ import { roundQty } from "@/server/services/inventory-ledger";
 import { createExpenseCategory, loadExpenseCategories } from "@/server/expense-categories";
 import { createExpense } from "@/features/finance/expenses/actions";
 import { createIncome } from "@/features/finance/income/actions";
+import { withAuditContext } from "@/server/audit";
+import { auditCategoryChange } from "@/features/finance/audit/settings";
 import { createItem } from "@/features/inventory/items/actions";
 import { purchaseStockAction } from "@/features/inventory/ledger/actions";
 import { createCategory } from "@/features/inventory/categories/actions";
@@ -1151,7 +1153,10 @@ async function importFinanceRows(
         }
         input = { ...(input as ExpenseFormInput), category: c.value };
       }
-      const result = kind === "expenses" ? await createExpense(input as ExpenseFormInput) : await createIncome(input as IncomeFormInput);
+      // Saved through the forms' own actions; the audit trail records them as imported from the file.
+      const result = await withAuditContext({ source: "csv_import" }, () =>
+        kind === "expenses" ? createExpense(input as ExpenseFormInput) : createIncome(input as IncomeFormInput),
+      );
       if (!result.ok) {
         results.push(failure(kind, line, result));
         continue;
@@ -1178,6 +1183,7 @@ async function ensureExpenseCategory(
   if (known) return { value: known.value };
   try {
     const c = await createExpenseCategory(label, userId);
+    await withAuditContext({ source: "csv_import" }, () => auditCategoryChange(null, c));
     ctx.expenseCategories.push(c);
     created.push(c.label);
     return { value: c.value };

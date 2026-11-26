@@ -11,6 +11,8 @@ import type { ExpenseSource, PaymentMethod } from "@/lib/constants";
 import { unmatchHint } from "@/features/finance/bank-statements/line-href";
 import { takesPayments } from "./sources";
 import { HALF_PAISA, assertAccountUsable, assertMaySalary, toObjectId } from "./server";
+import { auditSafely } from "@/server/audit";
+import { expensePaid, expensePaymentRemoved } from "@/features/finance/audit/records";
 
 /**
  * The one guarded write that records a payment against an expense. Record payment, Mark as paid
@@ -103,7 +105,9 @@ export async function applyExpensePayment(input: ApplyPaymentInput, user: Sessio
     ? await Expense.updateOne({ ...guard, payments: { $size: existing.payments!.length } }, { $push: { payments: payment } })
     : await Expense.updateOne({ ...guard, payments: { $exists: false } }, { $set: { payments: [payment] } });
   if (!res.matchedCount) throw changedMeanwhile();
-  return { id: input.id, paymentId: String(paymentId), amount, outstanding: round2(Math.max(0, outstanding - amount)) };
+  const left = round2(Math.max(0, outstanding - amount));
+  await auditSafely(() => expensePaid(existing, payment, { outstanding: left }));
+  return { id: input.id, paymentId: String(paymentId), amount, outstanding: left };
 }
 
 /** How long the person who recorded a payment may take it back without the delete permission. */
@@ -124,12 +128,12 @@ export async function removeExpensePayment(
   options: { allowOwnRecent: boolean; restoreCredit?: boolean },
   now: Date = new Date(),
 ): Promise<{ id: string; paymentId: string }> {
-  const existing = await Expense.findById(id, { source: 1, countedAtPurchase: 1, payments: 1, category: 1 }).lean();
+  const existing = await Expense.findById(id, { source: 1, countedAtPurchase: 1, payments: 1, category: 1, number: 1, vendor: 1 }).lean();
   if (!existing) throw notFound("The expense");
   // Payments on a salary expense are pay records, as when recording one.
   assertMaySalary(user, existing.category);
   assertTakesPayments(existing);
-  type Stored = { _id?: Types.ObjectId; bankTransaction?: unknown; createdBy?: unknown; createdAt?: Date | null };
+  type Stored = { _id?: Types.ObjectId; bankTransaction?: unknown; createdBy?: unknown; createdAt?: Date | null; date: Date; amount: number; paymentMethod?: string | null; account?: unknown };
   const payment = (existing.payments ?? []).find((p) => String((p as Stored)._id) === paymentId) as Stored | undefined;
   if (!payment) throw notFound("The payment");
   if (payment.bankTransaction) {
@@ -148,17 +152,22 @@ export async function removeExpensePayment(
     );
   }
   const pid = new Types.ObjectId(paymentId);
+  const removedNote = options.allowOwnRecent ? "Undone after Mark as paid" : undefined;
   if (options.restoreCredit) {
     const restored = await Expense.updateOne(
       { _id: existing._id, paymentMethod: "credit", payments: { $size: 1 }, "payments.0._id": pid, "payments.0.bankTransaction": null },
       { $unset: { payments: 1 } },
     );
-    if (restored.modifiedCount) return { id, paymentId };
+    if (restored.modifiedCount) {
+      await auditSafely(() => expensePaymentRemoved(existing, payment, removedNote));
+      return { id, paymentId };
+    }
   }
   const res = await Expense.updateOne(
     { _id: existing._id, payments: { $elemMatch: { _id: pid, bankTransaction: null } } },
     { $pull: { payments: { _id: pid } } },
   );
   if (!res.modifiedCount) throw notFound("The payment");
+  await auditSafely(() => expensePaymentRemoved(existing, payment, removedNote));
   return { id, paymentId };
 }

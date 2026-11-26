@@ -25,6 +25,8 @@ import { invoiceTotals } from "./totals";
 import { exactName, getInvoice, openInvoicesFor, unlinkedReceiptsFor } from "./queries";
 import { assertAccount, assertReceiptLink } from "./server";
 import type { InvoiceDetail, OpenInvoiceOption, UnlinkedReceipt } from "./types";
+import { auditSafely } from "@/server/audit";
+import { incomeCreated, invoiceCreated, invoiceEdited, invoiceStatus, receiptLink } from "@/features/finance/audit/records";
 
 const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
 
@@ -104,6 +106,7 @@ export const createInvoice = defineAction(
     const created = await Invoice.create({ ...doc, number, status: "issued", createdBy: new Types.ObjectId(user.id) });
     // Invoice papers stay off the project's documents, so deleting a project never deletes them.
     if (input.fileId) await attachFiles([input.fileId], { type: "invoice", id: String(created._id) }, null);
+    await auditSafely(() => invoiceCreated(created.toObject()));
     return { id: String(created._id), number };
   },
   { revalidate: REVALIDATE, message: "Invoice created", permission: "finance.invoices:create" },
@@ -148,6 +151,10 @@ export const updateInvoice = defineAction(
     );
     if (existing.file && String(existing.file) !== input.fileId) await removeFile(String(existing.file));
     if (input.fileId) await attachFiles([input.fileId], { type: "invoice", id: input.id }, null);
+    await auditSafely(async () => {
+      const after = await Invoice.findById(existing._id).lean();
+      return after ? invoiceEdited(existing, after) : null;
+    });
     return { id: input.id, number };
   },
   { revalidate: REVALIDATE, message: "Invoice updated", permission: "finance.invoices:edit" },
@@ -156,12 +163,13 @@ export const updateInvoice = defineAction(
 export const cancelInvoice = defineAction(
   invoiceIdSchema,
   async ({ id }) => {
-    const existing = await Invoice.findById(id, { number: 1, status: 1 }).lean();
+    const existing = await Invoice.findById(id, { number: 1, status: 1, client: 1 }).lean();
     if (!existing) throw notFound("The invoice");
     if (await Income.exists({ invoice: existing._id })) {
       throw new AppError(`Payments are recorded against ${existing.number}. Remove those links before cancelling it.`, "conflict");
     }
     await Invoice.updateOne({ _id: existing._id }, { $set: { status: "cancelled" } });
+    if (existing.status !== "cancelled") await auditSafely(() => invoiceStatus(existing, "cancelled"));
     return { id, number: existing.number };
   },
   // Cancelling and restoring were admin-only, like deleting.
@@ -171,9 +179,10 @@ export const cancelInvoice = defineAction(
 export const restoreInvoice = defineAction(
   invoiceIdSchema,
   async ({ id }) => {
-    const existing = await Invoice.findById(id, { number: 1 }).lean();
+    const existing = await Invoice.findById(id, { number: 1, status: 1, client: 1 }).lean();
     if (!existing) throw notFound("The invoice");
     await Invoice.updateOne({ _id: existing._id }, { $set: { status: "issued" } });
+    if (existing.status === "cancelled") await auditSafely(() => invoiceStatus(existing, "restored"));
     return { id, number: existing.number };
   },
   { revalidate: REVALIDATE, message: "Invoice restored", permission: "finance.invoices:delete" },
@@ -182,13 +191,14 @@ export const restoreInvoice = defineAction(
 export const deleteInvoice = defineAction(
   invoiceIdSchema,
   async ({ id }) => {
-    const existing = await Invoice.findById(id, { number: 1, file: 1 }).lean();
+    const existing = await Invoice.findById(id, { number: 1, file: 1, client: 1, total: 1, date: 1 }).lean();
     if (!existing) throw notFound("The invoice");
     if (await Income.exists({ invoice: existing._id })) {
       throw new AppError(`Payments are linked to ${existing.number}. Remove those links before deleting it, or cancel it instead.`, "conflict");
     }
     await Invoice.deleteOne({ _id: existing._id });
     if (existing.file) await removeFile(String(existing.file));
+    await auditSafely(() => invoiceStatus(existing, "deleted"));
     return { id, number: existing.number };
   },
   { revalidate: REVALIDATE, message: "Invoice deleted", permission: "finance.invoices:delete" },
@@ -224,6 +234,7 @@ export const recordInvoiceReceipt = defineAction(
       invoice: invoice._id,
       createdBy: new Types.ObjectId(user.id),
     });
+    await auditSafely(() => incomeCreated(created.toObject(), { ref: { invoice: String(invoice._id) } }));
     return { id: String(created._id), number };
   },
   { revalidate: REVALIDATE, message: "Payment recorded", permission: "finance.invoices:edit" },
@@ -260,6 +271,7 @@ async function linkReceipt(incomeId: string, invoiceId: string, allowOverpayment
   // Only if still unlinked: two people applying the same advance at once must not both succeed.
   const done = await Income.updateOne({ _id: income._id, invoice: null }, { $set: { invoice: invoice._id } });
   if (!done.modifiedCount) throw new AppError(`${income.number} was linked to an invoice meanwhile.`, "conflict");
+  await auditSafely(() => receiptLink(income, invoice, "linked"));
   return { id: invoiceId, number: income.number };
 }
 
@@ -306,12 +318,17 @@ export const createInvoiceForReceipt = defineAction(
     const number = form.number ?? (await freeInvoiceNumber(doc.date));
     const created = await Invoice.create({ ...doc, number, status: "issued", createdBy: new Types.ObjectId(user.id) });
     try {
+      // Logged before the link, so the trail reads: invoice made, then the receipt applied to it.
+      await auditSafely(() => invoiceCreated(created.toObject(), { note: `Made for receipt ${income.number}`, ref: { income: incomeId } }));
       await linkReceipt(incomeId, String(created._id), false);
     } catch (error) {
       try {
         // Keep it if another receipt was recorded against it meanwhile: deleting it would leave that receipt pointing at nothing.
         if (await Income.exists({ invoice: created._id })) console.error(`[invoices] kept ${number}: a receipt was linked to it before its own receipt could be`);
-        else await Invoice.deleteOne({ _id: created._id });
+        else {
+          await Invoice.deleteOne({ _id: created._id });
+          await auditSafely(() => ({ ...invoiceStatus(created, "deleted"), note: "Removed again: the receipt could not be linked to it" }));
+        }
       } catch (cleanup) {
         console.error(`[invoices] could not remove ${number} after its receipt link failed`, cleanup);
       }
@@ -357,9 +374,16 @@ export async function fetchInvoicePrefill(raw: z.input<typeof prefillInput>): Pr
 export const unlinkReceipt = defineAction(
   unlinkReceiptSchema,
   async ({ incomeId }) => {
-    const income = await Income.findById(incomeId, { number: 1, invoice: 1 }).lean();
+    const income = await Income.findById(incomeId, { number: 1, invoice: 1, client: 1 }).lean();
     if (!income) throw notFound("The income record");
-    if (income.invoice) await Income.updateOne({ _id: income._id }, { $unset: { invoice: 1 } });
+    if (income.invoice) {
+      await Income.updateOne({ _id: income._id }, { $unset: { invoice: 1 } });
+      const invoiceId = income.invoice;
+      await auditSafely(async () => {
+        const invoice = await Invoice.findById(invoiceId, { number: 1, client: 1 }).lean();
+        return invoice ? receiptLink(income, invoice, "unlinked") : null;
+      });
+    }
     return { id: incomeId, number: income.number };
   },
   { revalidate: REVALIDATE, message: "Link removed", permission: "finance.invoices:edit" },

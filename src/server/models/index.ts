@@ -68,3 +68,4 @@ export { HrHoliday, type HrHolidayDoc } from "./hr-holiday";
 export { HrSettings, type HrSettingsDoc } from "./hr-settings";
 export { PayrollAdjustment, type PayrollAdjustmentDoc, PayrollRun, type PayrollRunDoc } from "./payroll";
 export { CompanyProfile, type CompanyProfileDoc } from "./company-profile";
+export { AuditLog, type AuditLogDoc } from "./audit-log";

@@ -91,10 +91,10 @@ function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
       if (typeof b === "number") return { opening: b };
     }
     const labelled = cells.some(isSummaryLabel);
-    // A narration that wrapped onto the next row of the file: no date, no amounts, text only in the
-    // narration or reference column, right under a line or its wrapped text (`prevExists`), and not
-    // a footer ("End of Statement", "Page 2 of 3", a registered office line).
-    const onlyText = cells.every((c, i) => i === cols.narration || i === cols.reference || c.trim() === "");
+    // A narration that wrapped onto the next row of the file: no date, nothing in the amount,
+    // balance or Dr / Cr columns, right under a line or its wrapped text (`prevExists`), and not a
+    // footer ("End of Statement", "Page 2 of 3", a registered office line).
+    const onlyText = [cols.date, cols.valueDate, cols.withdrawal, cols.deposit, cols.amount, cols.drcr, cols.balance, cols.balanceSide].every((i) => cell(cells, i) === "");
     if (text && onlyText && !anyAmount && !dateRaw && !labelled && prevExists && row.near !== false && !TRAILER_RE.test(text)) {
       // A reference that wrapped in its own column goes on the reference, not the narration.
       return { continuation: cols.narration === undefined ? { narration: text, reference: "" } : { narration, reference } };

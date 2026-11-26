@@ -180,9 +180,26 @@ const BANKS: [RegExp, string][] = [
   [/federal bank/i, "Federal Bank"],
 ];
 
-/** The bank whose statement this is, from the lines above the column names. */
+/** Column names only one bank's export uses together, for files with no bank name above the table. */
+const HEADER_SIGNATURES: [RegExp[], string][] = [
+  [[/^transaction remarks$/, /^withdrawal amount inr$/, /^deposit amount inr$/], "ICICI Bank"],
+  [[/^narration$/, /^chq ref no$/, /^value dt$/, /^closing balance$/], "HDFC Bank"],
+  [[/^txn date$/, /^ref no cheque no$/], "State Bank of India"],
+  [[/^tran date$/, /^chqno$/, /^particulars$/], "Axis Bank"],
+];
+
+/**
+ * The bank whose statement this is, from the lines above the column names (never the
+ * transactions: a narration often names another bank), else from the column names themselves.
+ */
 export function detectBank(grid: GridRow[], headerIndex: number): string | null {
-  const top = grid.slice(0, Math.max(headerIndex, 0) || 15).flatMap((r) => r.cells).join(" ");
+  const top = grid
+    .slice(0, headerIndex >= 0 ? headerIndex : 15)
+    .flatMap((r) => r.cells)
+    .join(" ");
   for (const [re, name] of BANKS) if (re.test(top)) return name;
+  if (headerIndex < 0) return null;
+  const names = (grid[headerIndex]?.cells ?? []).map(headerKey);
+  for (const [sig, name] of HEADER_SIGNATURES) if (sig.every((re) => names.some((n) => re.test(n)))) return name;
   return null;
 }

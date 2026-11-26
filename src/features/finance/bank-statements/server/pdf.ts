@@ -177,6 +177,8 @@ const MONEY_ROLES: ReadonlySet<ColumnRole> = new Set(["withdrawal", "deposit", "
 /** A piece that is one amount and nothing else: "1,23,456.78", "-500.00", "(500.00)", "31,445.55(Dr)", "500.00 Cr". */
 const AMOUNT_ONLY = /^[(-]?(?:\d{1,3}(?:,\d{2,3})+|\d+)\.\d{2}\)?-?(?:\s?\(?(?:Cr|Dr|CR|DR)\.?\)?)?$/;
 const MARKED = /(?:Cr|Dr|CR|DR)\.?\)?$/;
+/** Text with an amount somewhere in it ("Closing Balance 1,23,456.00"). */
+const HAS_AMOUNT = /\d\.\d{2}(?!\d)/;
 const DATE_LIKE = /\d{1,4}[/\-. ]+[A-Za-z0-9]{1,9}[/\-. ]+\d{2,4}/;
 const PAGE_NUMBER = /^(page|pg\.?)\s*(no\.?)?\s*[:.]?\s*\d+(\s*(of|\/)\s*\d+)?$/i;
 
@@ -547,7 +549,8 @@ function placeText(w: Word, L: Layout, minCol: number): Piece[] {
     // Narration text that starts where the narrations start stays in the narration, however far it runs.
     const own = Math.max(minCol, colAt(L.bounds, w.x1 + 0.01));
     const start = L.starts[own];
-    if (L.roles[own] === "narration" && start !== null && start !== undefined && Math.abs(w.x1 - start) <= tol && !AMOUNT_ONLY.test(w.text)) return [{ w, col: own }];
+    // Not a piece with an amount in it ("Total 1,23,456.00 2,34,567.00"): that one goes where its middle is.
+    if (L.roles[own] === "narration" && start !== null && start !== undefined && Math.abs(w.x1 - start) <= tol && !HAS_AMOUNT.test(w.text)) return [{ w, col: own }];
   }
   return [{ w, col: Math.max(minCol, colAt(L.bounds, (w.x1 + w.x2) / 2)) }];
 }
@@ -581,7 +584,7 @@ function wrapsLikeNarration(pieces: Piece[], L: Layout): boolean {
     // A wrapped narration line with one long word ("POWER-tata@oksbi-...-PAYMENT") may run on under
     // the amounts' names: it starts where the narrations start. A footer starts at the margin.
     const start = L.starts[col];
-    if (L.roles[col] === "narration" && start !== null && start !== undefined && Math.abs(w.x1 - start) <= tol) return true;
+    if (L.roles[col] === "narration" && start !== null && start !== undefined && Math.abs(w.x1 - start) <= tol && !HAS_AMOUNT.test(w.text)) return true;
     for (let c = 0; c < L.header.length; c++) {
       const lo = c === 0 ? -Infinity : L.bounds[c - 1]!;
       const hi = c === L.header.length - 1 ? Infinity : L.bounds[c]!;

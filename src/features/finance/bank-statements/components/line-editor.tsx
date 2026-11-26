@@ -147,7 +147,7 @@ export function LineEditor({
 }
 
 function LineFacts({ line, decision }: { line: ReviewLine; decision: LineDecision }) {
-  const kind = lineKindOf(isWithdrawal(line) ? "dr" : "cr", line.narrationKind ?? null, line.imported ? line.imported.action : decision.action);
+  const kind = lineKindOf(isWithdrawal(line) ? "dr" : "cr", line.narrationKind ?? null, line.imported ? line.imported.action : decision.action, line.imported ? null : decision.matchKey);
   return (
     <div className="space-y-3 rounded-lg border p-3 text-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">

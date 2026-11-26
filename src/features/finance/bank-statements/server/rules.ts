@@ -125,14 +125,11 @@ async function lessonOf(l: AddLineValues, link: LinkRef | null): Promise<Lesson 
   }
   if (d.action !== "match" || !link) return null;
   // A line matched to a record: the name on the statement is that record's vendor or client.
-  if (link.kind === "expense") {
-    const e = await Expense.findById(link.id, { vendor: 1 }).lean();
-    return e?.vendor ? { party: e.vendor } : null;
-  }
-  if (link.kind === "expensePayment") {
-    const e = await Expense.findOne({ "payments._id": new Types.ObjectId(link.id) }, { vendor: 1 }).lean();
-    return e?.vendor ? { party: e.vendor } : null;
-  }
+  // A salary payment's rule is marked salaries, so it stays hidden from people who may not see salaries.
+  const fromExpense = (e: { vendor?: string | null; category?: string | null } | null): Lesson | null =>
+    e?.vendor ? { party: e.vendor, ...(e.category === "salaries" ? { category: "salaries" } : {}) } : null;
+  if (link.kind === "expense") return fromExpense(await Expense.findById(link.id, { vendor: 1, category: 1 }).lean());
+  if (link.kind === "expensePayment") return fromExpense(await Expense.findOne({ "payments._id": new Types.ObjectId(link.id) }, { vendor: 1, category: 1 }).lean());
   if (link.kind === "income") {
     const i = await Income.findById(link.id, { client: 1 }).lean();
     return i?.client ? { party: i.client } : null;

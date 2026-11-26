@@ -54,7 +54,7 @@ const isOut = (l: AddLineValues) => l.withdrawal > 0;
 /** The line's type, worked out here from its narration and action (never taken from the browser). */
 function kindOf(l: AddLineValues): BankLineKind {
   const side = isOut(l) ? "dr" : "cr";
-  return lineKindOf(side, analyseNarration(l.narration, side, { exclude: [COMPANY.name] }).kind, l.decision.action);
+  return lineKindOf(side, analyseNarration(l.narration, side, { exclude: [COMPANY.name] }).kind, l.decision.action, l.decision.matchKey);
 }
 
 /** Where the line sat in the uploaded file. A line reviewed again from its statement's page has no row (0). */

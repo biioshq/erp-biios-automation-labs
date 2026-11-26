@@ -36,12 +36,14 @@ const FROM_NARRATION: Record<Exclude<LineKind, null>, BankLineKind> = {
 };
 
 /**
- * The line's type. The chosen action wins where it says more (a transfer, a loan); otherwise the
+ * The line's type. The chosen action wins where it says more (a transfer, a loan), and so does the
+ * record an "Already recorded" line is tied to (its match key, "<kind>:<id>"); otherwise the
  * narration's kind; otherwise the side of the statement it is on.
  */
-export function lineKindOf(side: "dr" | "cr", narrationKind: LineKind, action: BankLineAction | null): BankLineKind {
-  if (action === "transfer") return narrationKind === "atm" ? "atm_cash" : "transfer";
-  if (action === "loan_received" || action === "loan_payment") return "loan";
+export function lineKindOf(side: "dr" | "cr", narrationKind: LineKind, action: BankLineAction | null, matchKey?: string | null): BankLineKind {
+  const matched = action === "match" ? (matchKey?.split(":")[0] ?? null) : null;
+  if (action === "transfer" || matched === "accountTransfer") return narrationKind === "atm" ? "atm_cash" : "transfer";
+  if (action === "loan_received" || action === "loan_payment" || matched === "liability" || matched === "liabilityPayment") return "loan";
   if (narrationKind) return FROM_NARRATION[narrationKind];
   return side === "dr" ? "withdrawal" : "deposit";
 }

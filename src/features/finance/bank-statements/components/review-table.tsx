@@ -92,7 +92,7 @@ function Row({
   const { line, decision: d, problem, index } = row;
   const summary = line.imported ? null : decisionSummary(line, d, pickers);
   const warn = !line.imported && (line.attention || problem);
-  const kind = lineKindOf(line.withdrawal > 0 ? "dr" : "cr", line.narrationKind ?? null, line.imported ? line.imported.action : d.action);
+  const kind = lineKindOf(line.withdrawal > 0 ? "dr" : "cr", line.narrationKind ?? null, line.imported ? line.imported.action : d.action, line.imported ? null : d.matchKey);
   return (
     <TableRow className={cn("align-top", line.imported && "text-muted-foreground", row.selected && "bg-brand/5")}>
       <TableCell className="pt-3">

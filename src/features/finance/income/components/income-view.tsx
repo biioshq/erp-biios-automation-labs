@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useOptimistic, useRef, useState, startTransition } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
-import { BadgeIndianRupee, Download, Eye, MoreHorizontal, Paperclip, Pencil, Plus, Trash2 } from "lucide-react";
+import { BadgeIndianRupee, Download, Eye, FilePlus2, MoreHorizontal, Paperclip, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -25,6 +26,7 @@ import { useCan } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { INCOME_CATEGORIES, PAYMENT_METHODS, labelOf } from "@/lib/constants";
 import { INCOME_INVOICE_FILTER } from "../schemas";
+import { createInvoiceHref, needsInvoice } from "../invoice-flag";
 import { formatDate } from "@/lib/format";
 import { emitDataChanged } from "@/lib/events";
 import type { Paginated } from "@/lib/list-params";
@@ -33,6 +35,15 @@ import { deleteIncome, fetchIncome } from "../actions";
 import type { IncomeDetail, IncomeRow, IncomeSummary } from "../types";
 import { IncomeForm } from "./income-form";
 import { IncomeDetailSkeleton, IncomeDetailView } from "./income-detail";
+
+/** The "No invoice" flag on a receipt of a sale. Create invoice is in the row menu and the detail. */
+function NoInvoiceBadge() {
+  return (
+    <StatusBadge tone="warning" dot={false} className="h-5 px-2 text-[11px] whitespace-nowrap">
+      No invoice
+    </StatusBadge>
+  );
+}
 
 type Panel = { kind: "new" } | { kind: "view"; id: string } | { kind: "edit"; id: string } | null;
 
@@ -53,6 +64,7 @@ export function IncomeView({
 }) {
   const canDelete = useCan("finance.income:delete");
   const canEdit = useCan("finance.income:edit");
+  const canCreateInvoice = useCan("finance.invoices:create");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -201,6 +213,8 @@ export function IncomeView({
         cell: ({ row }) =>
           row.original.invoice ? (
             <span className="whitespace-nowrap font-mono text-xs">{row.original.invoice.number}</span>
+          ) : needsInvoice(row.original) ? (
+            <NoInvoiceBadge />
           ) : (
             <span className="text-xs text-muted-foreground">None</span>
           ),
@@ -261,6 +275,18 @@ export function IncomeView({
                 <DropdownMenuItem onSelect={() => setPanel({ kind: "view", id: row.original.id })}>
                   <Eye /> View
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <a href={`/api/documents/receipt/${row.original.id}`}>
+                    <Download /> Download receipt
+                  </a>
+                </DropdownMenuItem>
+                {canCreateInvoice && needsInvoice(row.original) ? (
+                  <DropdownMenuItem asChild>
+                    <Link href={createInvoiceHref(row.original.id)}>
+                      <FilePlus2 /> Create invoice
+                    </Link>
+                  </DropdownMenuItem>
+                ) : null}
                 {canEdit ? (
                   <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
                     <Pencil /> Edit
@@ -281,7 +307,7 @@ export function IncomeView({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchParams, canDelete, canEdit],
+    [searchParams, canDelete, canEdit, canCreateInvoice],
   );
 
   const filters: FilterDef[] = useMemo(
@@ -343,7 +369,7 @@ export function IncomeView({
               <StatusBadge tone="neutral" dot={false} className="h-5 px-2 text-[11px]">
                 {labelOf(INCOME_CATEGORIES, r.category)}
               </StatusBadge>
-              {r.invoice ? <span className="font-mono text-[11px] text-muted-foreground">{r.invoice.number}</span> : null}
+              {r.invoice ? <span className="font-mono text-[11px] text-muted-foreground">{r.invoice.number}</span> : needsInvoice(r) ? <NoInvoiceBadge /> : null}
             </div>
           </div>
         )}

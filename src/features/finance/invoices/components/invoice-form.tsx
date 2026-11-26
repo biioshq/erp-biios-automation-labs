@@ -25,14 +25,30 @@ import { FileDropzone } from "@/features/files/components/file-dropzone";
 import { FileTile } from "@/features/files/components/file-preview";
 import { MAX_UPLOAD_LABEL } from "@/features/files/prepare";
 import { ACCEPT_RECEIPTS, type FileDTO } from "@/features/files/types";
-import { createInvoice, discardUnsavedInvoiceFile, updateInvoice } from "../actions";
+import { createInvoice, createInvoiceForReceipt, discardUnsavedInvoiceFile, updateInvoice, type InvoicePrefill } from "../actions";
 import { invoiceFormSchema, type InvoiceFormInput, type InvoiceFormValues } from "../schemas";
 import { GST_RATES, invoiceTotals } from "../totals";
 import type { InvoiceDetail } from "../types";
 
 const EMPTY_LINE = { description: "", quantity: 1, rate: undefined as unknown as number, gstRate: 18, hsnSac: "" };
 
-function defaultsFrom(invoice?: InvoiceDetail | null): InvoiceFormInput {
+function defaultsFrom(invoice?: InvoiceDetail | null, receipt?: InvoicePrefill | null): InvoiceFormInput {
+  // From a receipt: its customer, project and day, and one empty line whose rate is the amount received
+  // (0% GST, so the invoice total equals the receipt). The person fills in the description and can change the rest.
+  if (receipt && !invoice) {
+    return {
+      number: "",
+      client: receipt.client,
+      clientGstin: "",
+      projectId: receipt.projectId ?? undefined,
+      date: receipt.date,
+      dueDate: "",
+      interState: false,
+      lines: [{ description: "", quantity: 1, rate: receipt.amount, gstRate: 0, hsnSac: "" }],
+      notes: "",
+      fileId: undefined,
+    };
+  }
   return {
     number: invoice?.number ?? "",
     client: invoice?.client ?? "",
@@ -81,12 +97,15 @@ function GstRateField({ control, index }: { control: Control<InvoiceFormInput, u
 /** Create or edit a customer invoice: customer, dates, line items with GST, and the invoice file. */
 export function InvoiceForm({
   invoice,
+  receipt,
   projects,
   clients,
   onDone,
   onCancel,
 }: {
   invoice?: InvoiceDetail | null;
+  /** A receipt with no invoice: the invoice is made for it and linked to it when saved. */
+  receipt?: InvoicePrefill | null;
   projects: ProjectOption[];
   clients: string[];
   onDone: (id: string) => void;
@@ -101,7 +120,7 @@ export function InvoiceForm({
 
   const form = useForm<InvoiceFormInput, unknown, InvoiceFormValues>({
     resolver: zodResolver(invoiceFormSchema),
-    defaultValues: defaultsFrom(invoice),
+    defaultValues: defaultsFrom(invoice, receipt),
     ...formValidation,
   });
   const { control, setValue, getValues, setError } = form;
@@ -160,7 +179,11 @@ export function InvoiceForm({
 
   const onSubmit = form.handleSubmit((values) => {
     startTransition(async () => {
-      const result = invoice ? await updateInvoice({ ...values, id: invoice.id }) : await createInvoice(values);
+      const result = invoice
+        ? await updateInvoice({ ...values, id: invoice.id })
+        : receipt
+          ? await createInvoiceForReceipt({ ...values, incomeId: receipt.incomeId })
+          : await createInvoice(values);
       if (!result.ok) {
         applyFieldErrors(result, setError);
         toast.error(result.error);
@@ -178,6 +201,15 @@ export function InvoiceForm({
   return (
     <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col" noValidate>
       <FormSheetBody className="space-y-5">
+        {receipt ? (
+          <p className="rounded-xl border border-info/25 bg-info/5 px-3.5 py-3 text-sm text-pretty">
+            <span className="font-medium">Invoice for receipt {receipt.incomeNumber}.</span>{" "}
+            <span className="text-muted-foreground">
+              Saving links the receipt to this invoice, so the sale is not counted twice. Add what was sold. The total must be at least the receipt, which is{" "}
+              <Money value={receipt.amount} exact />.
+            </span>
+          </p>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2">
           <TextField
             control={control}
@@ -193,7 +225,16 @@ export function InvoiceForm({
                 Customer<span className="ml-0.5 text-danger">*</span>
               </span>
             </FieldLabel>
-            <Input id="client" list="invoice-clients" autoComplete="off" placeholder="Who is billed" aria-invalid={Boolean(clientError)} {...form.register("client")} />
+            <Input
+              id="client"
+              list="invoice-clients"
+              autoComplete="off"
+              placeholder="Who is billed"
+              aria-invalid={Boolean(clientError)}
+              // The customer on the receipt: the invoice must be to the same customer to be linked to it.
+              readOnly={Boolean(receipt)}
+              {...form.register("client")}
+            />
             <datalist id="invoice-clients">
               {clients.map((c) => (
                 <option key={c} value={c} />

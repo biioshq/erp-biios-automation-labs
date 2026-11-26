@@ -4,8 +4,10 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
-import { BadgeIndianRupee } from "lucide-react";
+import { BadgeIndianRupee, Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { DataTable, DataTableColumnHeader, type FilterDef } from "@/components/data-table";
+import { useCan } from "@/components/current-user";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Money } from "@/components/shared/money";
 import { PAYMENT_METHODS, labelOf } from "@/lib/constants";
@@ -18,6 +20,8 @@ import { InvoiceStatusBadge } from "./invoice-status-badge";
 /** "Payments received": every receipt recorded against an invoice, with what is still pending on that invoice. */
 export function PaymentsView({ data, invoiceClients }: { data: Paginated<InvoicePaymentRow>; invoiceClients: string[] }) {
   const router = useRouter();
+  // The receipt PDF is an income record document: it needs the income view permission (the route checks it too).
+  const canDownload = useCan("finance.income:view");
   const columns = useMemo<ColumnDef<InvoicePaymentRow>[]>(
     () => [
       {
@@ -106,8 +110,25 @@ export function PaymentsView({ data, invoiceClients }: { data: Paginated<Invoice
             </div>
           ) : null,
       },
+      {
+        id: "actions",
+        meta: { align: "right", className: "w-12" },
+        header: () => <span className="sr-only">Actions</span>,
+        enableHiding: false,
+        enableSorting: false,
+        cell: ({ row }) =>
+          canDownload ? (
+            <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+              <Button variant="ghost" size="icon-sm" asChild>
+                <a href={`/api/documents/receipt/${row.original.id}`} aria-label={`Download receipt ${row.original.number}`} title="Download receipt">
+                  <Download />
+                </a>
+              </Button>
+            </div>
+          ) : null,
+      },
     ],
-    [],
+    [canDownload],
   );
 
   const filters: FilterDef[] = useMemo(
@@ -147,6 +168,15 @@ export function PaymentsView({ data, invoiceClients }: { data: Paginated<Invoice
             <p className="text-xs text-muted-foreground">
               Pending on invoice: <Money value={r.invoice.outstanding} className="font-medium text-foreground" />
             </p>
+          ) : null}
+          {canDownload ? (
+            <a
+              href={`/api/documents/receipt/${r.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline"
+            >
+              <Download className="size-3.5" /> Download receipt
+            </a>
           ) : null}
         </div>
       )}

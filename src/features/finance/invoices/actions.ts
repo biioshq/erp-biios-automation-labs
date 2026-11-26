@@ -9,7 +9,7 @@ import { nextNumber } from "@/server/services/numbering";
 import { attachFiles, isClaimableFile, removeFile } from "@/features/files/server";
 import { can, getCurrentUser } from "@/server/auth/session";
 import { connectDB } from "@/server/db";
-import { endOfDayIST, fromDateInput } from "@/lib/dates";
+import { endOfDayIST, fromDateInput, toDateInput } from "@/lib/dates";
 import { formatCurrency, round2 } from "@/lib/format";
 import { searchRegex } from "@/lib/list-params";
 import { objectId, optionalObjectId } from "@/lib/zod";
@@ -22,11 +22,14 @@ import {
   type InvoiceFormValues,
 } from "./schemas";
 import { invoiceTotals } from "./totals";
-import { getInvoice, openInvoicesFor, unlinkedReceiptsFor } from "./queries";
+import { exactName, getInvoice, openInvoicesFor, unlinkedReceiptsFor } from "./queries";
 import { assertAccount, assertReceiptLink } from "./server";
 import type { InvoiceDetail, OpenInvoiceOption, UnlinkedReceipt } from "./types";
 
 const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
+
+const createForReceiptSchema = z.object({ incomeId: objectId });
+const prefillInput = createForReceiptSchema;
 
 function toDocument(v: InvoiceFormValues) {
   const totals = invoiceTotals(v.lines, v.interState);
@@ -226,34 +229,124 @@ export const recordInvoiceReceipt = defineAction(
   { revalidate: REVALIDATE, message: "Payment recorded", permission: "finance.invoices:edit" },
 );
 
+/** Why a receipt may not settle an invoice, or null. Shared by "Apply advance" and "Create invoice for a receipt". */
+function receiptBlock(income: { number: string; invoice?: unknown; paymentMethod: string; date: Date }): AppError | null {
+  if (income.invoice) return new AppError(`${income.number} is already linked to an invoice.`, "conflict");
+  // The books skip records "From stock" (no money moved), so one could not settle the invoice there.
+  if (income.paymentMethod === "stock") return new AppError(`${income.number} moved no money, so it cannot settle an invoice.`, "invalid");
+  // "On credit" is not money received either.
+  if (income.paymentMethod === "credit") return new AppError(`${income.number} is on credit, not money received, so it cannot settle an invoice.`, "invalid");
+  if (income.date.getTime() > endOfDayIST(new Date()).getTime()) {
+    return new AppError(`${income.number} is dated later than today, so it cannot settle an invoice yet.`, "invalid");
+  }
+  return null;
+}
+
+const RECEIPT_FIELDS = { number: 1, client: 1, project: 1, amount: 1, invoice: 1, paymentMethod: 1, date: 1 } as const;
+
+/** Links the receipt to the invoice: the receipt rules, the invoice link rules, then a conditional write. */
+async function linkReceipt(incomeId: string, invoiceId: string, allowOverpayment?: boolean) {
+  const income = await Income.findById(incomeId, RECEIPT_FIELDS).lean();
+  if (!income) throw notFound("The income record");
+  const blocked = receiptBlock(income);
+  if (blocked) throw blocked;
+  const invoice = await assertReceiptLink({
+    invoiceId,
+    client: income.client,
+    projectId: income.project ? String(income.project) : null,
+    amount: income.amount,
+    allowOverpayment,
+  });
+  // Only if still unlinked: two people applying the same advance at once must not both succeed.
+  const done = await Income.updateOne({ _id: income._id, invoice: null }, { $set: { invoice: invoice._id } });
+  if (!done.modifiedCount) throw new AppError(`${income.number} was linked to an invoice meanwhile.`, "conflict");
+  return { id: invoiceId, number: income.number };
+}
+
 /** Links an existing receipt (usually an advance) to an invoice, so it settles the invoice instead of counting on its own. */
 export const applyReceiptToInvoice = defineAction(
   applyReceiptSchema,
-  async (input) => {
-    const income = await Income.findById(input.incomeId, { number: 1, client: 1, project: 1, amount: 1, invoice: 1, paymentMethod: 1, date: 1 }).lean();
-    if (!income) throw notFound("The income record");
-    if (income.invoice) throw new AppError(`${income.number} is already linked to an invoice.`, "conflict");
-    // The books skip records "From stock" (no money moved), so one could not settle the invoice there.
-    if (income.paymentMethod === "stock") throw new AppError(`${income.number} moved no money, so it cannot settle an invoice.`, "invalid");
-    // "On credit" is not money received either.
-    if (income.paymentMethod === "credit") throw new AppError(`${income.number} is on credit, not money received, so it cannot settle an invoice.`, "invalid");
-    if (income.date.getTime() > endOfDayIST(new Date()).getTime()) {
-      throw new AppError(`${income.number} is dated later than today, so it cannot settle an invoice yet.`, "invalid");
-    }
-    const invoice = await assertReceiptLink({
-      invoiceId: input.invoiceId,
-      client: income.client,
-      projectId: income.project ? String(income.project) : null,
-      amount: income.amount,
-      allowOverpayment: input.allowOverpayment,
-    });
-    // Only if still unlinked: two people applying the same advance at once must not both succeed.
-    const done = await Income.updateOne({ _id: income._id, invoice: null }, { $set: { invoice: invoice._id } });
-    if (!done.modifiedCount) throw new AppError(`${income.number} was linked to an invoice meanwhile.`, "conflict");
-    return { id: input.invoiceId, number: income.number };
-  },
+  async (input) => linkReceipt(input.incomeId, input.invoiceId, input.allowOverpayment),
   { revalidate: REVALIDATE, message: "Receipt applied to the invoice", permission: "finance.invoices:edit" },
 );
+
+/**
+ * Creates an invoice for a receipt that has none (the "No invoice" flag on the income list) and
+ * links the receipt to it in one step. A new invoice posts revenue by itself, so one that is not
+ * linked to the receipt would count the sale twice: if the link fails, the new invoice is removed
+ * again and nothing is kept. Nothing is created for a receipt that may not settle an invoice.
+ */
+export const createInvoiceForReceipt = defineAction(
+  invoiceFormSchema.and(createForReceiptSchema),
+  async (input, user) => {
+    if (!can(user, "finance.income:view")) throw new AppError("You do not have permission to open income records.", "forbidden");
+    const { incomeId, ...form } = input;
+    await assertUsableFile(form.fileId, user.id);
+    const income = await Income.findById(incomeId, RECEIPT_FIELDS).lean();
+    if (!income) throw notFound("The income record");
+    const blocked = receiptBlock(income);
+    if (blocked) throw blocked;
+    const sameClient = exactName(income.client).test(form.client.trim());
+    const sameProject = Boolean(income.project && form.projectId && String(income.project) === form.projectId);
+    if (!sameClient && !sameProject) {
+      throw new AppError(`The invoice must be to ${income.client}, the customer on ${income.number}.`, "invalid", { client: ["Must match the receipt's customer"] });
+    }
+    const doc = toDocument(form);
+    if (doc.total < income.amount) {
+      throw new AppError(
+        `The invoice total ${formatCurrency(doc.total, { exact: true })} is less than the receipt ${formatCurrency(income.amount, { exact: true })}. Make the invoice at least that much.`,
+        "conflict",
+        { lines: ["The total is less than the receipt"] },
+      );
+    }
+    if (form.number) await assertNumberFree(form.number);
+    const number = form.number ?? (await freeInvoiceNumber(doc.date));
+    const created = await Invoice.create({ ...doc, number, status: "issued", createdBy: new Types.ObjectId(user.id) });
+    try {
+      await linkReceipt(incomeId, String(created._id), false);
+    } catch (error) {
+      try {
+        await Invoice.deleteOne({ _id: created._id });
+      } catch (cleanup) {
+        console.error(`[invoices] could not remove ${number} after its receipt link failed`, cleanup);
+      }
+      throw error;
+    }
+    if (form.fileId) await attachFiles([form.fileId], { type: "invoice", id: String(created._id) }, null);
+    return { id: String(created._id), number };
+  },
+  { revalidate: REVALIDATE, message: "Invoice created and linked to the receipt", permission: "finance.invoices:create" },
+);
+
+
+export type InvoicePrefill = { incomeId: string; incomeNumber: string; client: string; projectId: string | null; date: string; amount: number };
+
+/** What the invoice form starts with for "Create invoice" on a receipt, or why it cannot be made (error). */
+export async function fetchInvoicePrefill(raw: z.input<typeof prefillInput>): Promise<{ ok: true; prefill: InvoicePrefill } | { ok: false; error: string }> {
+  const user = await getCurrentUser();
+  if (!user || !can(user, "finance.invoices:create") || !can(user, "finance.income:view")) {
+    return { ok: false, error: "You do not have permission to create an invoice for a receipt." };
+  }
+  const parsed = prefillInput.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: "That receipt was not found." };
+  await connectDB();
+  const income = await Income.findById(parsed.data.incomeId, RECEIPT_FIELDS).lean();
+  if (!income) return { ok: false, error: "That receipt no longer exists." };
+  const blocked = receiptBlock(income);
+  if (blocked) return { ok: false, error: blocked.message };
+  return {
+    ok: true,
+    prefill: {
+      incomeId: String(income._id),
+      incomeNumber: income.number,
+      client: income.client,
+      projectId: income.project ? String(income.project) : null,
+      // The invoice is dated the receipt's day, so the sale stays in the period it was received in.
+      date: toDateInput(income.date),
+      amount: income.amount,
+    },
+  };
+}
 
 /** Removes a receipt's link to its invoice. The receipt then counts as income of its own category again. */
 export const unlinkReceipt = defineAction(

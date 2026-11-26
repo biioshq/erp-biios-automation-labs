@@ -4,7 +4,7 @@ import { useEffect, useMemo, useOptimistic, useRef, useState, startTransition } 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
-import { Eye, FileText, MoreHorizontal, Paperclip, Pencil, Plus, Trash2 } from "lucide-react";
+import { Download, Eye, FileText, MoreHorizontal, Paperclip, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { emitDataChanged } from "@/lib/events";
 import type { Paginated } from "@/lib/list-params";
 import type { BankAccountOption, ProjectOption } from "@/server/lookups";
-import { deleteInvoice, fetchInvoice } from "../actions";
+import { deleteInvoice, fetchInvoice, fetchInvoicePrefill, type InvoicePrefill } from "../actions";
 import { INVOICE_LIST_STATUSES } from "../schemas";
 import type { InvoiceDetail, InvoiceListSummary, InvoiceRow } from "../types";
 import { InvoiceForm } from "./invoice-form";
@@ -63,6 +63,9 @@ export function InvoicesView({
   const [detail, setDetail] = useState<InvoiceDetail | null>(null);
   const [version, setVersion] = useState(0);
   const [deleting, setDeleting] = useState<InvoiceRow | null>(null);
+  // "Create invoice" on a receipt with no invoice (?new=1&fromIncome=<id>): the form starts from that receipt.
+  const fromIncome = searchParams.get("fromIncome");
+  const [receiptPrefill, setReceiptPrefill] = useState<InvoicePrefill | null>(null);
 
   const panel: Panel = useMemo(() => {
     if (searchParams.get("new") === "1") return { kind: "new" };
@@ -78,6 +81,7 @@ export function InvoicesView({
     params.delete("new");
     params.delete("view");
     params.delete("edit");
+    params.delete("fromIncome");
     if (next?.kind === "new") params.set("new", "1");
     if (next?.kind === "view") params.set("view", next.id);
     if (next?.kind === "edit") params.set("edit", next.id);
@@ -87,6 +91,27 @@ export function InvoicesView({
 
   const panelId = panel && panel.kind !== "new" ? panel.id : null;
   if (!panelId && detail) setDetail(null);
+  const wantedReceipt = panel?.kind === "new" ? fromIncome : null;
+  if (!wantedReceipt && receiptPrefill) setReceiptPrefill(null);
+  useEffect(() => {
+    if (!wantedReceipt || receiptPrefill?.incomeId === wantedReceipt) return;
+    let cancelled = false;
+    fetchInvoicePrefill({ incomeId: wantedReceipt })
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) {
+          toast.error(result.error);
+          setPanel(null);
+          return;
+        }
+        setReceiptPrefill(result.prefill);
+      })
+      .catch(() => !cancelled && toast.error("Could not load the receipt. Check the connection and try again."));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantedReceipt]);
   useEffect(() => {
     if (!panelId) return;
     if (detail?.id === panelId) return;
@@ -259,6 +284,11 @@ export function InvoicesView({
                 <DropdownMenuItem onSelect={() => setPanel({ kind: "view", id: row.original.id })}>
                   <Eye /> View
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <a href={`/api/documents/invoice/${row.original.id}`}>
+                    <Download /> Download PDF
+                  </a>
+                </DropdownMenuItem>
                 {row.original.status === "cancelled" || !canEdit ? null : (
                   <DropdownMenuItem onSelect={() => setPanel({ kind: "edit", id: row.original.id })}>
                     <Pencil /> Edit
@@ -355,7 +385,9 @@ export function InvoicesView({
         title={panel?.kind === "new" ? "New invoice" : editing ? "Edit invoice" : (detail?.client ?? "Invoice")}
         description={
           panel?.kind === "new"
-            ? "A customer invoice with GST worked out per line."
+            ? wantedReceipt
+              ? "An invoice for a receipt you already have."
+              : "A customer invoice with GST worked out per line."
             : editing
               ? detail?.number
               : detail
@@ -363,8 +395,13 @@ export function InvoicesView({
                 : undefined
         }
       >
-        {panel?.kind === "new" ? (
+        {panel?.kind === "new" && wantedReceipt && receiptPrefill?.incomeId !== wantedReceipt ? (
+          <InvoiceDetailSkeleton />
+        ) : panel?.kind === "new" ? (
           <InvoiceForm
+            // Keyed by the receipt, so a form opened for another receipt starts again.
+            key={receiptPrefill?.incomeId ?? "new"}
+            receipt={wantedReceipt ? receiptPrefill : null}
             projects={projects}
             clients={clients}
             onDone={(id) => setPanel({ kind: "view", id })}

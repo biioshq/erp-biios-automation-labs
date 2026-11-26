@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarDays, CreditCard, FileText, FolderKanban, Hash, Landmark, Pencil, Receipt, Trash2, User } from "lucide-react";
+import { CalendarDays, CreditCard, Download, FilePlus2, FileText, FolderKanban, Hash, Landmark, Pencil, Receipt, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
@@ -14,6 +14,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { BankLineLink } from "@/features/finance/bank-statements/components/bank-line-link";
 import type { IncomeDetail } from "../types";
 import { useCan } from "@/components/current-user";
+import { createInvoiceHref, needsInvoice } from "../invoice-flag";
 
 function Row({ icon: Icon, label, children }: { icon: typeof User; label: string; children: React.ReactNode }) {
   return (
@@ -50,6 +51,8 @@ export function IncomeDetailView({
   canDelete?: boolean;
 }) {
   const canEdit = useCan("finance.income:edit");
+  const canCreateInvoice = useCan("finance.invoices:create");
+  const noInvoice = needsInvoice(income);
   return (
     <>
       <FormSheetBody className="space-y-6">
@@ -95,6 +98,22 @@ export function IncomeDetailView({
                 </Link>
                 <p className="text-xs text-muted-foreground">This payment settles that invoice, so it is not counted as revenue again.</p>
               </>
+            ) : noInvoice ? (
+              <div className="space-y-1.5">
+                <StatusBadge tone="warning" dot={false}>
+                  No invoice
+                </StatusBadge>
+                <p className="text-xs text-muted-foreground">
+                  This is a sale receipt with no invoice. Until one is linked it counts as revenue by itself.
+                </p>
+                {canCreateInvoice ? (
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={createInvoiceHref(income.id)}>
+                      <FilePlus2 /> Create invoice
+                    </Link>
+                  </Button>
+                ) : null}
+              </div>
             ) : (
               <span className="text-muted-foreground">Not linked to an invoice</span>
             )}
@@ -151,6 +170,11 @@ export function IncomeDetailView({
             }
           />
         ) : null}
+        <Button variant="outline" asChild>
+          <a href={`/api/documents/receipt/${income.id}`}>
+            <Download /> Download receipt
+          </a>
+        </Button>
         {canEdit ? (
           <Button onClick={onEdit}>
             <Pencil /> Edit

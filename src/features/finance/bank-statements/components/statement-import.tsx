@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, FileText, Landmark, RefreshCw, Upload } from "lucide-react";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, FileText, Landmark, RefreshCw, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -22,7 +22,7 @@ import { ADD_BATCH } from "../schemas";
 import { amountLayout, autoMapping, mappingProblems } from "../parse/columns";
 import { buildStatement } from "../parse/statement";
 import type { AddLineResult, ColumnRole, LineDecision, ParsedStatement, ReadStatementResult, ReviewLine, StatementPickers } from "../types";
-import { REVIEW_FILTERS, actionFits, amountOf, decisionProblem, inFilter, notAddedCsv, toWire, wireDecision, withAction, type ReviewFilter } from "../review-state";
+import { REVIEW_FILTERS, actionFits, amountOf, decisionProblem, destinationTotals, inFilter, isWithdrawal, notAddedCsv, toWire, wireDecision, withAction, type ReviewFilter } from "../review-state";
 import { MappingPanel } from "./mapping-panel";
 import { StatementOverview } from "./statement-overview";
 import { ReviewTable, type TableRowState } from "./review-table";
@@ -88,7 +88,8 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   const [decisions, setDecisions] = useState<LineDecision[]>([]);
   const [selected, setSelected] = useState<boolean[]>([]);
   const [filter, setFilter] = useState<ReviewFilter>("all");
-  const [page, setPage] = useState(0);
+  // Money out and money in are paged on their own.
+  const [pageBySide, setPageBySide] = useState<{ out: number; in: number }>({ out: 0, in: 0 });
   const [editing, setEditing] = useState<number | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
@@ -117,10 +118,6 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
     [rows],
   );
   const visible = useMemo(() => rows.filter((r) => inFilter(filter, r.line, r.decision, r.problem)), [rows, filter]);
-  const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
-  // Changing what lines become can shrink the filtered list below the page being shown.
-  const shownPage = Math.min(page, pages - 1);
-  const pageRows = visible.slice(shownPage * PAGE_SIZE, shownPage * PAGE_SIZE + PAGE_SIZE);
   const ticked = rows.filter((r) => r.selected && !r.line.imported);
   const ready = ticked.filter((r) => r.problem === null);
   const blocked = ticked.length - ready.length;
@@ -132,7 +129,7 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
     setDecisions([]);
     setSelected([]);
     setFilter("all");
-    setPage(0);
+    setPageBySide({ out: 0, in: 0 });
     setEditing(null);
     setRun(null);
   }
@@ -377,6 +374,8 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
 
   const editingLine = editing !== null && review ? review.lines[editing]! : null;
   const busy = reading || reviewing || Boolean(run?.busy);
+  const readySides = ready.reduce((s, r) => (isWithdrawal(r.line) ? { ...s, out: s.out + amountOf(r.line) } : { ...s, in: s.in + amountOf(r.line) }), { out: 0, in: 0 });
+  const waitingTotal = rows.filter((r) => !r.selected && !r.line.imported && (r.line.attention || r.problem !== null)).length;
   const totals = ready.reduce(
     (t, r) => {
       const a = amountOf(r.line);
@@ -552,7 +551,7 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
               onValueChange={(v) => {
                 if (!v) return;
                 setFilter(v as ReviewFilter);
-                setPage(0);
+                setPageBySide({ out: 0, in: 0 });
               }}
               className="flex-wrap"
             >
@@ -568,39 +567,86 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
             <BulkBar count={ticked.length} pickers={review.pickers} onApply={applyBulk} onClear={() => toggle(rows.map((r) => r.index), false)} />
           ) : null}
 
-          {visible.length ? (
-            <ReviewTable
-              rows={pageRows}
-              pickers={review.pickers}
-              onToggle={(i, on) => toggle([i], on)}
-              onToggleAll={toggle}
-              onAction={setAction}
-              onEdit={setEditing}
-              disabled={Boolean(run?.busy)}
-            />
-          ) : (
-            <EmptyState compact title="No lines in this view" description="Pick another filter above." />
-          )}
-
-          {pages > 1 ? (
-            <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
-              <span className="text-muted-foreground tabular-nums">
-                {formatNumber(shownPage * PAGE_SIZE + 1)} to {formatNumber(Math.min(visible.length, (shownPage + 1) * PAGE_SIZE))} of {formatNumber(visible.length)}
-              </span>
-              <Button type="button" size="sm" variant="outline" disabled={shownPage === 0} onClick={() => setPage(shownPage - 1)}>
-                Previous
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={shownPage >= pages - 1} onClick={() => setPage(shownPage + 1)}>
-                Next
-              </Button>
-            </div>
-          ) : null}
+          {(["out", "in"] as const).map((side) => {
+            const out = side === "out";
+            const all = rows.filter((r) => out === isWithdrawal(r.line));
+            const shown = visible.filter((r) => out === isWithdrawal(r.line));
+            const sidePages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+            // Changing what lines become can shrink the list below the page being shown.
+            const current = Math.min(pageBySide[side], sidePages - 1);
+            const pageRows = shown.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
+            const total = all.reduce((s, r) => s + amountOf(r.line), 0);
+            const waiting = all.filter((r) => !r.line.imported && (r.line.attention || r.problem !== null)).length;
+            return (
+              <section key={side} aria-labelledby={`statement-${side}`} className="space-y-2 rounded-xl border p-3 sm:p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                  <h3 id={`statement-${side}`} className="flex items-center gap-2 text-base font-semibold">
+                    {out ? <ArrowUpRight className="size-4 text-danger" aria-hidden /> : <ArrowDownLeft className="size-4 text-success" aria-hidden />}
+                    {out ? "Money out (withdrawals)" : "Money in (deposits)"}
+                    <span className="text-sm font-normal text-muted-foreground">{plural(all.length, "line", "lines")}</span>
+                  </h3>
+                  <Money value={total} exact className={cn("text-base font-semibold tabular-nums", out ? "text-danger" : "text-success")} />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {out
+                    ? "Payments to vendors, bills, bank charges, loan instalments and transfers to your other accounts."
+                    : "Receipts from customers, interest, loans, capital and transfers from your other accounts. A deposit is never made an invoice by itself."}
+                </p>
+                {all.length ? (
+                  <ul className="flex flex-wrap gap-1.5" aria-label={out ? "Where the money out goes" : "Where the money in goes"}>
+                    {destinationTotals(all).map((d) => (
+                      <li key={d.key} className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs">
+                        <span className="font-medium">{d.label}</span> {formatNumber(d.count)} · <Money value={d.amount} exact />
+                      </li>
+                    ))}
+                    {waiting ? (
+                      <li className="rounded-full border border-warning/40 bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning">
+                        {plural(waiting, "line needs", "lines need")} your choice
+                      </li>
+                    ) : null}
+                  </ul>
+                ) : null}
+                {pageRows.length ? (
+                  <ReviewTable
+                    rows={pageRows}
+                    pickers={review.pickers}
+                    onToggle={(i, on) => toggle([i], on)}
+                    onToggleAll={toggle}
+                    onAction={setAction}
+                    onEdit={setEditing}
+                    disabled={Boolean(run?.busy)}
+                  />
+                ) : (
+                  <EmptyState
+                    compact
+                    title={all.length ? "No lines in this view" : out ? "No withdrawals in this statement" : "No deposits in this statement"}
+                    description={all.length ? "Pick another filter above." : undefined}
+                  />
+                )}
+                {sidePages > 1 ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
+                    <span className="text-muted-foreground tabular-nums">
+                      {formatNumber(current * PAGE_SIZE + 1)} to {formatNumber(Math.min(shown.length, (current + 1) * PAGE_SIZE))} of {formatNumber(shown.length)}
+                    </span>
+                    <Button type="button" size="sm" variant="outline" disabled={current === 0} onClick={() => setPageBySide((p) => ({ ...p, [side]: current - 1 }))}>
+                      Previous
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" disabled={current >= sidePages - 1} onClick={() => setPageBySide((p) => ({ ...p, [side]: current + 1 }))}>
+                      Next
+                    </Button>
+                  </div>
+                ) : null}
+              </section>
+            );
+          })}
 
           <AddBar
             run={run}
             readyCount={ready.length}
             blocked={blocked}
             totals={totals}
+            sides={readySides}
+            waiting={waitingTotal}
             onAdd={() => setConfirmOpen(true)}
             onRetry={() => run && void addLines(run.pending, run)}
           />
@@ -613,20 +659,22 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
         title={`Add ${plural(ready.length, "line", "lines")} to the books?`}
         description={
           <>
-            {plural(totals.created, "new record", "new records")} will be made.
-            {totals.expense ? (
-              <>
-                {" "}New expenses total <Money value={totals.expense} exact />.
-              </>
-            ) : null}
-            {totals.income ? (
-              <>
-                {" "}New income totals <Money value={totals.income} exact />.
-              </>
-            ) : null}{" "}
-            {plural(totals.matched, "line is", "lines are")} tied to records already in the books and {formatNumber(totals.ignored)} kept as ignored. Every record is tied to
-            this statement&apos;s account.
-            {blocked ? ` ${plural(blocked, "ticked line still needs", "ticked lines still need")} details and will not be added.` : ""}
+            <span className="block">Each line goes to the place shown, tied to this statement&apos;s account:</span>
+            <span className="mt-2 block space-y-1">
+              {destinationTotals(ready).map((d) => (
+                <span key={d.key} className="flex items-baseline justify-between gap-4 text-sm">
+                  <span>
+                    {d.label} <span className="text-muted-foreground">({formatNumber(d.count)})</span>
+                  </span>
+                  <Money value={d.amount} exact className="tabular-nums" />
+                </span>
+              ))}
+            </span>
+            <span className="mt-2 block text-muted-foreground">
+              Money out <Money value={readySides.out} exact />, money in <Money value={readySides.in} exact />.
+              {blocked ? ` ${plural(blocked, "ticked line still needs", "ticked lines still need")} details and will not be added.` : ""}
+              {waitingTotal ? ` ${plural(waitingTotal, "line that needs", "lines that need")} your choice stay${waitingTotal === 1 ? "s" : ""} out until ticked.` : ""}
+            </span>
           </>
         }
         confirmLabel="Add"
@@ -663,6 +711,8 @@ function AddBar({
   readyCount,
   blocked,
   totals,
+  sides,
+  waiting,
   onAdd,
   onRetry,
 }: {
@@ -670,6 +720,8 @@ function AddBar({
   readyCount: number;
   blocked: number;
   totals: { expense: number; income: number; created: number; matched: number; ignored: number };
+  sides: { out: number; in: number };
+  waiting: number;
   onAdd: () => void;
   onRetry: () => void;
 }) {
@@ -709,9 +761,15 @@ function AddBar({
   return (
     <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card/95 p-3 shadow-card backdrop-blur sm:p-4">
       <p className="min-w-0 flex-1 basis-64 text-sm text-muted-foreground">
-        {readyCount
-          ? `${plural(readyCount, "ticked line is", "ticked lines are")} ready: ${plural(totals.created, "new record", "new records")}, ${formatNumber(totals.matched)} already recorded, ${formatNumber(totals.ignored)} to ignore.`
-          : "Tick the lines to add. Lines that need a look start unticked."}
+        {readyCount ? (
+          <>
+            {plural(readyCount, "ticked line is", "ticked lines are")} ready: {plural(totals.created, "new record", "new records")}, {formatNumber(totals.matched)} already recorded,{" "}
+            {formatNumber(totals.ignored)} to ignore. Money out <Money value={sides.out} exact />, money in <Money value={sides.in} exact />.
+          </>
+        ) : (
+          "Tick the lines to add. Lines that need your choice start unticked."
+        )}
+        {waiting ? <span> {plural(waiting, "line waits", "lines wait")} for your choice.</span> : null}
         {blocked ? <span className="text-warning"> {plural(blocked, "ticked line needs", "ticked lines need")} details first.</span> : null}
       </p>
       <Button type="button" onClick={onAdd} disabled={!readyCount}>

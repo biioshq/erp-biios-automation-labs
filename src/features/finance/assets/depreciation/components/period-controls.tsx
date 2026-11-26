@@ -18,7 +18,7 @@ const KINDS: { value: AssetKindFilter; label: string }[] = [
  * Period and asset kind of the depreciation summary: a financial year, or custom dates. Everything
  * is written to the URL (?fy, ?from, ?to, ?kind) and the server renders the figures.
  */
-export function PeriodControls({ period, years, kind }: { period: DepreciationPeriod; years: number[]; kind: AssetKindFilter }) {
+export function PeriodControls({ period, years, kind, showKind = true }: { period: DepreciationPeriod; years: number[]; kind: AssetKindFilter; showKind?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -80,6 +80,7 @@ export function PeriodControls({ period, years, kind }: { period: DepreciationPe
         label="Custom dates"
         className={cn(period.mode === "custom" && "border-brand/40 bg-brand/10 text-brand-ink")}
       />
+      {showKind ? (
       <ToggleGroup
         type="single"
         variant="outline"
@@ -96,6 +97,7 @@ export function PeriodControls({ period, years, kind }: { period: DepreciationPe
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
+      ) : null}
     </div>
   );
 }

@@ -99,6 +99,14 @@ export type NavItem = {
    * usually shares the parent's href.
    */
   children?: NavItem[];
+  /**
+   * Pages reached only from inside this page (Fixed assets › Depreciation on assets). They never show
+   * in the sidebar: they show as a second row of tabs on this page and on each of them. The first
+   * usually shares this page's href.
+   */
+  pages?: NavItem[];
+  /** Not the page people land on after signing in, even when it is first (Bank statements leads Finance; the dashboard stays home). */
+  notLanding?: boolean;
 };
 
 export type NavModule = {
@@ -118,6 +126,14 @@ export const MODULES: NavModule[] = [
     icon: Wallet,
     href: "/finance",
     items: [
+      {
+        title: "Bank statements",
+        href: "/finance/bank-statements",
+        permission: "finance.bank_statements:view",
+        icon: Landmark,
+        notLanding: true,
+        keywords: ["bank statement", "upload statement", "import statement", "csv", "excel", "pdf", "deposit", "withdrawal", "reconcile", "bank import"],
+      },
       { title: "Dashboard", href: "/finance", permission: "finance.dashboard:view", icon: LayoutDashboard, exact: true, keywords: ["overview", "profit", "cash position"] },
       { title: "Daily overview", href: "/finance/daily", permission: "finance.daily:view", icon: CalendarDays, keywords: ["daily", "today", "day book", "cash flow", "income received", "payments made", "outstanding"] },
       {
@@ -139,7 +155,6 @@ export const MODULES: NavModule[] = [
         icon: Receipt,
         keywords: ["bills", "spend", "gst", "vendor"],
         children: [
-          { title: "Bank statement import", tab: "Bank import", href: "/finance/bank-statements", permission: "finance.bank_statements:view", icon: Landmark, keywords: ["statement", "deposit", "withdrawal", "reconcile", "bank", "upload"] },
           { title: "Total expenses", tab: "Total expenses", href: "/finance/expenses", permission: "finance.expenses:view", icon: Receipt, keywords: ["bills", "spend", "gst", "vendor", "direct", "indirect", "expense records", "paid"] },
           { title: "Outstanding payments", tab: "Outstanding", href: "/finance/payments", permission: "finance.payments:view", icon: CalendarClock, keywords: ["unpaid", "partly paid", "overdue", "upcoming", "due", "mark as paid", "payment tracking"] },
           {
@@ -187,9 +202,29 @@ export const MODULES: NavModule[] = [
           { title: "Receivables", href: "/finance/assets/receivables", permission: "finance.receivables:view", icon: HandCoins, keywords: ["accounts receivable", "customers owe"] },
           { title: "Prepaid expenses", tab: "Prepaid", href: "/finance/assets/prepaid", permission: "finance.prepaid:view", icon: CalendarRange, keywords: ["advance paid", "insurance", "annual"] },
           { title: "Inventory valuation", tab: "Inventory", href: "/finance/assets/inventory", permission: "finance.inventory_valuation:view", icon: Boxes, keywords: ["stock in storage", "stock in use", "wasted stock"] },
-          { title: "Fixed assets", href: "/finance/assets/fixed", permission: "finance.fixed_assets:view", icon: Armchair, keywords: ["furniture", "machinery", "vehicles", "computers", "register"] },
-          { title: "Depreciation", href: "/finance/assets/depreciation", permission: "finance.fixed_assets:view", icon: TrendingDown, keywords: ["book value", "accumulated depreciation"] },
-          { title: "Intangible assets", tab: "Intangible", href: "/finance/assets/intangible", permission: "finance.fixed_assets:view", icon: KeyRound, keywords: ["software", "licences", "amortisation"] },
+          {
+            title: "Fixed assets",
+            href: "/finance/assets/fixed",
+            permission: "finance.fixed_assets:view",
+            icon: Armchair,
+            keywords: ["furniture", "machinery", "vehicles", "computers", "register"],
+            pages: [
+              { title: "Fixed asset register", tab: "Asset register", href: "/finance/assets/fixed", permission: "finance.fixed_assets:view", icon: Armchair },
+              { title: "Depreciation on assets", tab: "Depreciation on assets", href: "/finance/assets/fixed/depreciation", permission: "finance.fixed_assets:view", icon: TrendingDown, keywords: ["depreciation", "book value", "accumulated depreciation"] },
+            ],
+          },
+          {
+            title: "Intangible assets",
+            tab: "Intangible",
+            href: "/finance/assets/intangible",
+            permission: "finance.fixed_assets:view",
+            icon: KeyRound,
+            keywords: ["software", "licences", "intangible"],
+            pages: [
+              { title: "Intangible asset register", tab: "Asset register", href: "/finance/assets/intangible", permission: "finance.fixed_assets:view", icon: KeyRound },
+              { title: "Amortization", tab: "Amortization", href: "/finance/assets/intangible/amortization", permission: "finance.fixed_assets:view", icon: TrendingDown, keywords: ["amortisation", "amortization", "carrying value"] },
+            ],
+          },
           { title: "Investments", href: "/finance/assets/investments", permission: "finance.investments:view", icon: PiggyBank, keywords: ["fixed deposit", "mutual fund", "shares"] },
         ],
       },
@@ -457,9 +492,11 @@ const matches = (href: string, exact: boolean | undefined, pathname: string) =>
  * The module, the sidebar entry and the page (a child, when the entry has
  * children) that a path belongs to, by the deepest matching href. A child's
  * detail pages count as that child: /finance/employees/<id> is Employees under
- * Projects. `item` is always a sidebar entry.
+ * Projects. `item` is always a sidebar entry. `page` is the sub-page of the child (or of the entry,
+ * when it has no children) the path is on, when that entry has sub-pages (Fixed assets ›
+ * Depreciation on assets).
  */
-export function findActive(pathname: string): { module: NavModule | null; item: NavItem | null; child: NavItem | null } {
+export function findActive(pathname: string): { module: NavModule | null; item: NavItem | null; child: NavItem | null; page: NavItem | null } {
   for (const mod of MODULES) {
     if (pathname !== mod.href && !pathname.startsWith(`${mod.href}/`)) continue;
     let best: { item: NavItem; child: NavItem | null; length: number } | null = null;
@@ -474,9 +511,11 @@ export function findActive(pathname: string): { module: NavModule | null; item: 
         best = { item, child: null, length: item.href.length };
       }
     }
-    return { module: mod, item: best?.item ?? null, child: best?.child ?? null };
+    const owner = best?.child ?? best?.item ?? null;
+    const page = (owner?.pages ?? []).reduce<NavItem | null>((found, p) => (matches(p.href, p.exact, pathname) && (!found || p.href.length > found.href.length) ? p : found), null);
+    return { module: mod, item: best?.item ?? null, child: best?.child ?? null, page };
   }
-  return { module: null, item: null, child: null };
+  return { module: null, item: null, child: null, page: null };
 }
 
 /** True when the path is the entry's page, one of its children, or a detail page under either. */
@@ -496,7 +535,9 @@ export function modulePages(mod: NavModule): NavItem[] {
     const children = (item.children ?? []).map((c) =>
       c.href === item.href ? { ...c, keywords: [...(c.keywords ?? []), item.title, ...(item.keywords ?? [])] } : c,
     );
-    const own = children.length ? [...(children.some((c) => c.href === item.href) ? [] : [item]), ...children] : [item];
+    const top = children.length ? [...(children.some((c) => c.href === item.href) ? [] : [item]), ...children] : [item];
+    // Sub-pages are found by search too, under the page they sit in (Fixed assets › Depreciation on assets).
+    const own = top.flatMap((p) => [p, ...(p.pages ?? []).map((s) => ({ ...s, keywords: [...(s.keywords ?? []), p.title] }))]);
     for (const page of own) {
       if (seen.has(page.href)) continue;
       seen.add(page.href);
@@ -520,10 +561,22 @@ export function canOpen(item: NavItem, can: CanFn): boolean {
  * one the page belongs to marked. Only on the child pages themselves; detail pages (a project, an
  * employee, an item) have their own header and tabs.
  */
-export function getSectionTabs(pathname: string, can: CanFn): { item: NavItem; tabs: NavItem[]; activeHref: string } | null {
-  const { item, child } = findActive(pathname);
-  if (!item?.children?.length || !child || pathname !== child.href) return null;
-  return { item, tabs: item.children.filter((c) => canOpen(c, can)), activeHref: child.href };
+export function getSectionTabs(
+  pathname: string,
+  can: CanFn,
+): { item: NavItem; tabs: NavItem[]; activeHref: string; subTabs: NavItem[]; activeSubHref: string | null } | null {
+  const { item, child, page } = findActive(pathname);
+  const owner = child ?? item;
+  // Sub-pages (Fixed assets › Depreciation on assets) show as a second row on the page and on each of them.
+  const subTabs = (owner?.pages ?? []).filter((p) => canOpen(p, can));
+  const onSubPage = Boolean(page && pathname === page.href);
+  if (item?.children?.length && child && (pathname === child.href || onSubPage)) {
+    return { item, tabs: item.children.filter((c) => canOpen(c, can)), activeHref: child.href, subTabs, activeSubHref: page?.href ?? null };
+  }
+  if (item && !item.children?.length && subTabs.length && (pathname === item.href || onSubPage)) {
+    return { item, tabs: [], activeHref: item.href, subTabs, activeSubHref: page?.href ?? null };
+  }
+  return null;
 }
 
 /**
@@ -550,5 +603,6 @@ export function visibleModules(can: CanFn): NavModule[] {
 
 /** The first page a person may open, in sidebar order, or null when their role opens none. */
 export function firstAllowedHref(can: CanFn): string | null {
-  return visibleModules(can)[0]?.items[0]?.href ?? null;
+  const items = visibleModules(can)[0]?.items ?? [];
+  return (items.find((i) => !i.notLanding) ?? items[0])?.href ?? null;
 }

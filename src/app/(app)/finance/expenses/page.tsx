@@ -13,7 +13,6 @@ import { listExpenses } from "@/features/finance/expenses/queries";
 import { EXPENSE_FILTER_KEYS, EXPENSE_SORT_KEYS } from "@/features/finance/expenses/schemas";
 import { ExpensesView } from "@/features/finance/expenses/components/expenses-view";
 import { ExpenseCategoriesButton } from "@/features/finance/expenses/components/categories-dialog";
-import { ImportStatementCard } from "@/features/finance/expenses/components/import-statement-card";
 import { getExpenseCategories } from "@/server/expense-categories";
 import { NoAccess } from "@/components/shared/no-access";
 import { can, requireUser } from "@/server/auth/session";
@@ -44,7 +43,6 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/finance
 
   return (
     <Page>
-      {can(user, "finance.bank_statements:create") ? <ImportStatementCard /> : null}
       <PageHeader
         eyebrow="Finance"
         title="Total expenses"

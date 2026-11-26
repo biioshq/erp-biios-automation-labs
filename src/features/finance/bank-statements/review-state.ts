@@ -84,14 +84,51 @@ export function decisionProblem(line: ReviewLine, d: LineDecision, ctx: ProblemC
 
 export type ReviewFilter = "all" | "withdrawals" | "deposits" | "new" | "matched" | "attention";
 
+/** Money out and money in are shown as two sections, so the filters only narrow within them. */
 export const REVIEW_FILTERS: { value: ReviewFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "withdrawals", label: "Withdrawals" },
-  { value: "deposits", label: "Deposits" },
+  { value: "all", label: "All lines" },
   { value: "new", label: "New" },
   { value: "matched", label: "Already recorded" },
-  { value: "attention", label: "Needs attention" },
+  { value: "attention", label: "Needs your choice" },
 ];
+
+/** Where a line's amount goes when it is added, in plain words, for the preview and the confirm. */
+export type Destination = "expense" | "bill" | "recorded" | "income" | "capital" | "drawing" | "loan_received" | "loan_payment" | "transfer" | "ignore" | "earlier";
+
+export const DESTINATION_LABELS: Record<Destination, string> = {
+  expense: "New expenses",
+  bill: "Pays outstanding bills",
+  recorded: "Already in the books",
+  income: "New income",
+  capital: "Capital introduced",
+  drawing: "Owner drawings",
+  loan_received: "Loans received",
+  loan_payment: "Loan repayments",
+  transfer: "Transfers between own accounts",
+  ignore: "Ignored",
+  earlier: "Added from an earlier upload",
+};
+
+const DESTINATION_ORDER: Destination[] = ["expense", "bill", "income", "loan_payment", "loan_received", "capital", "drawing", "transfer", "recorded", "ignore", "earlier"];
+
+export function destinationOf(line: ReviewLine, d: LineDecision): Destination {
+  if (line.imported) return "earlier";
+  if (d.action === "match") return d.matchKey?.startsWith("bill:") ? "bill" : "recorded";
+  return d.action;
+}
+
+/** Lines grouped by where their money goes, with counts and amounts, in a fixed order. */
+export function destinationTotals(rows: { line: ReviewLine; decision: LineDecision }[]): { key: Destination; label: string; count: number; amount: number }[] {
+  const by = new Map<Destination, { count: number; amount: number }>();
+  for (const r of rows) {
+    const k = destinationOf(r.line, r.decision);
+    const cur = by.get(k) ?? { count: 0, amount: 0 };
+    cur.count += 1;
+    cur.amount += amountOf(r.line);
+    by.set(k, cur);
+  }
+  return DESTINATION_ORDER.filter((k) => by.has(k)).map((k) => ({ key: k, label: DESTINATION_LABELS[k], count: by.get(k)!.count, amount: Math.round(by.get(k)!.amount * 100) / 100 }));
+}
 
 export function inFilter(filter: ReviewFilter, line: ReviewLine, d: LineDecision, problem: string | null): boolean {
   switch (filter) {

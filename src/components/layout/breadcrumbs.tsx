@@ -22,7 +22,7 @@ type Crumb = { title: string; href: string; className?: string };
  */
 export function Breadcrumbs() {
   const pathname = usePathname();
-  const { module, item, child } = findActive(pathname);
+  const { module, item, child, page: subPage } = findActive(pathname);
   if (!module) {
     const title = pathname.startsWith("/settings") ? "Settings" : "";
     return title ? <span className="block truncate text-sm font-medium">{title}</span> : null;
@@ -31,7 +31,9 @@ export function Breadcrumbs() {
   const isDashboard = !item || (item.exact && item.href === module.href);
   // The page the path belongs to: the tab when the entry has tabs, else the entry.
   const page = child ?? item;
-  const isDetail = Boolean(page && pathname !== page.href);
+  // A sub-page (Fixed assets › Depreciation on assets) is a page of its own, not a detail page.
+  const sub = subPage && page && subPage.href !== page.href ? subPage : null;
+  const isDetail = Boolean(page && pathname !== (sub ?? page).href);
 
   const trail: Crumb[] = [{ title: module.title, href: module.href }];
   if (isDashboard || !item || !page) {
@@ -42,6 +44,7 @@ export function Breadcrumbs() {
     // entry crumb to keep the page name in view.
     if (child && child.href !== item.href) trail.push({ title: item.title, href: item.href, className: "hidden md:inline-flex" });
     trail.push({ title: page.title, href: page.href });
+    if (sub) trail.push({ title: sub.title, href: sub.href });
   }
   if (isDetail) trail.push({ title: "Details", href: pathname });
 

@@ -44,7 +44,7 @@ export async function AssetRegisterPage({ kind, searchParams }: { kind: AssetKin
         actions={
           <>
             <Button variant="outline" asChild>
-              <Link href={`/finance/assets/depreciation${kind === "intangible" ? "?kind=intangible" : "?kind=tangible"}`}>
+              <Link href={kind === "intangible" ? "/finance/assets/intangible/amortization" : "/finance/assets/fixed/depreciation"}>
                 <TrendingDown /> {labels.charge} summary
               </Link>
             </Button>

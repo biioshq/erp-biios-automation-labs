@@ -50,7 +50,7 @@ const SUMMARY_LABEL =
 const OPENING_LABEL = /^(opening|op) bal|^balance as (on|at|of)|b f$|brought forward$|^balance forward$/;
 /** Text that only appears after the table or in a page footer: it never continues a narration. */
 const TRAILER_RE =
-  /end of (the )?statement|computer generated|system generated|does not require (a |any )?signature|registered office|regd\.? office|^page( no\.?)? ?:? ?\d+( of \d+)?$|^legends?\b|please (examine|check|note)|statement summary/i;
+  /end of (the )?statement|computer generated|system generated|does not require (a |any )?signature|registered office|regd\.? office|^page( no\.?)? ?:? ?\d+( of \d+)?$|^legends?( used\b|\s*:|$)|please (examine|check|note)|statement summary/i;
 
 const isSummaryLabel = (s: string) => {
   const k = words(s);
@@ -329,13 +329,18 @@ const MIN_HARD_CUTS = 5;
  * or first character of a piece. When every wrapped piece in the file is exactly as long as the
  * longest piece, the file was cut that way, and its pieces are joined as written: no space inside a
  * cut word, the bank's own space where it cut at one. Files wrapped at words keep one space between
- * pieces, and so does a PDF, whose lines carry no spaces at their ends.
+ * pieces, and so does a PDF, whose lines carry no spaces at their ends. Equal widths alone are not
+ * enough: a bank that prints a fixed-length id on the first line ("NEFT-N1234567890123450", then
+ * the party) also gives equal pieces. A cutter at a fixed width sometimes cuts at a space, so at
+ * least one cut has to show that space at the end of a piece or the start of the next one.
  */
 function joinHardCuts(drafts: Draft[], pieces: Map<Draft, string[]>) {
   const all = [...pieces.values()];
   const width = all.reduce((m, ps) => ps.reduce((n, p) => Math.max(n, p.length), m), 0);
   const wrapped = all.flatMap((ps) => ps.slice(0, -1));
   if (width < 20 || wrapped.length < MIN_HARD_CUTS || wrapped.some((p) => p.length !== width)) return;
+  const cutAtSpace = all.some((ps) => ps.some((p, i) => i + 1 < ps.length && (/\s$/.test(p) || /^\s/.test(ps[i + 1]!))));
+  if (!cutAtSpace) return;
   for (const d of drafts) {
     const ps = pieces.get(d);
     if (ps && ps.length > 1) d.narration = ps.join("").replace(/\s+/g, " ").trim().slice(0, 1000);

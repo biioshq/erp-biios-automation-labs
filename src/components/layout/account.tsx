@@ -10,6 +10,7 @@ import { DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator } from "@/co
 import { Spinner } from "@/components/ui/spinner";
 import { authClient, signOut } from "@/lib/auth-client";
 import { initials } from "@/lib/format";
+import { OWN_PASSWORD_PERMISSION } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { useCan, type CurrentUser } from "@/components/current-user";
 
@@ -70,7 +71,10 @@ export function SignInMethodsLine({ methods }: { methods: SignInMethods }) {
   return <span className="block text-[11px] text-muted-foreground">Signs in with {parts.join(" and ")}</span>;
 }
 
-/** Team members and roles (for those whose role opens them), change password (only for accounts that have one) and log out. */
+/**
+ * Team members and roles (for those whose role opens them), change password (for roles with
+ * "Change own password" and accounts that have a password) and log out.
+ */
 export function AccountMenuItems({
   account,
   onChangePassword,
@@ -78,8 +82,10 @@ export function AccountMenuItems({
   account: ReturnType<typeof useAccount>;
   onChangePassword: () => void;
 }) {
-  // While methods are loading, keep the item; hide it once we know the account has no password (Google only).
-  const canChangePassword = account.methods?.password !== false;
+  // The role must allow it (the server refuses the change otherwise). While sign-in methods are
+  // loading, keep the item; hide it once we know the account has no password (Google only).
+  const mayChangePassword = useCan(OWN_PASSWORD_PERMISSION);
+  const canChangePassword = mayChangePassword && account.methods?.password !== false;
   const canSeeTeam = useCan("settings.team:view");
   const canSeeRoles = useCan("settings.roles:view");
   return (

@@ -19,6 +19,11 @@ export type PermissionResource = {
   actions: PermissionAction[];
   /** What the built-in Member role may do by default: exactly what members could do before roles existed. */
   memberDefault: PermissionAction[];
+  /**
+   * Actions every role has unless that role is saved with them unticked (the role's `denied` list).
+   * For permissions added after roles were saved, so that no existing role loses them silently.
+   */
+  defaultOn?: PermissionAction[];
 };
 
 export type DataPermission = {

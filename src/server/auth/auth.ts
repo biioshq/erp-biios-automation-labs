@@ -2,11 +2,12 @@ import "server-only";
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { mongodbAdapter } from "better-auth/adapters/mongodb";
 import { nextCookies } from "better-auth/next-js";
 import { MongoClient } from "mongodb";
 import { googleStatus, isAllowedCompanyEmail } from "./google";
+import { roleMayChangeOwnPassword } from "./roles";
 import { DB_NAME } from "@/server/db-name";
 
 const globalForAuth = globalThis as unknown as { __authMongo?: MongoClient };
@@ -19,6 +20,33 @@ const db = client.db(DB_NAME);
  * `allowAccountCreation.run(true, () => auth.api.signUpEmail(...))`.
  */
 export const allowAccountCreation = new AsyncLocalStorage<boolean>();
+
+/**
+ * Better Auth endpoints that let the signed-in person set their own password over HTTP. In
+ * better-auth 1.7 that is only /change-password: /set-password is server-only (not routed), and
+ * /reset-password needs a reset token, which cannot be issued because sendResetPassword is not set.
+ * Admins setting someone's password (setUserPassword) use the adapter directly, not these routes.
+ */
+const OWN_PASSWORD_PATHS = new Set(["/change-password"]);
+
+/**
+ * Refuses a password change when the person's role has "Change own password" unticked. The role
+ * is read fresh: the user by id from the database (not the cookie-cached session user), then the
+ * role through resolveRole, as for every page. Lookup errors are not swallowed, so the change fails
+ * rather than slipping through. No session: the endpoint itself answers 401.
+ */
+const ownPasswordGate = createAuthMiddleware(async (ctx) => {
+  if (!OWN_PASSWORD_PATHS.has(ctx.path)) return;
+  const session = await getSessionFromCtx(ctx);
+  if (!session?.user?.id) return;
+  const user = (await ctx.context.internalAdapter.findUserById(session.user.id)) as { role?: unknown } | null;
+  if (!(await roleMayChangeOwnPassword(user?.role))) {
+    throw new APIError("FORBIDDEN", {
+      code: "password_change_not_allowed",
+      message: "Your role does not allow changing your password. Ask an admin to set a new one.",
+    });
+  }
+});
 
 const openSignUp = () => process.env.ALLOW_OPEN_SIGNUP === "true";
 const google = googleStatus();
@@ -173,6 +201,7 @@ export const auth = betterAuth({
       },
     },
   },
+  hooks: { before: ownPasswordGate },
   plugins: [nextCookies()],
 });
 

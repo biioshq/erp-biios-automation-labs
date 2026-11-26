@@ -12,10 +12,10 @@ import { INVENTORY_RESOURCES } from "./inventory";
 import { ANALYTICS_RESOURCES } from "./analytics";
 import { TASKS_RESOURCES } from "./tasks";
 import { HR_RESOURCES } from "./hr";
-import { DATA_PERMISSIONS, SETTINGS_RESOURCES } from "./settings";
+import { DATA_PERMISSIONS, OWN_PASSWORD_PERMISSION, SETTINGS_RESOURCES } from "./settings";
 
 export type { DataPermission, Permission, PermissionAction, PermissionResource } from "./types";
-export { DATA_PERMISSIONS };
+export { DATA_PERMISSIONS, OWN_PASSWORD_PERMISSION };
 
 export const ADMIN_ROLE = "admin";
 export const MEMBER_ROLE = "member";
@@ -104,4 +104,30 @@ export function normalizePermissions(list: readonly string[]): string[] {
     if (view && KNOWN.has(view)) set.add(view);
   }
   return ALL_PERMISSIONS.filter((p) => set.has(p));
+}
+
+/**
+ * Permissions every role holds unless it is saved with them unticked (PermissionResource.defaultOn).
+ * A stored role lists them in `denied` when they are off; with no `denied` entry they are on.
+ */
+export const DEFAULT_ON_PERMISSIONS: string[] = ALL_RESOURCES.flatMap((r) =>
+  (r.defaultOn ?? []).filter((a) => r.actions.includes(a)).map((a) => perm(r.key, a)),
+);
+
+const DEFAULT_ON = new Set(DEFAULT_ON_PERMISSIONS);
+
+/**
+ * What a stored role document grants: its saved list, cleaned by normalizePermissions, plus every
+ * default-on permission it does not deny. A default-on permission is held exactly when it is not in
+ * `denied`, whatever the saved list says. Everything else follows the saved list as before.
+ */
+export function storedRolePermissions(saved: readonly string[] | null | undefined, denied: readonly string[] | null | undefined): string[] {
+  const off = new Set((denied ?? []).filter((p) => DEFAULT_ON.has(p)));
+  return normalizePermissions([...(saved ?? []), ...DEFAULT_ON_PERMISSIONS]).filter((p) => !off.has(p));
+}
+
+/** The `denied` list to store with a role's permission list: the default-on permissions it leaves out. */
+export function deniedDefaults(permissions: readonly string[]): string[] {
+  const held = new Set(permissions);
+  return DEFAULT_ON_PERMISSIONS.filter((p) => !held.has(p));
 }

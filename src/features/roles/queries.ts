@@ -3,7 +3,7 @@ import "server-only";
 import { connectDB } from "@/server/db";
 import { Role, User } from "@/server/models";
 import { roleKeyOf } from "@/server/auth/permissions";
-import { ADMIN_ROLE, ALL_PERMISSIONS, MEMBER_DEFAULT_PERMISSIONS, MEMBER_ROLE, normalizePermissions } from "@/lib/permissions";
+import { ADMIN_ROLE, ALL_PERMISSIONS, MEMBER_DEFAULT_PERMISSIONS, MEMBER_ROLE, storedRolePermissions } from "@/lib/permissions";
 import type { RoleSummary } from "./model";
 
 /** Who holds each role key, by name. */
@@ -42,7 +42,7 @@ export async function listRoles(): Promise<RoleSummary[]> {
       builtIn: true,
       locked: false,
       isDefault: !memberDoc,
-      permissions: memberDoc ? normalizePermissions(memberDoc.permissions ?? []) : [...MEMBER_DEFAULT_PERMISSIONS],
+      permissions: memberDoc ? storedRolePermissions(memberDoc.permissions, memberDoc.denied) : [...MEMBER_DEFAULT_PERMISSIONS],
       people: people.get(MEMBER_ROLE) ?? [],
     },
   ];
@@ -55,7 +55,7 @@ export async function listRoles(): Promise<RoleSummary[]> {
       builtIn: false,
       locked: false,
       isDefault: false,
-      permissions: normalizePermissions(d.permissions ?? []),
+      permissions: storedRolePermissions(d.permissions, d.denied),
       people: people.get(d.key) ?? [],
     });
   }

@@ -69,8 +69,8 @@ export function NewRoleDialog({ roles }: { roles: Option[] }) {
               control={form.control}
               name="copyFrom"
               label="Start from"
-              options={[{ value: NONE, label: "No permissions" }, ...roles.map((r) => ({ ...r, label: `Same as ${r.label}` }))]}
-              description="Copies that role's permissions as a starting point. Roles beyond your own cannot be copied."
+              options={[{ value: NONE, label: "No pages (only Change own password)" }, ...roles.map((r) => ({ ...r, label: `Same as ${r.label}` }))]}
+              description="Copies that role's permissions as a starting point. Roles beyond your own cannot be copied. You can untick Change own password on the next page."
             />
           </div>
           <DialogFooter className="max-sm:flex-col-reverse">

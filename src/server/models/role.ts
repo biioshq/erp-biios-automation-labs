@@ -13,6 +13,11 @@ const roleSchema = new Schema(
     name: { type: String, required: true, trim: true, maxlength: 60 },
     description: { type: String, trim: true, maxlength: 300, default: "" },
     permissions: { type: [String], default: [] },
+    /**
+     * Default-on permissions (DEFAULT_ON_PERMISSIONS, for example "Change own password") that this
+     * role has unticked. Absent on roles saved before it existed: they hold every default-on one.
+     */
+    denied: { type: [String], default: undefined },
     builtIn: { type: Boolean, default: false },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User" },

@@ -5,7 +5,7 @@ import { can, requireUser } from "@/server/auth/session";
 import { parseListParams } from "@/lib/list-params";
 import { formatNumber } from "@/lib/format";
 import { AUDIT_FILTER_KEYS } from "@/lib/audit";
-import { auditActors, listAuditLogs } from "@/features/finance/audit/queries";
+import { auditActors, listAuditLogs, visibleAuditTypes } from "@/features/finance/audit/queries";
 import { AuditView } from "@/features/finance/audit/components/audit-view";
 
 export const metadata: Metadata = { title: "Audit trail" };
@@ -36,7 +36,7 @@ export default async function AuditTrailPage({ searchParams }: PageProps<"/finan
           </>
         }
       />
-      <AuditView data={data} actors={actors} />
+      <AuditView data={data} actors={actors} types={visibleAuditTypes(user)} />
     </Page>
   );
 }

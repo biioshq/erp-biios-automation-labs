@@ -14,7 +14,7 @@ const VIEW_PERMISSION = { expense: "finance.expenses:view", income: "finance.inc
  */
 export async function fetchAuditHistory(type: keyof typeof VIEW_PERMISSION, id: string): Promise<AuditRow[] | null> {
   const user = await getCurrentUser();
-  if (!user || !(type in VIEW_PERMISSION) || !Types.ObjectId.isValid(id)) return null;
+  if (!user || typeof type !== "string" || !Object.hasOwn(VIEW_PERMISSION, type) || typeof id !== "string" || !Types.ObjectId.isValid(id)) return null;
   if (!can(user, "finance.audit:view") || !can(user, VIEW_PERMISSION[type])) return null;
   return entityHistory(type, id, user);
 }

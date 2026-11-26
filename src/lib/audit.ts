@@ -53,7 +53,7 @@ export function auditLabel(list: readonly { value: string; label: string }[], va
 }
 
 /** How a changed field is shown: its name and how to read its value. */
-export type AuditFieldKind = "text" | "money" | "date" | "bool" | "category" | "incomeCategory" | "project" | "account" | "stage" | "method" | "department";
+export type AuditFieldKind = "text" | "invoice" | "money" | "date" | "bool" | "category" | "incomeCategory" | "project" | "account" | "stage" | "method" | "department";
 
 export const AUDIT_FIELDS: Record<string, { label: string; kind: AuditFieldKind }> = {
   number: { label: "Number", kind: "text" },
@@ -79,7 +79,7 @@ export const AUDIT_FIELDS: Record<string, { label: string; kind: AuditFieldKind 
   notes: { label: "Notes", kind: "text" },
   gstin: { label: "GSTIN", kind: "text" },
   invoiceNumber: { label: "Vendor invoice no.", kind: "text" },
-  invoice: { label: "Invoice", kind: "text" },
+  invoice: { label: "Invoice", kind: "invoice" },
   receipt: { label: "Receipt file", kind: "bool" },
   file: { label: "Invoice file", kind: "bool" },
   prepaidFrom: { label: "Prepaid from", kind: "date" },

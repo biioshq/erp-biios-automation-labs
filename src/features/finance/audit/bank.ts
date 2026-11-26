@@ -43,13 +43,16 @@ const ENTITY_OF: Record<string, AuditEntityType> = {
 async function resolveTargets(refs: LinkRef[]): Promise<Map<string, Target>> {
   const out = new Map<string, Target>();
   const ids = (kind: string) => validIds(refs.filter((r) => r.kind === kind).map((r) => r.id));
+  // Only the lookups a kind in this batch needs ("payments._id" has no index, so an unneeded one would scan).
+  const expenseIds = ids("expense");
+  const expensePaymentIds = ids("expensePayment");
+  const expenseOr = [...(expenseIds.length ? [{ _id: { $in: expenseIds } }] : []), ...(expensePaymentIds.length ? [{ "payments._id": { $in: expensePaymentIds } }] : [])];
+  const incomeIds = ids("income");
+  const loanPaymentIds = ids("liabilityPayment");
   const [expenses, incomes, loans, info] = await Promise.all([
-    Expense.find(
-      { $or: [{ _id: { $in: ids("expense") } }, { "payments._id": { $in: ids("expensePayment") } }] },
-      { number: 1, vendor: 1, category: 1, payments: 1 },
-    ).lean(),
-    Income.find({ _id: { $in: ids("income") } }, { number: 1, client: 1, invoice: 1 }).lean(),
-    Liability.find({ "payments._id": { $in: ids("liabilityPayment") } }, { code: 1, name: 1, payments: 1 }).lean(),
+    expenseOr.length ? Expense.find({ $or: expenseOr }, { number: 1, vendor: 1, category: 1, payments: 1 }).lean() : Promise.resolve([]),
+    incomeIds.length ? Income.find({ _id: { $in: incomeIds } }, { number: 1, client: 1, invoice: 1 }).lean() : Promise.resolve([]),
+    loanPaymentIds.length ? Liability.find({ "payments._id": { $in: loanPaymentIds } }, { code: 1, name: 1, payments: 1 }).lean() : Promise.resolve([]),
     describeLinks(refs.filter((r) => ["capitalEntry", "liability", "accountTransfer"].includes(r.kind))),
   ]);
   const invoiceIds = incomes.flatMap((i) => (i.invoice ? [i.invoice] : []));

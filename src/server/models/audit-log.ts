@@ -3,7 +3,8 @@ import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES, AUDIT_SOURCES, auditValues } from "@
 
 /**
  * The audit trail (collection auditLogs): one entry per change to a money record, written after the
- * change succeeded (src/server/audit.ts). Entries are only ever added, never edited, and they never
+ * change succeeded (src/server/audit.ts). Entries are only ever added; the one later write is
+ * setting `salary` on a record's earlier entries once that record becomes salary data. They never
  * touch the record they describe, so a record's updatedAt and its guards are unaffected.
  *
  * `entity.id` is a string because some entities are not documents with an ObjectId (an expense

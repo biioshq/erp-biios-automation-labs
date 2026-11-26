@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { Types } from "mongoose";
-import { auditSafely, diffSnapshots, snapshotChanges, type AuditEntry } from "@/server/audit";
+import { auditSafely, diffSnapshots, hideEarlierAsSalary, snapshotChanges, type AuditEntry } from "@/server/audit";
 import type { ExpenseCategoryOption } from "@/lib/expense-categories";
 
 /**
@@ -55,8 +55,10 @@ const ruleSnapshot = (r: RuleLike) => ({
 
 /** A remembered party edited or forgotten on the bank statements page. */
 export async function auditPartyRule(before: RuleLike, after: RuleLike | null): Promise<void> {
-  await auditSafely((): AuditEntry | null => {
+  await auditSafely(async (): Promise<AuditEntry | null> => {
     const salary = before.category === "salaries" || after?.category === "salaries";
+    // Now a salary payee: its earlier entries are hidden from roles without salaries too.
+    if (after?.category === "salaries" && before.category !== "salaries") await hideEarlierAsSalary("bank_party_rule", before._id);
     const entity = { type: "bank_party_rule" as const, id: String(before._id), label: ruleLabel(before) };
     if (!after) return { action: "deleted", entity, changes: snapshotChanges(ruleSnapshot(before), "from"), salary };
     const changes = diffSnapshots(ruleSnapshot(before), ruleSnapshot(after));

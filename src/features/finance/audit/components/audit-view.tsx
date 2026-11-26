@@ -37,7 +37,7 @@ function ChangesCell({ row }: { row: AuditRow }) {
 }
 
 /** The Audit trail list: newest first, filtered by record type, action, person, source and date. */
-export function AuditView({ data, actors }: { data: Paginated<AuditRow>; actors: { value: string; label: string }[] }) {
+export function AuditView({ data, actors, types }: { data: Paginated<AuditRow>; actors: { value: string; label: string }[]; types: string[] }) {
   const columns = useMemo<ColumnDef<AuditRow>[]>(
     () => [
       {
@@ -90,12 +90,13 @@ export function AuditView({ data, actors }: { data: Paginated<AuditRow>; actors:
 
   const filters: FilterDef[] = useMemo(
     () => [
-      { key: "type", title: "Record", options: AUDIT_ENTITY_TYPES.map((o) => ({ ...o })) },
+      // Only the record types this person may open.
+      { key: "type", title: "Record", options: AUDIT_ENTITY_TYPES.filter((o) => types.includes(o.value)).map((o) => ({ ...o })) },
       { key: "action", title: "Action", options: AUDIT_ACTIONS.map((o) => ({ ...o })) },
       { key: "actor", title: "Person", options: actors },
       { key: "source", title: "Source", options: AUDIT_SOURCES.map((o) => ({ ...o })) },
     ],
-    [actors],
+    [actors, types],
   );
 
   return (

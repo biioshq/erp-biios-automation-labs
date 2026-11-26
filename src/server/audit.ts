@@ -140,6 +140,20 @@ export async function audit(entries: AuditEntry | AuditEntry[] | null | undefine
 }
 
 /**
+ * A record that has just become salary data (an expense moved to Salaries, a remembered party now
+ * paying salaries): its earlier entries are hidden from people without the salaries permission
+ * too, or they would still show what is now someone's pay. Only ever sets the flag, never clears
+ * it. Touches auditLogs only. Never throws.
+ */
+export async function hideEarlierAsSalary(type: AuditEntityType, id: string | Types.ObjectId): Promise<void> {
+  try {
+    await AuditLog.updateMany({ "entity.type": type, "entity.id": String(id), salary: { $ne: true } }, { $set: { salary: true } });
+  } catch (error) {
+    console.error("[audit] could not hide earlier entries of a salary record", error);
+  }
+}
+
+/**
  * Runs `build` (which may read the database to describe the change) and writes what it returns.
  * Anything that goes wrong, in building or in writing, is logged and never reaches the caller.
  */

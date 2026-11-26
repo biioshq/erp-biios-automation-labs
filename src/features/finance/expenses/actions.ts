@@ -17,7 +17,7 @@ import { getExpense } from "./queries";
 import { generatedNote, isGeneratedExpense } from "./sources";
 import { HALF_PAISA, assertAccountUsable, assertMaySalary, toObjectId } from "./server";
 import type { ExpenseDetail } from "./types";
-import { auditSafely } from "@/server/audit";
+import { auditSafely, hideEarlierAsSalary } from "@/server/audit";
 import { expenseCreated, expenseDeleted, expenseEdited } from "@/features/finance/audit/records";
 
 const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
@@ -247,6 +247,8 @@ export const updateExpense = defineAction(
     if (input.receiptId) await attachFiles([input.receiptId], { type: "expense", id: input.id }, input.projectId);
     await auditSafely(async () => {
       const after = await Expense.findById(existing._id).lean();
+      // Moved to Salaries: what the trail holds from before is someone's pay now.
+      if (after?.category === "salaries" && existing.category !== "salaries") await hideEarlierAsSalary("expense", existing._id);
       return after ? expenseEdited(existing, after) : null;
     });
     return { id: input.id };

@@ -2,7 +2,7 @@ import "server-only";
 
 import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
-import { AuditLog, BankAccount, Project, type AuditLogDoc } from "@/server/models";
+import { AuditLog, BankAccount, Invoice, Project, type AuditLogDoc } from "@/server/models";
 import { can, type SessionUser } from "@/server/auth/session";
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { dateRangeFilter, fromDateInput } from "@/lib/dates";
@@ -28,6 +28,28 @@ import {
 
 /** Salary entries only for people who may see salaries. */
 const salaryScope = (user: SessionUser) => (can(user, "data.salaries") ? {} : { salary: { $ne: true } });
+
+/** The page each record type opens on: its entries need that page too, as its History does. */
+const TYPE_PERMISSION: Record<AuditEntityType, string> = {
+  expense: "finance.expenses:view",
+  income: "finance.income:view",
+  invoice: "finance.invoices:view",
+  capital_entry: "finance.equity:view",
+  liability: "finance.liabilities:view",
+  account_transfer: "finance.cash_bank:view",
+  bank_party_rule: "finance.bank_statements:view",
+  expense_category: "finance.expenses:view",
+};
+
+/** The record types this person may read entries of. */
+export const visibleAuditTypes = (user: SessionUser) => AUDIT_ENTITY_TYPES.map((t) => t.value).filter((t) => can(user, TYPE_PERMISSION[t]));
+
+/** Salary scope plus the record types the person may see; an empty list matches nothing. */
+const scopeOf = (user: SessionUser, only?: string[]): Record<string, unknown> => {
+  const allowed: string[] = visibleAuditTypes(user);
+  const types = only?.length ? allowed.filter((t) => only.includes(t)) : allowed;
+  return { ...salaryScope(user), "entity.type": { $in: types } };
+};
 
 const SYSTEM_ACTOR = "system";
 
@@ -59,11 +81,16 @@ type Lookups = {
   category: (v: string) => string;
   projects: Map<string, string>;
   accounts: Map<string, string>;
+  invoices: Map<string, string>;
 };
+
+/** A stored id (24 hex digits). Invoice entries also hold invoice numbers, which are never ids. */
+const isOid = (v: string) => /^[a-f\d]{24}$/i.test(v);
 
 async function lookupsFor(docs: AuditLogDoc[]): Promise<Lookups> {
   const projectIds = new Set<string>();
   const accountIds = new Set<string>();
+  const invoiceIds = new Set<string>();
   for (const d of docs) {
     for (const c of d.changes ?? []) {
       const kind = AUDIT_FIELDS[c.field]?.kind;
@@ -71,19 +98,22 @@ async function lookupsFor(docs: AuditLogDoc[]): Promise<Lookups> {
         if (typeof v !== "string" || !Types.ObjectId.isValid(v)) continue;
         if (kind === "project") projectIds.add(v);
         if (kind === "account") accountIds.add(v);
+        if (kind === "invoice" && isOid(v)) invoiceIds.add(v);
       }
     }
   }
   const oids = (s: Set<string>) => [...s].map((id) => new Types.ObjectId(id));
-  const [labeler, projects, accounts] = await Promise.all([
+  const [labeler, projects, accounts, invoices] = await Promise.all([
     getExpenseCategoryLabeler(),
     projectIds.size ? Project.find({ _id: { $in: oids(projectIds) } }, { name: 1 }).lean() : Promise.resolve([]),
     accountIds.size ? BankAccount.find({ _id: { $in: oids(accountIds) } }, { name: 1 }).lean() : Promise.resolve([]),
+    invoiceIds.size ? Invoice.find({ _id: { $in: oids(invoiceIds) } }, { number: 1 }).lean() : Promise.resolve([]),
   ]);
   return {
     category: (v) => labeler(v),
     projects: new Map(projects.map((p) => [String(p._id), p.name])),
     accounts: new Map(accounts.map((a) => [String(a._id), a.name])),
+    invoices: new Map(invoices.map((i) => [String(i._id), i.number])),
   };
 }
 
@@ -109,6 +139,9 @@ function show(field: string, v: unknown, l: Lookups): string | null {
       return l.projects.get(s) ?? "A removed project";
     case "account":
       return l.accounts.get(s) ?? "A removed account";
+    case "invoice":
+      // Edits store the invoice's id; links made from an invoice or a statement store its number.
+      return isOid(s) ? (l.invoices.get(s) ?? "A removed invoice") : s;
     case "stage":
       return labelOf(PROJECT_STAGES, s as (typeof PROJECT_STAGES)[number]["value"]) || s;
     case "method":
@@ -148,9 +181,8 @@ function toRow(d: AuditLogDoc, l: Lookups): AuditRow {
 export const AUDIT_SORT = { at: -1 as const, _id: -1 as const };
 
 function filterOf(params: Pick<ListParams, "q" | "filters" | "from" | "to">, user: SessionUser) {
-  const f: Record<string, unknown> = { ...salaryScope(user) };
   const { filters } = params;
-  if (filters.type?.length) f["entity.type"] = { $in: filters.type };
+  const f: Record<string, unknown> = scopeOf(user, filters.type);
   if (filters.action?.length) f.action = { $in: filters.action };
   if (filters.source?.length) f.source = { $in: filters.source };
   if (filters.actor?.length) {
@@ -189,7 +221,7 @@ export async function listAuditLogs(params: ListParams, user: SessionUser): Prom
 export async function auditActors(user: SessionUser): Promise<{ value: string; label: string }[]> {
   await connectDB();
   const rows = await AuditLog.aggregate<{ _id: Types.ObjectId | null; name: string }>([
-    { $match: salaryScope(user) },
+    { $match: scopeOf(user) },
     { $sort: { at: -1 } },
     { $group: { _id: { $ifNull: ["$actor.id", null] }, name: { $first: "$actor.name" } } },
     { $limit: 300 },
@@ -202,7 +234,7 @@ export async function auditActors(user: SessionUser): Promise<{ value: string; l
 /** The History of one record, newest first. */
 export async function entityHistory(type: AuditEntityType, id: string, user: SessionUser, limit = 100): Promise<AuditRow[]> {
   await connectDB();
-  const docs = await AuditLog.find({ "entity.type": type, "entity.id": id, ...salaryScope(user) })
+  const docs = await AuditLog.find({ ...scopeOf(user, [type]), "entity.id": id })
     .sort(AUDIT_SORT)
     .limit(limit)
     .lean();

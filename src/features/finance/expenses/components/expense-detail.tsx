@@ -123,6 +123,10 @@ export function ExpenseDetailView({
           <Row icon={CreditCard} label="Payment mode">
             {labelOf(PAYMENT_METHODS, expense.paymentMethod)}
             {expense.account ? <span className="text-muted-foreground"> · {expense.account.name}</span> : null}
+            {/* A bill with a payments list and nothing paid yet (a recurring bill): the method is how it is meant to be paid. */}
+            {expense.payment.explicit && !expense.payment.lastMethod && expense.paymentMethod !== "credit" ? (
+              <span className="text-muted-foreground"> · planned, not paid yet</span>
+            ) : null}
             {expense.bankTransactionId ? (
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                 <span>

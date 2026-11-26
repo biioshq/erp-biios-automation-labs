@@ -60,8 +60,10 @@ const isSummaryLabel = (s: string) => {
 /** A line read from a row, before the balance check. `side` is null when only the balance can tell. */
 type Draft = Omit<StatementLine, "withdrawal" | "deposit" | "check"> & { amount: number; side: "dr" | "cr" | null; fromSign: boolean };
 
-/** `summary`: a total, opening or closing row; never a line and never reported as one not read. */
-/** `continuation`: wrapped text of the line above, its narration part and its reference part. */
+/**
+ * `continuation`: wrapped text of the line above, its narration part and its reference part.
+ * `summary`: a total, opening or closing row; never a line and never reported as one not read.
+ */
 type RowResult = { draft: Draft } | { continuation: { narration: string; reference: string } } | { opening: number } | { summary: true } | { skip: string } | null;
 
 function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
@@ -298,6 +300,31 @@ function openingAround(grid: GridRow[], headerIndex: number, lastDraftIndex: num
   return found.size === 1 ? [...found][0]! : null;
 }
 
+/** The lines of a raw narration cell, blank ones left out. */
+const rawPieces = (raw: string | undefined) => (raw ?? "").split(/\r?\n/).filter((p) => p.trim() !== "");
+
+/** Fewest wrapped pieces, all exactly as wide, that show a file was cut at a fixed width. */
+const MIN_HARD_CUTS = 5;
+
+/**
+ * Some banks cut the narration at a fixed width, often inside a UPI id, IFSC or UTR
+ * ("...-KKBK000065" then "1-704120964365-..."), and a space that fell at the cut stays as the last
+ * or first character of a piece. When every wrapped piece in the file is exactly as long as the
+ * longest piece, the file was cut that way, and its pieces are joined as written: no space inside a
+ * cut word, the bank's own space where it cut at one. Files wrapped at words keep one space between
+ * pieces, and so does a PDF, whose lines carry no spaces at their ends.
+ */
+function joinHardCuts(drafts: Draft[], pieces: Map<Draft, string[]>) {
+  const all = [...pieces.values()];
+  const width = all.reduce((m, ps) => ps.reduce((n, p) => Math.max(n, p.length), m), 0);
+  const wrapped = all.flatMap((ps) => ps.slice(0, -1));
+  if (width < 20 || wrapped.length < MIN_HARD_CUTS || wrapped.some((p) => p.length !== width)) return;
+  for (const d of drafts) {
+    const ps = pieces.get(d);
+    if (ps && ps.length > 1) d.narration = ps.join("").replace(/\s+/g, " ").trim().slice(0, 1000);
+  }
+}
+
 /** Reads the transactions under the header row with the given column roles. */
 export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (ColumnRole | null)[]): ParsedStatement {
   const cols = columnsOf(mapping);
@@ -309,6 +336,9 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
   // or under a page's last line is never glued onto a narration. Lines after it are still read.
   let chain = false;
   let lastDraftIndex = headerIndex;
+  // Each line's narration as the file wrote it, piece by piece (see joinHardCuts).
+  const pieces = new Map<Draft, string[]>();
+  const narrationAt = cols.narration;
   for (let i = headerIndex + 1; i < grid.length; i++) {
     const row = grid[i]!;
     if (drafts.length >= MAX_STATEMENT_LINES) {
@@ -321,15 +351,20 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
     if ("draft" in r) {
       drafts.push(r.draft);
       lastDraftIndex = i;
+      if (narrationAt !== undefined) pieces.set(r.draft, rawPieces(row.cells[narrationAt]));
     } else if ("continuation" in r) {
       const last = drafts[drafts.length - 1]!;
-      if (r.continuation.narration) last.narration = `${last.narration} ${r.continuation.narration}`.trim().slice(0, 1000);
+      if (r.continuation.narration) {
+        last.narration = `${last.narration} ${r.continuation.narration}`.trim().slice(0, 1000);
+        if (narrationAt !== undefined) pieces.get(last)?.push(...rawPieces(row.cells[narrationAt]));
+      }
       // References have no spaces: the second line of a wrapped one is joined straight on.
       if (r.continuation.reference) last.reference = `${last.reference ?? ""}${r.continuation.reference}`.slice(0, 200);
     } else if ("opening" in r) {
       if (drafts.length === 0) stated = r.opening;
     } else if ("skip" in r) skipped.push({ line: row.line, reason: r.skip });
   }
+  if (!grid.some((r) => r.page !== undefined)) joinHardCuts(drafts, pieces);
   // No opening row in the table: the one printed in the account block above it, or in the summary
   // under it, so the first line is checked too.
   if (stated === null && cols.balance !== undefined && drafts.length > 0) stated = openingAround(grid, headerIndex, lastDraftIndex);

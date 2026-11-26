@@ -67,7 +67,9 @@ function pickDelimiter(text: string): CsvDelimiter {
 function readText(text: string): GridRow[] {
   const records = readRecords(text, pickDelimiter(text));
   if (records.length > MAX_ROWS) throw tooLong(records.length);
-  return nonEmpty(records.map((r) => ({ line: r.line, cells: r.cells.slice(0, MAX_COLUMNS).map((c) => c.trim()) })));
+  // Cells keep the spaces the bank wrote around them: a narration cut at a fixed width is joined
+  // back by them (see joinHardCuts in parse/statement.ts). The reader trims every cell it reads.
+  return nonEmpty(records.map((r) => ({ line: r.line, cells: r.cells.slice(0, MAX_COLUMNS) })));
 }
 
 const tooLong = (n: number) =>
@@ -119,7 +121,8 @@ async function readXlsx(bytes: Buffer): Promise<{ grid: GridRow[]; sheet: string
       const cells: string[] = [];
       row.eachCell({ includeEmpty: false }, (c, col) => {
         if (col > MAX_COLUMNS) return;
-        cells[col - 1] = cellText(c.value, c.address).replace(/\s+/g, " ").trim();
+        // As written, line breaks and spaces at the ends included (see readText).
+        cells[col - 1] = cellText(c.value, c.address);
       });
       for (let i = 0; i < cells.length; i++) cells[i] ??= "";
       grid.push({ line: rowNumber, cells });

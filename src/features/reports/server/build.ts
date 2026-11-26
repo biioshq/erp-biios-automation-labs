@@ -10,6 +10,7 @@ import { buildIncomeReport } from "./builders/income";
 import { buildInventoryReport } from "./builders/inventory";
 import { buildProjectReport } from "./builders/project";
 import { buildDepreciationReport, buildFixedAssetReport } from "./builders/assets";
+import { buildCustomerStatementReport, buildVendorStatementReport } from "./builders/party-statements";
 import { buildCashBudgetReport, buildProjectFinancialsReport } from "./builders/planning";
 import { buildEquityReport, buildLiabilitiesReport, buildPayablesReport, buildReceivablesReport } from "./builders/position";
 import { buildBalanceSheetReport, buildCashFlowReport, buildProfitLossReport, buildTrialBalanceReport } from "./builders/statements";
@@ -57,6 +58,10 @@ export function buildReport(type: ReportType, filters: ReportFilters): Promise<R
       return buildCashBudgetReport(filters);
     case "daily":
       return buildDailyReport(filters);
+    case "vendor_statement":
+      return buildVendorStatementReport(filters);
+    case "customer_statement":
+      return buildCustomerStatementReport(filters);
     case "scenario":
       // What-if scenarios are exported from their own page (src/features/analytics/scenarios/server/export.ts).
       // parseReportRequest refuses the type, so this is reached only by a caller that skipped it.

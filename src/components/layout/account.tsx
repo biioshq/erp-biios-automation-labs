@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { KeyRound, LogOut, ShieldCheck, Users } from "lucide-react";
+import { Building2, KeyRound, LogOut, ShieldCheck, Users } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
@@ -87,6 +87,7 @@ export function AccountMenuItems({
   const mayChangePassword = useCan(OWN_PASSWORD_PERMISSION);
   const canChangePassword = mayChangePassword && account.methods?.password !== false;
   const canSeeTeam = useCan("settings.team:view");
+  const canSeeCompany = useCan("settings.company:view");
   const canSeeRoles = useCan("settings.roles:view");
   return (
     <>
@@ -96,6 +97,14 @@ export function AccountMenuItems({
             <Link href="/settings/team">
               <Users />
               Team members
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
+        {canSeeCompany ? (
+          <DropdownMenuItem asChild>
+            <Link href="/settings/company">
+              <Building2 />
+              Business details
             </Link>
           </DropdownMenuItem>
         ) : null}

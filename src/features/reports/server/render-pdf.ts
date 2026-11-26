@@ -1,54 +1,17 @@
 import "server-only";
 
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { jsPDF } from "jspdf";
 import autoTable, { type CellDef } from "jspdf-autotable";
 import { COMPANY } from "@/config/company";
 import { formatDateTime } from "@/lib/format";
 import type { ColumnType, ReportCell, ReportColumn, ReportData, SummaryItem } from "../types";
 import { sectionsOf } from "./build";
+import { FONT, MUTED, NAVY, ORANGE, clean, drawLogo, loadFonts, loadLogo, logoClearSpace, pdfDate, pdfMoney } from "./pdf-kit";
 
-/**
- * FreeSans (GNU FreeFont, embedding allowed by its font exception): the PDF standard fonts have no
- * rupee sign and only Latin-1, so names in Hindi or with symbols (Ω, ₹, en dashes) would print as "?".
- * Read once per server instance; jsPDF embeds only the glyphs a report uses.
- */
-// Shipped with the report route through outputFileTracingIncludes in next.config.ts.
-const FONT_DIR = path.join(process.cwd(), "assets", "fonts");
-let fonts: { regular: string; bold: string } | null = null;
-function loadFonts(doc: jsPDF) {
-  fonts ??= {
-    regular: readFileSync(path.join(FONT_DIR, "FreeSans.ttf")).toString("base64"),
-    bold: readFileSync(path.join(FONT_DIR, "FreeSansBold.ttf")).toString("base64"),
-  };
-  doc.addFileToVFS("FreeSans.ttf", fonts.regular);
-  doc.addFont("FreeSans.ttf", FONT, "normal");
-  doc.addFileToVFS("FreeSansBold.ttf", fonts.bold);
-  doc.addFont("FreeSansBold.ttf", FONT, "bold");
-}
-const FONT = "FreeSans";
-
-/** Text as typed; only control characters (tabs, stray line breaks inside a cell) become spaces. */
-function clean(text: string): string {
-  return text.replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, " ");
-}
+export { pdfMoney };
 
 const grouped = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const plain = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
-
-/** "₹3,50,000.00" with lakh grouping. */
-export function pdfMoney(value: number): string {
-  return `${value < 0 ? "-" : ""}₹${grouped.format(Math.abs(value))}`;
-}
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-/** "05 Sep 2026": a fixed spelling (Intl writes "Sept"), matching the month labels of the reports. */
-function pdfDate(ymd: string): string {
-  const [y, m, d] = ymd.split("-").map(Number);
-  if (!y || !m || !d) return clean(ymd);
-  return `${String(d).padStart(2, "0")} ${MONTHS[m - 1]} ${y}`;
-}
 
 /** Table cells: amounts without the currency sign (the column header carries "(₹)"), so columns stay narrow. */
 function pdfValue(type: ColumnType, value: ReportCell, inTable = true): string {
@@ -61,10 +24,6 @@ function pdfValue(type: ColumnType, value: ReportCell, inTable = true): string {
 
 const summaryText = (item: SummaryItem) => (typeof item.value === "number" ? pdfValue(item.type ?? "number", item.value, false) : clean(item.value));
 
-const NAVY: [number, number, number] = [11, 25, 41];
-const ORANGE: [number, number, number] = [255, 136, 0];
-const MUTED: [number, number, number] = [28, 52, 80];
-
 export function renderPdf(report: ReportData): Buffer {
   const sections = sectionsOf(report);
   const widest = Math.max(...sections.map((s) => s.columns.length));
@@ -76,16 +35,29 @@ export function renderPdf(report: ReportData): Buffer {
   const margin = 36;
   const bodyTop = 52;
 
-  // First-page masthead.
-  doc.setFillColor(...ORANGE);
-  doc.rect(margin, 34, 4, 38, "F");
-  doc.setFont(FONT, "bold").setFontSize(10).setTextColor(...NAVY);
-  doc.text(clean(COMPANY.name).toUpperCase(), margin + 12, 44);
-  doc.setFontSize(18).setTextColor(...NAVY);
-  doc.text(clean(report.title), margin + 12, 64);
+  // First-page masthead: the logo (the company name as text when the logo file is not shipped), then the title.
+  const logoHeight = 22;
+  const hasLogo = Boolean(loadLogo());
+  let y: number;
+  if (hasLogo) {
+    drawLogo(doc, margin, 28, logoHeight);
+    doc.setFillColor(...ORANGE);
+    doc.rect(margin, 28 + logoHeight + logoClearSpace(logoHeight) - 2, 4, 26, "F");
+    const titleY = 28 + logoHeight + logoClearSpace(logoHeight) + 20;
+    doc.setFont(FONT, "bold").setFontSize(18).setTextColor(...NAVY);
+    doc.text(clean(report.title), margin + 12, titleY);
+    y = titleY + 18;
+  } else {
+    doc.setFillColor(...ORANGE);
+    doc.rect(margin, 34, 4, 38, "F");
+    doc.setFont(FONT, "bold").setFontSize(10).setTextColor(...NAVY);
+    doc.text(clean(COMPANY.name).toUpperCase(), margin + 12, 44);
+    doc.setFontSize(18).setTextColor(...NAVY);
+    doc.text(clean(report.title), margin + 12, 64);
+    y = 82;
+  }
   doc.setFont(FONT, "normal").setFontSize(8).setTextColor(...MUTED);
   doc.text(`Generated ${formatDateTime(new Date())} IST`, pageW - margin, 44, { align: "right" });
-  let y = 82;
   if (report.subtitle) {
     // Measured at the size it prints in, so a long subtitle wraps inside the margins.
     doc.setFontSize(9);

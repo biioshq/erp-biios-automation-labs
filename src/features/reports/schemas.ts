@@ -47,6 +47,8 @@ const filtersSchema = z.object({
   to: day,
   project: csvList,
   vendor: csvList,
+  /** Customer statement: customer names. */
+  customer: csvList,
   category: csvList,
   movements: flag,
   q: z
@@ -92,8 +94,8 @@ export function parseReportFilters(sp: URLSearchParams | Record<string, string |
 export function filtersForReport(type: ReportType, filters: ReportFilters): ReportFilters {
   if (isLegacyReport(type)) {
     // Payment status, direct / indirect and department narrow the expense report only.
-    const expenseOnly = { status: [], nature: [], department: [] };
-    if (type === "expense") return filters;
+    const expenseOnly = { status: [], nature: [], department: [], customer: [] };
+    if (type === "expense") return { ...filters, customer: [] };
     if (type !== "ca") return { ...filters, ...expenseOnly };
     return { ...filters, ...expenseOnly, q: "", stage: [], paymentMethod: [], source: [], movementType: [], item: [], movements: false };
   }
@@ -105,6 +107,7 @@ export function filtersForReport(type: ReportType, filters: ReportFilters): Repo
     to: has("date") || has("asOf") ? filters.to : null,
     project: has("project") ? filters.project : [],
     vendor: has("vendor") ? filters.vendor : [],
+    ...(has("customer") ? { customer: filters.customer ?? [] } : {}),
     category: has("category") ? filters.category : [],
     movements: false,
     q: "",
@@ -146,6 +149,7 @@ export function reportQueryString(filters: Partial<ReportFilters>, format?: Repo
   const lists: [string, string[] | undefined][] = [
     ["project", filters.project],
     ["vendor", filters.vendor],
+    ["customer", filters.customer],
     ["category", filters.category],
     ["stage", filters.stage],
     ["paymentMethod", filters.paymentMethod],

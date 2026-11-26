@@ -58,6 +58,7 @@ function summarise(type: ReportType, filters: Partial<ReportFilters> & { movemen
   for (const p of [
     count(filters.project?.length, "project"),
     count(filters.vendor?.length, "vendor"),
+    count(filters.customer?.length, "customer"),
     count(filters.category?.length, "category", "categories"),
     count(filters.stage?.length, "stage"),
     count(filters.paymentMethod?.length, "payment method"),

@@ -33,6 +33,15 @@ export const SETTINGS_RESOURCES: PermissionResource[] = [
     actions: ["view", "edit"],
     memberDefault: [],
   },
+  {
+    key: "settings.company",
+    module: "settings",
+    group: "Settings",
+    label: "Business details",
+    description: "See the company's legal name, GSTIN, address and bank details that print on invoices, receipts and statements. Edit changes them.",
+    actions: ["view", "edit"],
+    memberDefault: [],
+  },
 ];
 
 /** Changing your own password: the account menu item and Better Auth's /change-password. */

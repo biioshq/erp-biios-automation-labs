@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Ban, FileText, Link2Off, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Ban, Download, FileText, Link2Off, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -73,6 +73,7 @@ export function InvoiceDetailView({
   const [pending, startTransition] = useTransition();
   // Receipts, links and the edit form need the invoices edit permission (the actions check it too).
   const canEdit = useCan("finance.invoices:edit");
+  const canSeeIncome = useCan("finance.income:view");
   const cancelled = invoice.status === "cancelled";
   const hasReceipts = invoice.receipts.length > 0;
 
@@ -211,7 +212,7 @@ export function InvoiceDetailView({
                     <TableHead>Receipt</TableHead>
                     <TableHead>Mode</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="w-10">
+                    <TableHead className="w-20">
                       <span className="sr-only">Actions</span>
                     </TableHead>
                   </TableRow>
@@ -237,6 +238,14 @@ export function InvoiceDetailView({
                         <Money value={r.amount} exact tone="positive" className="font-medium" />
                       </TableCell>
                       <TableCell>
+                        <div className="flex items-center justify-end">
+                        {canSeeIncome ? (
+                          <Button variant="ghost" size="icon-sm" asChild>
+                            <a href={`/api/documents/receipt/${r.id}`} aria-label={`Download receipt ${r.number}`} title="Download receipt">
+                              <Download />
+                            </a>
+                          </Button>
+                        ) : null}
                         {canEdit ? (
                           <ConfirmDialog
                             title={`Remove ${r.number} from this invoice?`}
@@ -251,6 +260,7 @@ export function InvoiceDetailView({
                             }
                           />
                         ) : null}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -325,6 +335,11 @@ export function InvoiceDetailView({
             )}
           </div>
         ) : null}
+        <Button variant="outline" asChild>
+          <a href={`/api/documents/invoice/${invoice.id}`}>
+            <Download /> Download PDF
+          </a>
+        </Button>
         {cancelled ? (
           canDelete ? (
             <Button variant="outline" disabled={pending} onClick={() => void run(() => restoreInvoice({ id: invoice.id }))}>

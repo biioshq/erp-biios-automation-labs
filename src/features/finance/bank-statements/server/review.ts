@@ -27,7 +27,7 @@ import {
   type VendorHistory,
   type VendorProjects,
 } from "./context";
-import { findRule, loadRules, type PartyRule, type RuleBook } from "./rules";
+import { findRuleHit, loadRules, type PartyRule, type RuleBook } from "./rules";
 
 /**
  * The review of a statement before anything is saved: which lines were imported before, which
@@ -248,10 +248,21 @@ type Context = {
 const allowedCategory = (ctx: Context, value: string | null | undefined) =>
   value && ctx.pickers.categories.some((c) => c.value === value) ? value : null;
 
-/** The remembered party of a line, looked up once per line. */
+/**
+ * The remembered party of a line, looked up once per line. A rule found only by its name inside
+ * the narration gives way to a longer vendor or client name of the books found there too: a rule
+ * for "Amazon" does not speak for "AMAZON WEB SERVICES" when Amazon Web Services is a vendor.
+ */
 function ruleFor(ctx: Context, line: StatementLine, info: NarrationInfo): PartyRule | null {
   if (ctx.ruleCache.has(line)) return ctx.ruleCache.get(line) ?? null;
-  const rule = findRule(ctx.rules, sideOf(line) === "dr" ? "out" : "in", line, info);
+  const out = sideOf(line) === "dr";
+  const hit = findRuleHit(ctx.rules, out ? "out" : "in", line, info);
+  let rule = hit?.rule ?? null;
+  if (hit?.by === "name") {
+    const text = `${line.narration} ${line.vendor ?? ""}`;
+    const known = knownName(out ? ctx.vendors.map((v) => v.name) : ctx.clients, text);
+    if (known && nameKey(known).replace(/ /g, "").length > nameKey(hit.rule.party).replace(/ /g, "").length) rule = null;
+  }
   ctx.ruleCache.set(line, rule);
   return rule;
 }

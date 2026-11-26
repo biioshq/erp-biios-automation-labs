@@ -59,7 +59,7 @@ export const addStatementBatch = defineAction(
   addLinesSchema,
   async (input, user) => {
     assertMayAddLines(user, input.lines);
-    return addStatementLines(input, user.id);
+    return addStatementLines(input, user.id, { salaries: can(user, "data.salaries") });
   },
   { permission: "finance.bank_statements:create", revalidate: [["/finance", "layout"]] },
 );

@@ -46,7 +46,7 @@ type Prior = {
   unmatchedBy?: Types.ObjectId | null;
 };
 type Claim = { id: Types.ObjectId; fresh: true } | { id: Types.ObjectId; fresh: false; prior: Prior };
-type Ctx = { accountId: string; statementId: () => Promise<Types.ObjectId>; userId: string };
+type Ctx = { accountId: string; statementId: () => Promise<Types.ObjectId>; userId: string; salaries: boolean };
 
 const amountOf = (l: AddLineValues) => (l.withdrawal > 0 ? l.withdrawal : l.deposit);
 const isOut = (l: AddLineValues) => l.withdrawal > 0;
@@ -500,7 +500,7 @@ async function addOne(l: AddLineValues, ctx: Ctx): Promise<{ result: Omit<AddLin
     if (link) await BankTransaction.updateOne({ _id: claim.id }, { $set: { link: { kind: link.kind, id: oid(link.id) }, ...reopenedFields } });
     else if (!claim.fresh) await BankTransaction.updateOne({ _id: claim.id }, { $set: reopenedFields });
     // Remembered for the next statement. Best effort, after the record is saved: it never fails the line.
-    if (!held && link) await learnFromLine(l, link, ctx.userId);
+    if (!held && link) await learnFromLine(l, link, ctx.userId, ctx.salaries);
     // Bookkeeping of the counts only: the line is added either way.
     if (!claim.fresh) await moveCount(claim.prior).catch((e: unknown) => console.error("[bank-statements] could not move a count", e));
     const status = l.decision.action === "ignore" ? "ignored" : l.decision.action === "match" ? "matched" : "added";
@@ -516,7 +516,8 @@ async function addOne(l: AddLineValues, ctx: Ctx): Promise<{ result: Omit<AddLin
 }
 
 /** Adds a batch of reviewed lines for one account. Safe to repeat: lines already added are reported, not added again. */
-export async function addStatementLines(input: AddLinesValues, userId: string): Promise<AddBatchResult> {
+/** `options.salaries`: the person may see salaries, so a salary payee's remembered party may change. */
+export async function addStatementLines(input: AddLinesValues, userId: string, options: { salaries?: boolean } = {}): Promise<AddBatchResult> {
   await requireIndexes(BankTransaction);
   const account = await BankAccount.findById(input.accountId, { kind: 1, archivedAt: 1, name: 1 }).lean();
   if (!account) throw notFound("The bank account");
@@ -528,6 +529,7 @@ export async function addStatementLines(input: AddLinesValues, userId: string): 
   const ctx: Ctx = {
     accountId: input.accountId,
     userId,
+    salaries: options.salaries ?? false,
     statementId: async () => {
       if (!statementId) {
         const s = input.statement;

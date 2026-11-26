@@ -90,15 +90,29 @@ export async function loadRules(): Promise<RuleBook> {
  * party whose name is written out in the narration (the longest such name).
  */
 export function findRule(book: RuleBook, side: Side, line: Pick<StatementLine, "vendor" | "narration">, info: NarrationInfo): PartyRule | null {
+  return findRuleHit(book, side, line, info)?.rule ?? null;
+}
+
+/**
+ * findRule with how the rule was found: "token" and "key" are the name or handle the statement
+ * shows; "name" is a remembered party's name read inside the narration, which is looser (a rule
+ * for "Amazon" is found in "AMAZON WEB SERVICES").
+ */
+export function findRuleHit(
+  book: RuleBook,
+  side: Side,
+  line: Pick<StatementLine, "vendor" | "narration">,
+  info: NarrationInfo,
+): { rule: PartyRule; by: "token" | "key" | "name" } | null {
   if (!book.all.length) return null;
   if (info.vpa) {
     const byToken = book.byToken.get(bookKey(side, info.vpa.toLowerCase()));
-    if (byToken) return byToken;
+    if (byToken) return { rule: byToken, by: "token" };
   }
   const k = statementKeyOf(line, info);
   if (k) {
     const byKey = book.byKey.get(bookKey(side, k.key));
-    if (byKey) return byKey;
+    if (byKey) return { rule: byKey, by: "key" };
   }
   let best: PartyRule | null = null;
   const padded = ` ${nameKey(`${line.narration} ${line.vendor ?? ""}`)} `;
@@ -107,21 +121,22 @@ export function findRule(book: RuleBook, side: Side, line: Pick<StatementLine, "
     if (rule.side !== side) continue;
     if (test(padded, flat) && (!best || rule.party.length > best.party.length)) best = rule;
   }
-  return best;
+  return best ? { rule: best, by: "name" } : null;
 }
 
 /** Bank-only lines (charges, interest, cash withdrawals) are never remembered: the review knows them already. */
 const UNLEARNED_KINDS = new Set(["charges", "interest", "atm"]);
 
-type Lesson = { party: string; category?: string; projectId?: string; stage?: string };
+/** `chosen`: the line was made into a new record, so its project (or no project) is the latest choice. */
+type Lesson = { party: string; category?: string; projectId?: string; stage?: string; chosen?: boolean };
 
 async function lessonOf(l: AddLineValues, link: LinkRef | null): Promise<Lesson | null> {
   const d = l.decision;
   if (d.action === "expense" && l.withdrawal > 0 && d.party) {
-    return { party: d.party, category: d.category, projectId: d.projectId, stage: d.projectId ? d.stage : undefined };
+    return { party: d.party, category: d.category, projectId: d.projectId, stage: d.projectId ? d.stage : undefined, chosen: true };
   }
   if (d.action === "income" && l.deposit > 0 && d.party) {
-    return { party: d.party, category: d.incomeCategory, projectId: d.projectId };
+    return { party: d.party, category: d.incomeCategory, projectId: d.projectId, chosen: true };
   }
   if (d.action !== "match" || !link) return null;
   // A line matched to a record: the name on the statement is that record's vendor or client.
@@ -141,9 +156,10 @@ async function lessonOf(l: AddLineValues, link: LinkRef | null): Promise<Lesson 
  * Remembers what a line was made into. Called after the line's record is saved and tied to it;
  * best effort: a failure is logged and never fails the add. Rules are upserted on their unique
  * (side, key) index, so requireIndexes runs first: without the index two adds at once could make
- * two rules for one name.
+ * two rules for one name. `salaries`: the person may see salaries. Without it, a rule remembered
+ * as a salary payment is left as it is, as the Remembered parties page would leave it.
  */
-export async function learnFromLine(l: AddLineValues, link: LinkRef | null, userId: string): Promise<void> {
+export async function learnFromLine(l: AddLineValues, link: LinkRef | null, userId: string, salaries = false): Promise<void> {
   try {
     const side: Side = l.withdrawal > 0 ? "out" : "in";
     const info = analyseNarration(l.narration, side === "out" ? "dr" : "cr", { exclude: [COMPANY.name] });
@@ -157,19 +173,27 @@ export async function learnFromLine(l: AddLineValues, link: LinkRef | null, user
     const set: Record<string, unknown> = { party: lesson.party.trim().slice(0, 200), lastUsedAt: new Date() };
     if (k.token) set.token = k.token;
     if (lesson.category) set.category = lesson.category;
+    const unset: Record<string, 1> = {};
     if (lesson.projectId && Types.ObjectId.isValid(lesson.projectId)) {
       set.project = new Types.ObjectId(lesson.projectId);
       // An income rule keeps no stage; an expense rule's stage goes with its project.
       if (lesson.stage) set.stage = lesson.stage;
+      else unset.stage = 1;
+    } else if (lesson.chosen) {
+      // Added without a project: the project suggested from this rule was taken off, so it is not suggested again.
+      unset.project = 1;
+      unset.stage = 1;
     }
     if (user) set.updatedBy = user;
-    const update = { $set: set, $inc: { hits: 1 }, ...(user ? { $setOnInsert: { createdBy: user } } : {}) };
+    // Without the salaries permission a salary rule is not matched, so it is not changed (an insert then hits the unique index and stops).
+    const filter = { side, key: k.key, ...(salaries || lesson.category === "salaries" ? {} : { category: { $ne: "salaries" } }) };
+    const changes = { $set: set, $inc: { hits: 1 }, ...(Object.keys(unset).length ? { $unset: unset } : {}) };
     try {
-      await BankPartyRule.updateOne({ side, key: k.key }, update, { upsert: true });
+      await BankPartyRule.updateOne(filter, { ...changes, ...(user ? { $setOnInsert: { createdBy: user } } : {}) }, { upsert: true });
     } catch (error) {
       // Two adds learned the same new name at the same moment: the other one made the rule, so update it.
       if (!isDuplicateKeyError(error)) throw error;
-      await BankPartyRule.updateOne({ side, key: k.key }, { $set: set, $inc: { hits: 1 } });
+      await BankPartyRule.updateOne(filter, changes);
     }
   } catch (error) {
     console.error("[bank-statements] could not remember the party of a line", error);

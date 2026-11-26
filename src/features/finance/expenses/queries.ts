@@ -18,12 +18,13 @@ import {
   type ExpenseCategoryOption,
 } from "@/lib/expense-categories";
 import { expenseNature } from "@/lib/expense-nature";
-import { paymentState } from "@/lib/payments";
+import { effectivePayments, paymentState } from "@/lib/payments";
 import { totalTax } from "@/lib/gst";
 import { round2 } from "@/lib/format";
 import { COMPANY_EXPENSES } from "@/server/services/metrics";
 import { EXPENSE_NATURE_FILTER_VALUES, EXPENSE_STATUS_FILTER_VALUES } from "./schemas";
-import { statusCondition } from "./payment-status";
+import { OUTSTANDING_EXPR, PAID_EXPR, statusCondition } from "./payment-status";
+import { HALF_PAISA } from "./server";
 import type { ExpenseDetail, ExpensePaymentRecord, ExpensePaymentSummary, ExpenseRow, ExpenseSummary } from "./types";
 
 const DEPARTMENT_VALUES = valuesOf(DEPARTMENTS);
@@ -48,14 +49,32 @@ function categoryLookup(categories: readonly ExpenseCategoryOption[]): CategoryL
 /** Paid and outstanding as of `now`. Generated stock assignments move no money, so they show "stock". */
 export function paymentSummaryOf(e: Pick<ExpenseDoc, "amount" | "date" | "paymentMethod" | "dueDate" | "payments" | "account">, now = new Date()): ExpensePaymentSummary {
   const explicit = Array.isArray(e.payments);
-  const s = paymentState({ amount: e.amount, date: e.date, paymentMethod: e.paymentMethod, dueDate: e.dueDate, payments: e.payments }, now);
+  const like = { amount: e.amount, date: e.date, paymentMethod: e.paymentMethod, dueDate: e.dueDate, payments: e.payments };
+  const s = paymentState(like, now);
+  const stock = !explicit && e.paymentMethod === "stock";
+  // The latest payment (the same list paymentState reads); on a tie the one recorded last.
+  const last = effectivePayments(like).reduce<{ date: Date; paymentMethod: string } | null>((best, p) => {
+    const d = new Date(p.date);
+    return !best || d.getTime() >= best.date.getTime() ? { date: d, paymentMethod: String(p.paymentMethod) } : best;
+  }, null);
   return {
-    status: !explicit && e.paymentMethod === "stock" ? "stock" : s.status,
+    status: stock ? "stock" : s.status,
     paid: s.paid,
     outstanding: s.outstanding,
     dueOn: s.dueOn ? iso(s.dueOn) : null,
     explicit,
+    lastPaidOn: !stock && s.lastPaidOn ? iso(s.lastPaidOn) : null,
+    lastMethod: !stock && last ? (last.paymentMethod as PaymentMethod) : null,
   };
+}
+
+/** Came from, or was paid through, a bank statement line (the expense's own link, or any payment's). */
+export const FROM_BANK_STATEMENT = {
+  $or: [{ bankTransaction: { $type: "objectId" } }, { payments: { $elemMatch: { bankTransaction: { $type: "objectId" } } } }],
+} as const;
+
+function fromBank(e: { bankTransaction?: unknown; payments?: { bankTransaction?: unknown }[] | null }): boolean {
+  return Boolean(e.bankTransaction) || (e.payments ?? []).some((p) => Boolean(p.bankTransaction));
 }
 
 function toRow(e: ExpenseDoc & { project?: unknown }, categories: CategoryLookup, now = new Date()): ExpenseRow {
@@ -83,6 +102,8 @@ function toRow(e: ExpenseDoc & { project?: unknown }, categories: CategoryLookup
     department: (e.department as Department | undefined) ?? null,
     nature: expenseNature({ category: e.category, project: e.project }, categories.nature(e.category)),
     payment: paymentSummaryOf(e, now),
+    dueDate: iso(e.dueDate ?? null),
+    fromBank: fromBank(e),
   };
 }
 
@@ -140,6 +161,7 @@ export function expenseFilter(params: Pick<ListParams, "q" | "filters" | "from" 
   }
   const statuses = (filters.status ?? []).filter((s): s is PaymentStatus => (EXPENSE_STATUS_FILTER_VALUES as readonly string[]).includes(s));
   if (statuses.length) and.push(statusCondition(statuses, options.now));
+  if (filters.bank?.includes("yes")) and.push(FROM_BANK_STATEMENT);
   if (filters.nature?.length) {
     const direct = options.directCategories ?? directCategoryValues(DEFAULT_EXPENSE_CATEGORIES);
     const condition = natureCondition(filters.nature, direct);
@@ -172,13 +194,19 @@ export async function listExpenses(params: ListParams): Promise<Paginated<Expens
     Expense.countDocuments(filter),
     // Totals leave out stock counted at purchase, whatever the filter: the purchase itself is
     // already in them. Project spend and the project's expenses tab count it.
-    Expense.aggregate<{ total: number; tax: number }>([
+    // Paid and outstanding use the expressions the status filters use (payment-status.ts), so the
+    // header agrees with every row's status. Paid is capped at the amount, so paid + outstanding = total.
+    Expense.aggregate<{ total: number; tax: number; paid: number; outstanding: number; outstandingCount: number }>([
       { $match: { $and: [filter, COMPANY_EXPENSES] } },
+      { $addFields: { _outstanding: OUTSTANDING_EXPR } },
       {
         $group: {
           _id: null,
           total: { $sum: "$amount" },
           tax: { $sum: { $add: [{ $ifNull: ["$gst.cgst", 0] }, { $ifNull: ["$gst.sgst", 0] }, { $ifNull: ["$gst.igst", 0] }, { $ifNull: ["$gst.cess", 0] }] } },
+          paid: { $sum: { $min: ["$amount", PAID_EXPR] } },
+          outstanding: { $sum: "$_outstanding" },
+          outstandingCount: { $sum: { $cond: [{ $gt: ["$_outstanding", HALF_PAISA] }, 1, 0] } },
         },
       },
     ]),
@@ -194,6 +222,9 @@ export async function listExpenses(params: ListParams): Promise<Paginated<Expens
       count: total,
       total: round2(summary[0]?.total ?? 0),
       tax: round2(summary[0]?.tax ?? 0),
+      paid: round2(summary[0]?.paid ?? 0),
+      outstanding: round2(summary[0]?.outstanding ?? 0),
+      outstandingCount: summary[0]?.outstandingCount ?? 0,
     },
   };
 }

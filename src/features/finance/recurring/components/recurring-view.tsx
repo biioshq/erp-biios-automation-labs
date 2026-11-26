@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
@@ -11,6 +12,8 @@ import { DataTable, DataTableColumnHeader, type FilterDef } from "@/components/d
 import { EmptyState } from "@/components/shared/empty-state";
 import { FormSheet } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { FilterChips, type FilterChip } from "@/features/finance/expenses/components/filter-chips";
 import { useCan } from "@/components/current-user";
 import { useOnLiveChange } from "@/components/live-updates";
 import { cn } from "@/lib/utils";
@@ -49,6 +52,38 @@ function DueCell({ row }: { row: RecurringRow }) {
     </div>
   );
 }
+
+/** The latest posted expense: its date, and Paid or Outstanding, linking to it. */
+function LastPostedCell({ row, compact = false }: { row: RecurringRow; compact?: boolean }) {
+  const last = row.lastPosted;
+  if (!last) return <span className="text-xs text-muted-foreground">Nothing posted yet</span>;
+  const state = (
+    <StatusBadge tone={last.status === "paid" ? "success" : last.status === "overdue" ? "danger" : last.status === "stock" ? "neutral" : "warning"} className="h-5 px-2 text-[11px]">
+      {last.status === "paid" ? "Paid" : last.status === "overdue" ? "Overdue" : last.status === "partial" ? "Partly paid" : last.status === "stock" ? "From stock" : "Outstanding"}
+    </StatusBadge>
+  );
+  return (
+    <Link
+      href={`/finance/expenses?view=${last.id}`}
+      onClick={(e) => e.stopPropagation()}
+      className={cn("group inline-flex min-w-0 hover:underline", compact ? "items-center gap-1.5" : "flex-col items-start gap-0.5")}
+      title={`Open ${last.number}`}
+    >
+      <span className="text-sm whitespace-nowrap">{formatDate(last.date)}</span>
+      <span className="inline-flex items-center gap-1.5">
+        {state}
+        {last.outstanding > 0 ? (
+          <span className="text-[11px] whitespace-nowrap text-muted-foreground">
+            <Money value={last.outstanding} /> owed
+          </span>
+        ) : null}
+      </span>
+    </Link>
+  );
+}
+
+/** Quick frequency filters over the same `frequency` URL filter as the Frequency chip. */
+const FREQUENCY_CHIPS: FilterChip[] = [{ label: "Any frequency", values: [] }, ...RECURRING_FREQUENCIES.map((f) => ({ label: f.label, values: [f.value] }))];
 
 function AssigneeChip({ row }: { row: RecurringRow }) {
   if (row.employee)
@@ -290,6 +325,13 @@ export function RecurringView({
         enableHiding: false,
       },
       {
+        id: "lastPosted",
+        meta: { label: "Last posted" },
+        header: "Last posted",
+        enableSorting: false,
+        cell: ({ row }) => <LastPostedCell row={row.original} />,
+      },
+      {
         id: "assignee",
         meta: { label: "Project / person" },
         header: "Project / person",
@@ -412,6 +454,8 @@ export function RecurringView({
         </div>
       ) : null}
 
+      {summary.total > 0 ? <FilterChips param="frequency" label="Frequency" chips={FREQUENCY_CHIPS} /> : null}
+
       <DataTable
         id="recurring"
         mode="server"
@@ -447,6 +491,12 @@ export function RecurringView({
               </div>
               <AssigneeChip row={r} />
             </div>
+            {r.lastPosted ? (
+              <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <span>Last posted</span>
+                <LastPostedCell row={r} compact />
+              </div>
+            ) : null}
           </div>
         )}
       />

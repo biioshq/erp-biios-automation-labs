@@ -5,45 +5,45 @@ import { Page, PageHeader } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
 import { SalariesHiddenNote } from "@/components/shared/salaries-hidden-note";
-import { formatNumber, round2 } from "@/lib/format";
+import { formatNumber } from "@/lib/format";
 import { parseListParams, type SearchParams } from "@/lib/list-params";
 import { NoAccess } from "@/components/shared/no-access";
 import { can, requireUser } from "@/server/auth/session";
 import { getBankAccountOptions } from "@/server/lookups";
-import { getPaymentTracking } from "@/features/finance/expenses/payment-queries";
+import { getPaymentDefaults, getPaymentTracking } from "@/features/finance/expenses/payment-queries";
 import { parsePaymentTab } from "@/features/finance/expenses/payment-tabs";
 import { PaymentExpensesTable, PaymentHistoryTable, PaymentTabs } from "@/features/finance/expenses/components/payments-view";
 
-export const metadata: Metadata = { title: "Payment tracking" };
+export const metadata: Metadata = { title: "Outstanding payments" };
 
 const plural = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`;
 
 export default async function PaymentsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   // Every page checks the session itself: client navigations can skip the layout's check.
   const user = await requireUser();
-  if (!can(user, "finance.payments:view")) return <NoAccess title="Payment tracking" />;
+  if (!can(user, "finance.payments:view")) return <NoAccess title="Outstanding payments" />;
   const sp = await searchParams;
   const tab = parsePaymentTab(sp.tab);
   const params = parseListParams(sp, { sortable: ["date", "amount", "outstanding", "due", "vendor"] });
-  const [data, accounts] = await Promise.all([getPaymentTracking(tab, params), getBankAccountOptions()]);
+  const [data, accounts, defaults] = await Promise.all([getPaymentTracking(tab, params), getBankAccountOptions(), getPaymentDefaults()]);
   const t = data.totals;
-  const owed = round2(t.unpaid.total + t.partial.total + t.overdue.total);
-  const owedCount = t.unpaid.count + t.partial.count + t.overdue.count;
+  const owed = t.outstanding.total;
+  const owedCount = t.outstanding.count;
   const filtered = Boolean(params.q || params.from || params.to);
 
   return (
     <Page>
       <PageHeader
         eyebrow="Finance"
-        title="Payment tracking"
+        title="Outstanding payments"
         description={
           <>
-            What is paid and what is still owed on expenses, by status as of today.{filtered ? " Filtered by the search and dates below." : ""} Bills
-            are added on{" "}
+            Bills still to pay, as of today.{filtered ? " Filtered by the search and dates below." : ""} Tick Mark as paid when you pay one: the
+            expense keeps its date and shows as paid in{" "}
             <Link href="/finance/expenses" className="font-medium text-foreground hover:underline">
-              Expenses
+              Total expenses
             </Link>
-            ; choose Partly paid or Not paid yet there.
+            . A bill saved as Not paid yet or Partly paid shows here by itself.
           </>
         }
       />
@@ -84,7 +84,17 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       {tab === "history" ? (
         <PaymentHistoryTable rows={data.history} total={data.total} page={data.page} pageSize={data.pageSize} />
       ) : (
-        <PaymentExpensesTable tab={tab} rows={data.rows} total={data.total} page={data.page} pageSize={data.pageSize} accounts={accounts} />
+        <PaymentExpensesTable
+          // A new tab or page starts with nothing selected and no rows hidden.
+          key={`${tab}:${data.page}`}
+          tab={tab}
+          rows={data.rows}
+          total={data.total}
+          page={data.page}
+          pageSize={data.pageSize}
+          accounts={accounts}
+          defaults={defaults}
+        />
       )}
     </Page>
   );

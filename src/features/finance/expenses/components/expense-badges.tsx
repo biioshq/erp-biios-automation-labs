@@ -2,7 +2,7 @@ import { Boxes, Landmark, PackageX, PackagePlus, Repeat } from "lucide-react";
 import { Money } from "@/components/shared/money";
 import { StatusBadge, type Tone } from "@/components/shared/status-badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { EXPENSE_NATURES, PAYMENT_STATUSES, labelOf, type ExpenseNature, type ExpenseSource } from "@/lib/constants";
+import { EXPENSE_NATURES, PAYMENT_METHODS, PAYMENT_STATUSES, labelOf, type ExpenseNature, type ExpenseSource } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
 import type { ExpensePaymentStatus, ExpensePaymentSummary, ExpenseRow } from "../types";
 
@@ -17,6 +17,77 @@ export function PaymentStatusBadge({ payment, className }: { payment: Pick<Expen
     <StatusBadge tone={PAYMENT_TONES[payment.status]} className={className}>
       {label}
     </StatusBadge>
+  );
+}
+
+/** Status words on the Total expenses and Outstanding payments lists: "Outstanding" reads plainer there than "Unpaid". */
+const STATE_LABELS: Record<ExpensePaymentStatus, string> = {
+  paid: "Paid",
+  partial: "Partly paid",
+  unpaid: "Outstanding",
+  overdue: "Overdue",
+  stock: "From stock",
+};
+
+/**
+ * Where an expense stands: "Paid" with the day it was paid, or "Outstanding", "Partly paid" or
+ * "Overdue" with what is still owed. `compact` keeps it on one line for phone cards.
+ */
+export function PaymentStateCell({
+  payment,
+  compact = false,
+  showOwed = false,
+  showMethod = false,
+}: {
+  payment: ExpensePaymentSummary;
+  compact?: boolean;
+  /** Also say how much is owed and when it is due (lists that have no Owed column). */
+  showOwed?: boolean;
+  /** Name the method of the latest payment after the day it was paid. */
+  showMethod?: boolean;
+}) {
+  const badge = (
+    <StatusBadge tone={PAYMENT_TONES[payment.status]} className={compact ? "h-5 px-2 text-[11px]" : undefined}>
+      {STATE_LABELS[payment.status]}
+    </StatusBadge>
+  );
+  const method = showMethod && payment.lastMethod ? ` · ${labelOf(PAYMENT_METHODS, payment.lastMethod)}` : "";
+  const paidOn = payment.status === "paid" && payment.lastPaidOn ? `on ${formatDate(payment.lastPaidOn)}${method}` : null;
+  const owed =
+    showOwed && payment.status !== "paid" && payment.status !== "stock" && payment.outstanding > 0 ? (
+      <>
+        <Money value={payment.outstanding} /> owed{payment.dueOn ? ` · due ${formatDate(payment.dueOn)}` : ""}
+      </>
+    ) : null;
+  if (compact) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        {badge}
+        {paidOn ? <span className="text-[11px] whitespace-nowrap text-muted-foreground">{paidOn}</span> : null}
+      </span>
+    );
+  }
+  return (
+    <div className="min-w-24 space-y-0.5">
+      {badge}
+      {paidOn || owed ? <p className="pl-1 text-[11px] whitespace-nowrap text-muted-foreground">{paidOn ?? owed}</p> : null}
+    </div>
+  );
+}
+
+/** A small marker on expenses that came from, or were paid through, a bank statement line. */
+export function BankMarker({ className }: { className?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex shrink-0">
+          <StatusBadge tone="neutral" dot={false} icon={<Landmark className="size-3" aria-hidden />} className={className ?? "h-5 px-1.5 text-[10.5px]"}>
+            Bank
+          </StatusBadge>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>From a bank statement line, or paid through one</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -105,10 +176,13 @@ export function ExpenseMobileCard({
   row,
   showProject = true,
   mutedIfCounted = false,
+  showPaymentState = false,
 }: {
   row: ExpenseRow;
   showProject?: boolean;
   mutedIfCounted?: boolean;
+  /** Total expenses: every row says where it stands, "Paid on <day>" included. */
+  showPaymentState?: boolean;
 }) {
   const muted = mutedIfCounted && row.countedAtPurchase;
   return (
@@ -135,10 +209,13 @@ export function ExpenseMobileCard({
           )
         ) : null}
         <ExpenseSourceBadge source={row.source} countedAtPurchase={row.countedAtPurchase} className="h-5 px-2 text-[11px]" />
+        {row.fromBank ? <BankMarker /> : null}
         <StatusBadge tone="neutral" dot={false} className="h-5 px-2 text-[11px]">
           {row.categoryLabel}
         </StatusBadge>
-        {row.payment && row.payment.status !== "paid" && row.payment.status !== "stock" ? (
+        {showPaymentState && row.payment && row.payment.status !== "stock" ? (
+          <PaymentStateCell payment={row.payment} compact />
+        ) : row.payment && row.payment.status !== "paid" && row.payment.status !== "stock" ? (
           <PaymentStatusBadge payment={row.payment} className="h-5 px-2 text-[11px]" />
         ) : null}
       </div>

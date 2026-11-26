@@ -13,7 +13,9 @@ import { monthlyEquivalent, upcomingOccurrences } from "@/lib/recurrence";
 import type { ExpenseCategory, PaymentMethod, ProjectStage, RecurringFrequency, RecurringStatus } from "@/lib/constants";
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { GROUP_CATEGORIES } from "./schemas";
-import type { PostedExpense, RecurringDetail, RecurringRow, RecurringSummary } from "./types";
+import { paymentSummaryOf } from "@/features/finance/expenses/queries";
+import { isFixedCommitment } from "./fixed";
+import type { LastPosted, PostedExpense, RecurringDetail, RecurringRow, RecurringSummary } from "./types";
 
 type PopulatedProject = { _id: Types.ObjectId; name: string; code: string; color?: string } | null;
 type PopulatedEmployee = { _id: Types.ObjectId; name: string } | null;
@@ -43,7 +45,41 @@ function toRow(t: RecurringExpenseDoc & { project?: unknown; employee?: unknown 
     project: project?._id ? { id: String(project._id), name: project.name, code: project.code, color: project.color ?? "#4a82cc" } : null,
     stage: (t.stage as ProjectStage | undefined) ?? null,
     employee: employee?._id ? { id: String(employee._id), name: employee.name } : null,
+    fixed: typeof t.fixed === "boolean" ? t.fixed : null,
+    fixedCommitment: isFixedCommitment(t),
   };
+}
+
+/**
+ * The latest expense each schedule posted, with its payment status today (paymentSummaryOf, the
+ * Expenses list's own rule). One read over the `recurring` index for the whole page.
+ */
+export async function lastPostedBySchedule(ids: Types.ObjectId[], now: Date = new Date()): Promise<Map<string, LastPosted>> {
+  const out = new Map<string, LastPosted>();
+  if (!ids.length) return out;
+  const latest = await Expense.aggregate<{ _id: Types.ObjectId; expenseId: Types.ObjectId }>([
+    { $match: { recurring: { $in: ids } } },
+    { $sort: { date: -1, _id: -1 } },
+    { $group: { _id: "$recurring", expenseId: { $first: "$_id" } } },
+  ]);
+  if (!latest.length) return out;
+  const docs = await Expense.find(
+    { _id: { $in: latest.map((l) => l.expenseId) } },
+    { number: 1, date: 1, amount: 1, paymentMethod: 1, dueDate: 1, payments: 1, account: 1, recurring: 1 },
+  ).lean();
+  for (const e of docs) {
+    const p = paymentSummaryOf(e, now);
+    out.set(String(e.recurring), {
+      id: String(e._id),
+      number: e.number,
+      date: iso(e.date)!,
+      amount: e.amount,
+      status: p.status,
+      outstanding: p.outstanding,
+      lastPaidOn: p.lastPaidOn ?? null,
+    });
+  }
+  return out;
 }
 
 /** Mongo filter from list params. `group` is the tab: a category group, or paused / ended. */
@@ -86,7 +122,9 @@ export async function listRecurring(params: ListParams): Promise<Paginated<Recur
     RecurringExpense.countDocuments(filter),
     getExpenseCategoryLabeler(),
   ]);
-  return { rows: docs.map((d) => toRow(d, labelOf)), total, page: params.page, pageSize: params.pageSize };
+  const last = await lastPostedBySchedule(docs.map((d) => d._id));
+  const rows = docs.map((d) => ({ ...toRow(d, labelOf), lastPosted: last.get(String(d._id)) ?? null }));
+  return { rows, total, page: params.page, pageSize: params.pageSize };
 }
 
 /**

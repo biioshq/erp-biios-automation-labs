@@ -45,6 +45,11 @@ const recurringExpenseSchema = new Schema(
     occurrences: { type: Number, default: 0 },
     status: { type: String, enum: valuesOf(RECURRING_STATUSES), default: "active", index: true },
     notes: { type: String, trim: true, maxlength: 2000 },
+    /**
+     * A fixed commitment the company must pay (shown under Fixed payments). Optional with no default:
+     * when it was never set, schedules in category "rent" count as fixed (isFixedCommitment).
+     */
+    fixed: { type: Boolean },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },

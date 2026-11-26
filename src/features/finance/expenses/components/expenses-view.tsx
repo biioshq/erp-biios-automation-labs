@@ -34,9 +34,24 @@ import { deleteExpense, fetchExpense } from "../actions";
 import type { ExpenseDetail, ExpenseRow, ExpenseSummary } from "../types";
 import { ExpenseForm } from "./expense-form";
 import { ExpenseDetailSkeleton, ExpenseDetailView } from "./expense-detail";
-import { ExpenseMobileCard, ExpenseSourceBadge, PaymentStatusBadge, isGeneratedExpense } from "./expense-badges";
+import { BankMarker, ExpenseMobileCard, ExpenseSourceBadge, PaymentStateCell, isGeneratedExpense } from "./expense-badges";
+import { FilterChips } from "./filter-chips";
+import { EXPENSE_BANK_FILTER_OPTIONS } from "../schemas";
 
 type Panel = { kind: "new" } | { kind: "view"; id: string } | { kind: "edit"; id: string } | null;
+
+/** The method money actually moved by: the latest payment's, when payments are recorded one by one. */
+function paidWith(row: ExpenseRow) {
+  return row.payment.explicit && row.payment.lastMethod ? row.payment.lastMethod : row.paymentMethod;
+}
+
+/** Quick status filters over the same `status` URL filter as the Payment status chip. */
+const STATUS_CHIPS = [
+  { label: "All", values: [] },
+  { label: "Paid", values: ["paid"] },
+  { label: "Outstanding", values: ["unpaid", "partial", "overdue"] },
+  { label: "Overdue", values: ["overdue"] },
+];
 
 /**
  * The expenses list with its create / view / edit drawers. Drawers follow the
@@ -188,6 +203,7 @@ export function ExpensesView({
                 row.original.countedAtPurchase ? (
                   <ExpenseSourceBadge source={row.original.source} countedAtPurchase={row.original.countedAtPurchase} className="h-5 px-2 text-[11px]" />
                 ) : null}
+                {row.original.fromBank ? <BankMarker /> : null}
               </p>
               <p className="truncate font-mono text-[11px] text-muted-foreground">
                 {row.original.number}
@@ -259,26 +275,15 @@ export function ExpensesView({
         meta: { label: "Payment" },
         header: "Payment",
         enableSorting: false,
-        cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{labelOf(PAYMENT_METHODS, row.original.paymentMethod)}</span>,
+        // A bill bought "On credit" and paid later shows how it was paid (its latest payment), not "On credit".
+        cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{labelOf(PAYMENT_METHODS, paidWith(row.original))}</span>,
       },
       {
         id: "status",
         meta: { label: "Payment status" },
         header: "Status",
         enableSorting: false,
-        cell: ({ row }) => {
-          const p = row.original.payment;
-          return (
-            <div className="min-w-24 space-y-0.5">
-              <PaymentStatusBadge payment={p} />
-              {p.outstanding > 0 && p.status !== "stock" ? (
-                <p className="pl-1 text-[11px] whitespace-nowrap text-muted-foreground">
-                  <Money value={p.outstanding} /> owed{p.dueOn ? ` · due ${formatDate(p.dueOn)}` : ""}
-                </p>
-              ) : null}
-            </div>
-          );
-        },
+        cell: ({ row }) => <PaymentStateCell payment={row.original.payment} showOwed showMethod />,
       },
       {
         id: "amount",
@@ -380,6 +385,8 @@ export function ExpensesView({
 
   const filters: FilterDef[] = useMemo(
     () => [
+      { key: "status", title: "Payment status", options: PAYMENT_STATUSES.map((o) => (o.value === "unpaid" ? { value: o.value, label: "Outstanding (nothing paid)" } : { ...o })) },
+      { key: "bank", title: "Bank statement", options: EXPENSE_BANK_FILTER_OPTIONS.map((o) => ({ ...o })) },
       { key: "category", title: "Category", options: expenseCategoryFilterOptions(categories) },
       {
         key: "project",
@@ -387,7 +394,6 @@ export function ExpensesView({
         options: [{ value: "none", label: "No project (overhead)" }, ...projects.map((p) => ({ value: p.value, label: p.label }))],
       },
       { key: "stage", title: "Stage", options: PROJECT_STAGES.map((o) => ({ ...o })) },
-      { key: "status", title: "Payment status", options: PAYMENT_STATUSES.map((o) => ({ ...o })) },
       { key: "nature", title: "Direct / indirect", options: EXPENSE_NATURES.map((o) => ({ ...o })) },
       { key: "paymentMethod", title: "Payment mode", options: PAYMENT_METHODS.map((o) => ({ ...o })) },
       { key: "department", title: "Department", options: [{ value: "none", label: "No department" }, ...DEPARTMENTS.map((o) => ({ ...o }))] },
@@ -408,6 +414,7 @@ export function ExpensesView({
 
   return (
     <>
+      <FilterChips param="status" label="Payment status" chips={STATUS_CHIPS} />
       <DataTable
         id="expenses"
         mode="server"
@@ -421,7 +428,7 @@ export function ExpensesView({
         searchPlaceholder="Search vendor, invoice, number…"
         getRowId={(r) => r.id}
         onRowClick={(r) => setPanel({ kind: "view", id: r.id })}
-        renderMobileRow={(r) => <ExpenseMobileCard row={r} mutedIfCounted />}
+        renderMobileRow={(r) => <ExpenseMobileCard row={r} mutedIfCounted showPaymentState />}
         initialHidden={["paymentMethod", "department", "gst"]}
         toolbarActions={
           <DropdownMenu>

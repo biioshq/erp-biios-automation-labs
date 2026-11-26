@@ -133,13 +133,16 @@ export type ExpenseFormValues = z.output<typeof expenseFormSchema>;
 export const expenseIdSchema = z.object({ id: objectId });
 
 /** Filter keys accepted in the URL of the expenses list. */
-export const EXPENSE_FILTER_KEYS = ["category", "project", "stage", "paymentMethod", "source", "vendor", "status", "nature", "department"] as const;
+export const EXPENSE_FILTER_KEYS = ["category", "project", "stage", "paymentMethod", "source", "vendor", "status", "nature", "department", "bank"] as const;
+
+/** The list's "From bank statement" filter: expenses that came from, or were paid through, a statement line. */
+export const EXPENSE_BANK_FILTER_OPTIONS = [{ value: "yes", label: "From bank statement" }] as const;
 
 /** Values of the list's status, nature and department filters ("none" = no department). */
 export const EXPENSE_STATUS_FILTER_VALUES = valuesOf(PAYMENT_STATUSES);
 export const EXPENSE_NATURE_FILTER_VALUES = valuesOf(EXPENSE_NATURES);
 
-/** Recording a payment against an expense (Payment tracking and the expense drawer). */
+/** Recording a payment against an expense (Outstanding payments and the expense drawer). */
 export const expensePaymentSchema = z.object({
   id: objectId,
   date: dateInput,
@@ -152,6 +155,27 @@ export const expensePaymentSchema = z.object({
 export type ExpensePaymentInput = z.input<typeof expensePaymentSchema>;
 
 export const expensePaymentIdSchema = z.object({ id: objectId, paymentId: objectId });
+
+/** Mark as paid (Outstanding payments): the same fields as Record payment, prefilled by the page. */
+export const markExpensePaidSchema = expensePaymentSchema;
+
+/** Most rows one Mark selected as paid, or one Undo, can take. */
+export const MAX_BULK_PAYMENTS = 100;
+
+/** Mark selected as paid: each expense is paid what it still owes, on one day from one account. */
+export const markExpensesPaidSchema = z.object({
+  ids: z.array(objectId).min(1, "Pick at least one expense").max(MAX_BULK_PAYMENTS, `At most ${MAX_BULK_PAYMENTS} at a time`),
+  date: dateInput,
+  paymentMethod: payingMethod,
+  accountId: optionalObjectId,
+  reference: optionalText(120),
+  note: optionalText(1000),
+});
+
+/** Undo right after Mark as paid: the payments it recorded. */
+export const undoExpensePaymentsSchema = z.object({
+  payments: z.array(expensePaymentIdSchema).min(1).max(MAX_BULK_PAYMENTS),
+});
 export const EXPENSE_SORT_KEYS = ["date", "amount", "vendor", "number", "category", "createdAt"] as const;
 
 /** Managing categories (admins, from the Expenses page). */

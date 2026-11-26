@@ -63,8 +63,16 @@ type Draft = Omit<StatementLine, "withdrawal" | "deposit" | "check"> & { amount:
 /**
  * `continuation`: wrapped text of the line above, its narration part and its reference part.
  * `summary`: a total, opening or closing row; never a line and never reported as one not read.
+ * `labelled`: a dated row labelled like a total that reads as a line; see buildStatement.
  */
-type RowResult = { draft: Draft } | { continuation: { narration: string; reference: string } } | { opening: number } | { summary: true } | { skip: string } | null;
+type RowResult =
+  | { draft: Draft }
+  | { continuation: { narration: string; reference: string } }
+  | { opening: number }
+  | { summary: true }
+  | { labelled: Draft }
+  | { skip: string }
+  | null;
 
 function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
   const cells = row.cells;
@@ -108,15 +116,18 @@ function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
     return null;
   }
 
-  // A dated summary row ("31/05/25, Total Debits, 72,80,507.58") is never a line. The opening one
-  // gives the balance the first line starts from.
+  // A dated summary row ("31/05/25, Total Debits, 72,80,507.58") is not a line. The opening one
+  // gives the balance the first line starts from. A row with one amount and a balance may still be a
+  // real line whose narration is only that word ("04-11-2026, TOTAL, 779, 100.00 Dr, 51,900.00"):
+  // buildStatement keeps it when its balance moved by an amount from the line above.
   if (isSummaryLabel(narration)) {
     const k = words(narration);
     if (OPENING_LABEL.test(k) && !CLOSING_RE.test(narration) && cols.balance !== undefined) {
       const b = readBalance(cell(cells, cols.balance), cell(cells, cols.balanceSide));
       if (typeof b === "number") return { opening: b };
     }
-    return { summary: true };
+    const r = readLine(row, cols, date, narration, reference, anyAmount);
+    return r && "draft" in r && r.draft.balance !== null ? { labelled: r.draft } : { summary: true };
   }
 
   if (OPENING_RE.test(narration) && !CLOSING_RE.test(narration) && cols.balance !== undefined) {
@@ -128,6 +139,12 @@ function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
     if (noMoney && typeof b === "number") return { opening: b };
   }
 
+  return readLine(row, cols, date, narration, reference, anyAmount);
+}
+
+/** The amount, side and balance of a dated row. */
+function readLine(row: GridRow, cols: Columns, date: string, narration: string, reference: string, anyAmount: boolean): RowResult {
+  const cells = row.cells;
   let amount = 0;
   let side: "dr" | "cr" | null = null;
   let fromSign = false;
@@ -325,6 +342,19 @@ function joinHardCuts(drafts: Draft[], pieces: Map<Draft, string[]>) {
   }
 }
 
+/**
+ * True when a row labelled like a total is a real line: its balance differs from the line above by
+ * its own amount (oldest first) or by the amount of the line above (newest first), or from the
+ * opening row by its own amount when it is the first line. A total row shows no balance, or the
+ * same balance as the line above, so it never passes.
+ */
+function movedByAnAmount(d: Draft, prev: Draft | undefined, opening: number | null): boolean {
+  if (d.balance === null) return false;
+  const by = (from: number, amount: number) => Math.abs(Math.abs(round2(d.balance! - from)) - amount) < TOLERANCE;
+  if (!prev) return opening !== null && by(opening, d.amount);
+  return prev.balance !== null && (by(prev.balance, d.amount) || by(prev.balance, prev.amount));
+}
+
 /** Reads the transactions under the header row with the given column roles. */
 export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (ColumnRole | null)[]): ParsedStatement {
   const cols = columnsOf(mapping);
@@ -345,7 +375,8 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
       skipped.push({ line: row.line, reason: `Only the first ${MAX_STATEMENT_LINES} lines of a statement are read. Upload the rest as another file` });
       break;
     }
-    const r = readRow(row, cols, drafts.length > 0 && chain);
+    let r = readRow(row, cols, drafts.length > 0 && chain);
+    if (r && "labelled" in r) r = movedByAnAmount(r.labelled, drafts[drafts.length - 1], stated) ? { draft: r.labelled } : { summary: true };
     chain = r !== null && ("draft" in r || "continuation" in r);
     if (!r) continue;
     if ("draft" in r) {

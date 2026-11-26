@@ -57,7 +57,13 @@ const nextConfig: NextConfig = {
     "/api/health": OCR_FILES,
     "/api/imports/drive/receipts": OCR_FILES,
     // The PDF font (the built-in PDF fonts have no rupee sign); read from disk by render-pdf.ts.
-    "/api/reports/[type]": ["./assets/fonts/**"],
+    "/api/reports/[type]": ["./assets/fonts/**", "./assets/brand/**"],
+    // Invoice and receipt PDFs read the same fonts and the logo from disk (src/features/reports/server/pdf-kit.ts).
+    "/api/documents/invoice/[id]": ["./assets/fonts/**", "./assets/brand/**"],
+    "/api/documents/receipt/[id]": ["./assets/fonts/**", "./assets/brand/**"],
+    // The scenario exports use the same report PDF renderer.
+    "/api/analytics/scenarios/compare": ["./assets/fonts/**", "./assets/brand/**"],
+    "/api/analytics/scenarios/[id]/export": ["./assets/fonts/**", "./assets/brand/**"],
   },
   // Docs, scripts and local uploads are never needed by the built server. Not "./src/**": the
   // tracer applies it inside packages too, which dropped fast-csv/build/src (ExcelJS loads it at

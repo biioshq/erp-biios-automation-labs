@@ -412,6 +412,7 @@ export const MODULES: NavModule[] = [
 export const SETTINGS_PAGES: NavItem[] = [
   { title: "Team members", href: "/settings/team", permission: "settings.team:view", icon: Users, keywords: ["people", "staff", "password", "role", "invite"] },
   { title: "Roles and permissions", href: "/settings/roles", permission: "settings.roles:view", icon: ShieldCheck, keywords: ["access", "who can see", "rights", "admin", "member"] },
+  { title: "Business details", href: "/settings/company", permission: "settings.company:view", icon: Building2, keywords: ["company", "gstin", "pan", "address", "bank details", "upi", "invoice terms", "logo", "signatory"] },
 ];
 
 /** Quick actions for the command palette. `?new=1` opens the page's create drawer. */

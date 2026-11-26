@@ -61,7 +61,8 @@ const isSummaryLabel = (s: string) => {
 type Draft = Omit<StatementLine, "withdrawal" | "deposit" | "check"> & { amount: number; side: "dr" | "cr" | null; fromSign: boolean };
 
 /** `summary`: a total, opening or closing row; never a line and never reported as one not read. */
-type RowResult = { draft: Draft } | { continuation: string } | { opening: number } | { summary: true } | { skip: string } | null;
+/** `continuation`: wrapped text of the line above, its narration part and its reference part. */
+type RowResult = { draft: Draft } | { continuation: { narration: string; reference: string } } | { opening: number } | { summary: true } | { skip: string } | null;
 
 function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
   const cells = row.cells;
@@ -92,7 +93,10 @@ function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
     // narration or reference column, right under a line or its wrapped text (`prevExists`), and not
     // a footer ("End of Statement", "Page 2 of 3", a registered office line).
     const onlyText = cells.every((c, i) => i === cols.narration || i === cols.reference || c.trim() === "");
-    if (text && onlyText && !anyAmount && !dateRaw && !labelled && prevExists && row.near !== false && !TRAILER_RE.test(text)) return { continuation: text };
+    if (text && onlyText && !anyAmount && !dateRaw && !labelled && prevExists && row.near !== false && !TRAILER_RE.test(text)) {
+      // A reference that wrapped in its own column goes on the reference, not the narration.
+      return { continuation: cols.narration === undefined ? { narration: text, reference: "" } : { narration, reference } };
+    }
     // Total, opening and closing rows, and the figures under a summary header ("Opening Balance, Dr
     // Count..." then the numbers), are not lines and not rows that failed to read.
     if (labelled || closing || (anyAmount && OPENING_RE.test(joined)) || (dateRaw !== "" && readAmount(dateRaw) !== "invalid")) return { summary: true };
@@ -319,7 +323,9 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
       lastDraftIndex = i;
     } else if ("continuation" in r) {
       const last = drafts[drafts.length - 1]!;
-      last.narration = `${last.narration} ${r.continuation}`.trim().slice(0, 1000);
+      if (r.continuation.narration) last.narration = `${last.narration} ${r.continuation.narration}`.trim().slice(0, 1000);
+      // References have no spaces: the second line of a wrapped one is joined straight on.
+      if (r.continuation.reference) last.reference = `${last.reference ?? ""}${r.continuation.reference}`.slice(0, 200);
     } else if ("opening" in r) {
       if (drafts.length === 0) stated = r.opening;
     } else if ("skip" in r) skipped.push({ line: row.line, reason: r.skip });

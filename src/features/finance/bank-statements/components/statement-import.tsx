@@ -111,6 +111,8 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   const [pageBySide, setPageBySide] = useState<{ out: number; in: number }>({ out: 0, in: 0 });
   const [editing, setEditing] = useState<number | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  /** Lines that were waiting for a choice when "Add all lines" ticked them, for the confirm. */
+  const [addAllUnchecked, setAddAllUnchecked] = useState(0);
   const [run, setRun] = useState<Run | null>(null);
   const [dragging, setDragging] = useState(false);
   // A locked PDF waiting for its password. The password lives only here, until the file is read or changed.
@@ -259,6 +261,14 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
     setDecision(index, withAction(line, decisions[index]!, action));
     // Choosing what a line is counts as reviewing it.
     setSelected((all) => all.map((x, i) => (i === index ? true : x)));
+  }
+
+  /** Ticks every line not added before, so Add takes the whole statement with the suggestions shown. */
+  function addAll() {
+    if (!review) return;
+    setAddAllUnchecked(rows.filter((r) => !r.selected && !r.line.imported).length);
+    setSelected(review.lines.map((l) => !l.imported));
+    setConfirmOpen(true);
   }
 
   function toggle(indices: number[], on: boolean) {
@@ -713,7 +723,12 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
             totals={totals}
             sides={readySides}
             waiting={waitingTotal}
-            onAdd={() => setConfirmOpen(true)}
+            notTicked={rows.filter((r) => !r.selected && !r.line.imported).length}
+            onAdd={() => {
+              setAddAllUnchecked(0);
+              setConfirmOpen(true);
+            }}
+            onAddAll={addAll}
             onRetry={() => run && void addLines(run.pending, run)}
           />
         </div>
@@ -721,7 +736,10 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
 
       <ConfirmDialog
         open={confirmOpen}
-        onOpenChange={setConfirmOpen}
+        onOpenChange={(o) => {
+          setConfirmOpen(o);
+          if (!o) setAddAllUnchecked(0);
+        }}
         title={`Add ${plural(ready.length, "line", "lines")} to the books?`}
         description={
           <>
@@ -741,6 +759,12 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
               {blocked ? ` ${plural(blocked, "ticked line still needs", "ticked lines still need")} details and will not be added.` : ""}
               {waitingTotal ? ` ${plural(waitingTotal, "line that needs", "lines that need")} your choice stay${waitingTotal === 1 ? "s" : ""} out until ticked.` : ""}
             </span>
+            {addAllUnchecked ? (
+              <span className="mt-2 block rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-sm text-foreground">
+                {plural(addAllUnchecked, "line was", "lines were")} not ticked yet (a payer that is not a known customer, no category from earlier records, or a possible
+                refund). {addAllUnchecked === 1 ? "It is" : "They are"} added as suggested; you can change any record afterwards on Total expenses or Income.
+              </span>
+            ) : null}
           </>
         }
         confirmLabel="Add"
@@ -779,7 +803,9 @@ function AddBar({
   totals,
   sides,
   waiting,
+  notTicked,
   onAdd,
+  onAddAll,
   onRetry,
 }: {
   run: Run | null;
@@ -788,6 +814,8 @@ function AddBar({
   totals: { expense: number; income: number; created: number; matched: number; ignored: number };
   sides: { out: number; in: number };
   waiting: number;
+  notTicked: number;
+  onAddAll: () => void;
   onAdd: () => void;
   onRetry: () => void;
 }) {
@@ -838,9 +866,16 @@ function AddBar({
         {waiting ? <span> {plural(waiting, "line waits", "lines wait")} for your choice.</span> : null}
         {blocked ? <span className="text-warning"> {plural(blocked, "ticked line needs", "ticked lines need")} details first.</span> : null}
       </p>
-      <Button type="button" onClick={onAdd} disabled={!readyCount}>
-        Add {plural(readyCount, "line", "lines")}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        {notTicked ? (
+          <Button type="button" variant="outline" onClick={onAddAll} title="Tick every line and add the whole statement with the suggestions shown">
+            Add all lines
+          </Button>
+        ) : null}
+        <Button type="button" onClick={onAdd} disabled={!readyCount}>
+          Add {plural(readyCount, "line", "lines")}
+        </Button>
+      </div>
     </div>
   );
 }

@@ -15,7 +15,7 @@ export type PermissionResource = {
   group: string;
   label: string;
   description?: string;
-  /** The actions this resource has. Every resource has "view". */
+  /** The actions this resource has. Every page resource has "view"; a feature with no page of its own (settings.account) may not. */
   actions: PermissionAction[];
   /** What the built-in Member role may do by default: exactly what members could do before roles existed. */
   memberDefault: PermissionAction[];

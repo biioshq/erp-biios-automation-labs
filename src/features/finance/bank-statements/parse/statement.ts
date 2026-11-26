@@ -88,8 +88,11 @@ function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
       if (typeof b === "number") return { opening: b };
     }
     const labelled = cells.some(isSummaryLabel);
-    // A narration that wrapped onto the next row of the file: no date and no amounts.
-    if (text && !anyAmount && !dateRaw && !labelled && prevExists && row.near !== false) return { continuation: text };
+    // A narration that wrapped onto the next row of the file: no date, no amounts, text only in the
+    // narration or reference column, right under a line or its wrapped text (`prevExists`), and not
+    // a footer ("End of Statement", "Page 2 of 3", a registered office line).
+    const onlyText = cells.every((c, i) => i === cols.narration || i === cols.reference || c.trim() === "");
+    if (text && onlyText && !anyAmount && !dateRaw && !labelled && prevExists && row.near !== false && !TRAILER_RE.test(text)) return { continuation: text };
     // Total, opening and closing rows, and the figures under a summary header ("Opening Balance, Dr
     // Count..." then the numbers), are not lines and not rows that failed to read.
     if (labelled || closing || (anyAmount && OPENING_RE.test(joined)) || (dateRaw !== "" && readAmount(dateRaw) !== "invalid")) return { summary: true };
@@ -249,12 +252,17 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
   const drafts: Draft[] = [];
   const skipped: ParsedStatement["skipped"] = [];
   let stated: number | null = null;
+  // True while the row above was a line or its wrapped text. Anything else (a total, an opening or
+  // closing row, a row not read, a footer, a repeated header) ends the run, so text after the table
+  // or under a page's last line is never glued onto a narration. Lines after it are still read.
+  let chain = false;
   for (const row of grid.slice(headerIndex + 1)) {
     if (drafts.length >= MAX_STATEMENT_LINES) {
       skipped.push({ line: row.line, reason: `Only the first ${MAX_STATEMENT_LINES} lines of a statement are read. Upload the rest as another file` });
       break;
     }
-    const r = readRow(row, cols, drafts.length > 0);
+    const r = readRow(row, cols, drafts.length > 0 && chain);
+    chain = r !== null && ("draft" in r || "continuation" in r);
     if (!r) continue;
     if ("draft" in r) drafts.push(r.draft);
     else if ("continuation" in r) {

@@ -30,12 +30,20 @@ export async function OverviewTab({ project }: { project: ProjectDetail }) {
         <StatCard className={KPI} label="Total budget" value={<Money value={project.budget} compact />} icon={Wallet} tone="info" hint={project.budget > 0 ? undefined : "No budget set"} />
         <StatCard
           className={KPI}
-          label="Total spent"
+          label="Total incurred"
           value={<Money value={project.spent} compact />}
           icon={Receipt}
           tone={tone === "danger" ? "danger" : tone === "warning" ? "warning" : "brand"}
-          hint={project.budget > 0 ? `${formatPercent(project.usage)} of budget` : `${formatNumber(project.expenseCount)} expenses`}
-          footer={<BudgetBar spent={project.spent} budget={project.budget} />}
+          hint={
+            project.spent > 0 ? (
+              <>
+                <Money value={project.finance.payables.paid} compact /> paid, <Money value={project.finance.payables.outstanding} compact /> outstanding
+              </>
+            ) : (
+              `${formatNumber(project.expenseCount)} expenses`
+            )
+          }
+          footer={<BudgetBar spent={project.spent} budget={project.budget} paid={project.finance.payables.paid} />}
         />
         <StatCard
           className={KPI}

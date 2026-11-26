@@ -41,7 +41,7 @@ import type {
   TimelineEvent,
 } from "./types";
 import { currentMembership } from "@/features/employees/membership";
-import { originalBudgetOf, projectOutlook, sumBy, type ProjectFinance } from "./finance";
+import { emptyPayables, originalBudgetOf, projectOutlook, sumBy, type ProjectFinance } from "./finance";
 import { projectFinances } from "./finance-queries";
 import type { BudgetChange, ProjectFinanceRow } from "./types";
 
@@ -112,6 +112,7 @@ export function withFinance(row: ProjectRow, finance: ProjectFinance | undefined
     byStage: stageMap(),
     expenseCount: row.expenseCount,
     revenue: { invoiced: 0, invoiceCount: 0, receivedOnInvoices: 0, receivedDirect: 0, received: 0, revenue: 0, outstanding: 0, overdue: 0 },
+    payables: emptyPayables(PROJECT_STAGES.map((s) => s.value)),
     salariesHidden: false,
   };
   return {
@@ -155,6 +156,7 @@ export async function listProjects(params: ProjectListParams): Promise<{ rows: P
 
   const totalBudget = round2(all.reduce((s, p) => s + p.budget, 0));
   const totalSpent = round2(all.reduce((s, p) => s + p.spent, 0));
+  const totalPaid = sumBy(all, (p) => p.finance.payables.paid);
   return {
     rows,
     summary: {
@@ -168,6 +170,9 @@ export async function listProjects(params: ProjectListParams): Promise<{ rows: P
       totalRevenue: sumBy(all, (p) => p.finance.revenue.revenue),
       totalReceived: sumBy(all, (p) => p.finance.revenue.received),
       totalOutstanding: sumBy(all, (p) => p.finance.revenue.outstanding),
+      totalPaid,
+      totalPayables: round2(totalSpent - totalPaid),
+      payablesOverdue: sumBy(all, (p) => p.finance.payables.overdue),
     },
   };
 }
@@ -251,15 +256,20 @@ async function budgetChangers(history: { changedBy?: Types.ObjectId | null }[] |
 }
 
 /** Stage-wise planned vs actual spend for all seven stages. */
-export function stageRows(project: Pick<ProjectDetail, "byStage" | "stageBudgets" | "spent">): StageRow[] {
+export function stageRows(project: Pick<ProjectDetail, "byStage" | "stageBudgets" | "spent"> & { finance?: Pick<ProjectDetail["finance"], "payables"> }): StageRow[] {
   return PROJECT_STAGES.map((s) => {
     const planned = project.stageBudgets[s.value] ?? 0;
     const spent = project.byStage[s.value] ?? 0;
+    const split = project.finance?.payables.byStage[s.value];
+    // Paid and outstanding come from the shared split (projectPaymentSplit); without it all of the spend reads as paid.
+    const paid = split ? split.paid : spent;
     return {
       stage: s.value,
       label: s.label,
       planned,
       spent,
+      paid,
+      outstanding: round2(spent - paid),
       variance: planned > 0 ? round2(planned - spent) : null,
       share: project.spent > 0 ? spent / project.spent : 0,
     };

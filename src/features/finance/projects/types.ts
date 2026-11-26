@@ -63,7 +63,14 @@ export type ProjectsSummary = {
   withContractValue: number;
   totalRevenue: number;
   totalReceived: number;
+  /** Still to receive on customer invoices (receivable). */
   totalOutstanding: number;
+  /** Paid to vendors out of totalSpent. */
+  totalPaid: number;
+  /** Still owed to vendors out of totalSpent (payables); totalPaid + totalPayables = totalSpent. */
+  totalPayables: number;
+  /** The part of totalPayables that is past due. */
+  payablesOverdue: number;
 };
 
 export type ProjectDetail = ProjectFinanceRow & {
@@ -83,6 +90,10 @@ export type StageRow = {
   label: string;
   planned: number;
   spent: number;
+  /** Paid to vendors out of `spent`. */
+  paid: number;
+  /** Still owed to vendors out of `spent` (spent - paid). */
+  outstanding: number;
   /** planned - spent (negative = over the stage budget). Null when no stage budget was set. */
   variance: number | null;
   /** Share of total spend, 0 to 1. */

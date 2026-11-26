@@ -3,14 +3,14 @@ import "server-only";
 import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
 import { Expense, Income, Invoice } from "@/server/models";
-import { projectSpend } from "@/server/services/metrics";
+import { projectPaymentSplit, projectSpend } from "@/server/services/metrics";
 import { invoiceBalances } from "@/server/finance/summaries";
 import { round2 } from "@/lib/format";
 import { PROJECT_STAGES, type ProjectStage } from "@/lib/constants";
-import { emptyRevenue, emptySpendByType, spendTypeOf, type ProjectFinance } from "./finance";
+import { emptyPayables, emptyRevenue, emptySpendByType, spendTypeOf, type ProjectFinance } from "./finance";
 
 /**
- * Revenue, receipts, receivables and spend by type per project, in one batch. Spend is
+ * Revenue, receipts, receivables, spend by type and paid / outstanding payables per project, in one batch. Spend is
  * projectSpend's (the source of truth, salaries left out for members); the split by type uses the
  * same filter, so its parts always add up to that spend.
  */
@@ -60,12 +60,19 @@ export async function projectFinances(projectIds?: (string | Types.ObjectId)[], 
   const includeSalaries = await seesSalaries(options);
   const ids = projectIds?.map((id) => new Types.ObjectId(String(id)));
   const match = ids ? { project: { $in: ids } } : { project: { $ne: null } };
-  const [spend, categories, invoices, direct] = await Promise.all([
+  const [spend, categories, invoices, direct, payables] = await Promise.all([
     projectSpend(ids, { includeSalaries }),
     spendByCategory(match, includeSalaries),
     invoiceBalances(now, match),
     directReceipts(match),
+    projectPaymentSplit(ids, { includeSalaries, now }),
   ]);
+
+  const payablesOf = (id: string) => {
+    const p = payables.get(id);
+    if (!p) return emptyPayables(PROJECT_STAGES.map((s) => s.value));
+    return { incurred: p.incurred, paid: p.paid, outstanding: p.outstanding, overdue: p.overdue, byStage: p.byStage, noStage: p.noStage };
+  };
 
   const out = new Map<string, ProjectFinance>();
   const get = (id: string) => {
@@ -79,6 +86,7 @@ export async function projectFinances(projectIds?: (string | Types.ObjectId)[], 
         byStage: s?.byStage ?? (Object.fromEntries(PROJECT_STAGES.map((st) => [st.value, 0])) as Record<ProjectStage, number>),
         expenseCount: s?.expenseCount ?? 0,
         revenue: emptyRevenue(),
+        payables: payablesOf(id),
         salariesHidden: !includeSalaries,
       };
       out.set(id, entry);

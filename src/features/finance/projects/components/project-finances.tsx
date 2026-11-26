@@ -48,17 +48,18 @@ export function SpendByTypeList({ project }: { project: ProjectFinanceRow }) {
 }
 
 /**
- * The project's money in one place: what it earns, what was received and is still owed, what it
- * spent by type, and the profit and budget variance worked out the same way as on the
+ * The project's money in one place: what it earns, what was received and is still to receive,
+ * what it spent by type and how much of that is paid or still owed to vendors, and the profit and budget variance worked out the same way as on the
  * Profitability and Budget tracking pages.
  */
 export function ProjectFinances({ project }: { project: ProjectFinanceRow }) {
   const r = project.finance.revenue;
+  const p = project.finance.payables;
   const o = project.outlook;
   return (
     <Section
       title="Finances"
-      description="Revenue is invoices raised plus payments received without an invoice. Spend comes from the project's expenses."
+      description="Revenue is invoices raised plus payments received without an invoice. Spend comes from the project's expenses, split into what is paid and what is still owed."
       actions={
         <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
           <Link href="/finance/projects/profitability" className="inline-flex items-center gap-1 text-brand-ink hover:underline">
@@ -84,11 +85,20 @@ export function ProjectFinances({ project }: { project: ProjectFinanceRow }) {
           <Figure label="Payments received" hint={r.receivedDirect > 0 ? <>incl. <Money value={r.receivedDirect} /> without an invoice</> : "Against invoices"}>
             <ResponsiveMoney value={r.received} />
           </Figure>
-          <Figure label="Outstanding receivables" hint={r.overdue > 0 ? <span className="text-danger"><Money value={r.overdue} /> overdue</span> : "Nothing overdue"}>
+          <Figure label="Receivable" hint={r.overdue > 0 ? <span className="text-danger"><Money value={r.overdue} /> overdue on invoices</span> : "Still to receive on invoices"}>
             <ResponsiveMoney value={r.outstanding} />
           </Figure>
-          <Figure label="Total spent" hint={`${formatNumber(project.finance.expenseCount)} ${project.finance.expenseCount === 1 ? "expense" : "expenses"}`}>
+          <Figure label="Total incurred" hint={`${formatNumber(project.finance.expenseCount)} ${project.finance.expenseCount === 1 ? "expense" : "expenses"}, paid or not`}>
             <ResponsiveMoney value={project.finance.spent} />
+          </Figure>
+          <Figure label="Paid to vendors" hint="Part of the incurred total">
+            <ResponsiveMoney value={p.paid} />
+          </Figure>
+          <Figure
+            label="Outstanding payables"
+            hint={p.overdue > 0 ? <span className="text-danger"><Money value={p.overdue} /> overdue</span> : p.outstanding > 0 ? "Still to pay vendors" : "Nothing owed to vendors"}
+          >
+            <ResponsiveMoney value={p.outstanding} />
           </Figure>
           <Figure
             label="Estimated profit"

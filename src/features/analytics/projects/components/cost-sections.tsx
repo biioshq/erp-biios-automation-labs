@@ -7,6 +7,7 @@ import { PROJECT_STATUSES, labelOf } from "@/lib/constants";
 import { SPEND_TYPES } from "@/lib/project-cost-types";
 import { sumOf } from "../model";
 import type { ProjectCostRow } from "../queries";
+import { EditBudgetButton } from "@/features/finance/projects/components/edit-budget-dialog";
 
 /** Tables of the project cost analysis and budget pages. Server components. */
 
@@ -108,8 +109,11 @@ function Utilisation({ value }: { value: number | null }) {
   );
 }
 
-/** Original and revised budget against actual spend. */
-export function BudgetTable({ rows }: { rows: ProjectCostRow[] }) {
+/**
+ * Original and revised budget against actual spend, split into paid and outstanding. With
+ * `canEdit` (finance.projects:edit) each revised budget has an Edit budget button.
+ */
+export function BudgetTable({ rows, canEdit = false }: { rows: ProjectCostRow[]; canEdit?: boolean }) {
   const columns: Column<ProjectCostRow>[] = [
     project,
     status,
@@ -120,12 +124,31 @@ export function BudgetTable({ rows }: { rows: ProjectCostRow[] }) {
       align: "right",
       cell: (r) => (
         <div>
-          <Money value={r.budget} />
+          <span className="inline-flex items-center justify-end gap-1">
+            <Money value={r.budget} />
+            {canEdit ? <EditBudgetButton project={{ id: r.id, name: r.name, budget: r.budget, spent: r.spent }} className="-my-1" /> : null}
+          </span>
           {r.budgetHistory.length ? <span className="block text-xs text-muted-foreground">{r.budgetHistory.length === 1 ? "Revised once" : `Revised ${r.budgetHistory.length} times`}</span> : null}
         </div>
       ),
     },
     { key: "spent", header: "Actual", align: "right", cell: (r) => <Money value={r.spent} className="font-medium" /> },
+    { key: "paid", header: "Paid", align: "right", cell: (r) => <Money value={r.paid} /> },
+    {
+      key: "outstanding",
+      header: "Outstanding",
+      align: "right",
+      cell: (r) => (
+        <div>
+          <Money value={r.outstanding} />
+          {r.overdue > 0 ? (
+            <span className="block text-xs text-danger">
+              <Money value={r.overdue} /> overdue
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
     { key: "use", header: "Utilisation", cell: (r) => <Utilisation value={r.utilisation} /> },
     {
       key: "variance",
@@ -145,7 +168,7 @@ export function BudgetTable({ rows }: { rows: ProjectCostRow[] }) {
       rows={rows}
       columns={columns}
       rowKey={(r) => r.id}
-      minWidth={940}
+      minWidth={1120}
       footer={
         <FooterRow
           cells={[
@@ -154,6 +177,8 @@ export function BudgetTable({ rows }: { rows: ProjectCostRow[] }) {
             { content: <Money value={sumOf(rows, (r) => r.originalBudget)} />, align: "right" },
             { content: <Money value={sumOf(rows, (r) => r.budget)} />, align: "right" },
             { content: <Money value={sumOf(rows, (r) => r.spent)} />, align: "right" },
+            { content: <Money value={sumOf(rows, (r) => r.paid)} />, align: "right" },
+            { content: <Money value={sumOf(rows, (r) => r.outstanding)} />, align: "right" },
             { content: "" },
             { content: <Money value={sumOf(rows.filter((r) => r.budget > 0), (r) => r.remainingBudget)} tone="auto" />, align: "right" },
             { content: "" },

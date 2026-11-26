@@ -12,6 +12,8 @@ import { ScenarioStatusBadge, ScenarioTypeBadge } from "@/features/analytics/sce
 import { ScenarioActions } from "@/features/analytics/scenarios/components/scenario-actions";
 import { ResultsSwitch } from "@/features/analytics/scenarios/components/results-switch";
 import { HistoryTimeline } from "@/features/analytics/scenarios/components/history-timeline";
+import { ApplyBudgetButton } from "@/features/analytics/scenarios/components/apply-budget-button";
+import { scenarioBudgetTarget } from "@/features/analytics/scenarios/server/project-budget";
 
 export const metadata: Metadata = { title: "Scenario" };
 
@@ -23,6 +25,8 @@ export default async function ScenarioPage({ params }: { params: Promise<{ id: s
   // Worked out again from today's records on every visit; the saved figures stay as they were.
   const s = await getScenarioDetail(id, analyticsViewer(user));
   if (!s) notFound();
+  // A whole-project budget scenario can become the project's budget (with the projects edit permission).
+  const budgetTarget = s.type === "budget" && can(user, "finance.projects:edit") ? await scenarioBudgetTarget(s.id) : null;
 
   return (
     <Page>
@@ -38,7 +42,12 @@ export default async function ScenarioPage({ params }: { params: Promise<{ id: s
             </span>
           </span>
         }
-        actions={<ScenarioActions id={s.id} code={s.code} status={s.status} hasSaved={Boolean(s.saved)} canExport={Boolean(s.live)} outdated={!s.saved || s.changedSinceSave.length > 0 || Boolean(s.savedNote)} canRecalculate={!s.savedHidden} />}
+        actions={
+          <>
+            {budgetTarget ? <ApplyBudgetButton target={budgetTarget} /> : null}
+            <ScenarioActions id={s.id} code={s.code} status={s.status} hasSaved={Boolean(s.saved)} canExport={Boolean(s.live)} outdated={!s.saved || s.changedSinceSave.length > 0 || Boolean(s.savedNote)} canRecalculate={!s.savedHidden} />
+          </>
+        }
       />
 
       <Section title="Inputs and assumptions" description="What this scenario supposes. Nothing here is written to real records.">

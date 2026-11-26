@@ -77,6 +77,18 @@ export type ProjectFormInput = z.input<typeof projectFormSchema>;
 export type ProjectFormValues = z.output<typeof projectFormSchema>;
 
 export const projectIdSchema = z.object({ id: objectId });
+
+/** The Edit budget dialog: a new allocated budget, guarded by the budget it was opened with. */
+export const projectBudgetSchema = z.object({
+  id: objectId,
+  budget: money,
+  /** The budget the dialog was opened with; the change only applies while it is still stored. */
+  expectedBudget: z.number().finite(),
+  /** Why the budget changed; kept with the old budget in the budget history. */
+  note: optionalText(500),
+});
+export type ProjectBudgetInput = z.input<typeof projectBudgetSchema>;
+export type ProjectBudgetValues = z.output<typeof projectBudgetSchema>;
 export const projectStatusSchema = z.object({ id: objectId, status: z.enum(valuesOf(PROJECT_STATUSES)) });
 
 export const documentRefSchema = z.object({ projectId: objectId, fileId: objectId });

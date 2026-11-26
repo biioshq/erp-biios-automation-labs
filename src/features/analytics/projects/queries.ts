@@ -5,7 +5,7 @@ import { connectDB } from "@/server/db";
 import { Expense, Project } from "@/server/models";
 import { canSeeSalaries } from "@/server/auth/session";
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
-import { projectSpend } from "@/server/services/metrics";
+import { projectPaymentSplit, projectSpend } from "@/server/services/metrics";
 import { PROJECT_STAGES, type ProjectStage, type ProjectStatus } from "@/lib/constants";
 import { toDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
@@ -42,6 +42,12 @@ export type ProjectCostRow = {
   noStage: number;
   byCategory: CategorySpend[];
   expenseCount: number;
+  /** Paid to vendors out of `spent` (projectPaymentSplit, the same expenses and salary rule). */
+  paid: number;
+  /** Still owed to vendors out of `spent`; paid + outstanding = spent. */
+  outstanding: number;
+  /** The part of outstanding past its due date. */
+  overdue: number;
   /** Budget minus spent; negative when over budget. Also the variance. */
   remainingBudget: number;
   /** Budget not spent yet on open projects (0 when over budget, 0 when closed). */
@@ -111,13 +117,18 @@ export async function loadProjectCosts(statuses: ProjectStatus[] | null, now: Da
     getExpenseCategoryLabeler(),
   ]);
   const ids = projects.map((p) => p._id);
-  const [spend, categories] = await Promise.all([projectSpend(ids, { includeSalaries }), categorySpend(ids, includeSalaries)]);
+  const [spend, categories, payables] = await Promise.all([
+    projectSpend(ids, { includeSalaries }),
+    categorySpend(ids, includeSalaries),
+    projectPaymentSplit(ids, { includeSalaries, now }),
+  ]);
   const today = toDateInput(now);
 
   const rows = projects.map((p): ProjectCostRow => {
     const id = String(p._id);
     const s = spend.get(id);
     const spent = s?.spent ?? 0;
+    const paid = payables.get(id)?.paid ?? 0;
     const byType = emptySpendByType();
     const byCategory = (categories.get(id) ?? [])
       .map((c) => ({ ...c, label: labelOf(c.category) }))
@@ -153,6 +164,9 @@ export async function loadProjectCosts(statuses: ProjectStatus[] | null, now: Da
       noStage: round2(spent - staged),
       byCategory,
       expenseCount: s?.expenseCount ?? 0,
+      paid,
+      outstanding: round2(spent - paid),
+      overdue: payables.get(id)?.overdue ?? 0,
       remainingBudget,
       estimatedRemaining: closed ? 0 : Math.max(0, remainingBudget),
       utilisation: budget > 0 ? spent / budget : null,

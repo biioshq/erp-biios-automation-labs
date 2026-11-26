@@ -8,6 +8,7 @@ import { monthKeyIST, startOfMonthIST } from "@/lib/dates";
 import { roundQty } from "@/server/services/inventory-ledger";
 import { round2 } from "@/lib/format";
 import { getStockStatus } from "@/lib/stock-status";
+import { PAID_EXPR, statusExpr } from "@/features/finance/expenses/payment-status";
 
 /**
  * The ERP's shared numbers. Dashboards, project pages and reports all read
@@ -176,6 +177,87 @@ export async function projectSpend(
     if (row._id.stage) entry.byStage[row._id.stage] = round2(entry.byStage[row._id.stage] + row.total);
   }
   for (const row of incomes) get(String(row._id)).income = round2(row.total);
+  ids?.forEach((id) => get(String(id)));
+  return out;
+}
+
+/** Spend split into what was paid and what is still owed to vendors. incurred = paid + outstanding. */
+export type PaymentSplit = {
+  /** What projectSpend sums: every expense at its full amount, paid or not. */
+  incurred: number;
+  paid: number;
+  outstanding: number;
+  /** The part of outstanding that is past its due date (the due date, or the expense date). */
+  overdue: number;
+};
+
+export type ProjectPaymentSplit = PaymentSplit & {
+  projectId: string;
+  byStage: Record<ProjectStage, PaymentSplit>;
+  /** Expenses without a stage, so the stages and this add up to the project figures. */
+  noStage: PaymentSplit;
+  salariesHidden: boolean;
+};
+
+export const emptyPaymentSplit = (): PaymentSplit => ({ incurred: 0, paid: 0, outstanding: 0, overdue: 0 });
+
+const addSplit = (into: PaymentSplit, incurred: number, paid: number, overdue: number) => {
+  into.incurred = round2(into.incurred + incurred);
+  into.paid = round2(into.paid + paid);
+  // Derived from the two sums, never summed on its own, so paid + outstanding is always incurred.
+  into.outstanding = round2(into.incurred - into.paid);
+  into.overdue = Math.min(into.outstanding, round2(into.overdue + overdue));
+};
+
+/**
+ * Paid and outstanding per project and stage, over exactly the expenses projectSpend sums (same
+ * match, same salary rule), so `incurred` is the project's spend. An expense counts once, at its
+ * full amount, whether it is paid, part paid or unpaid: settling a bill moves money from
+ * outstanding to paid and never changes incurred.
+ *
+ * Paid follows the shared payment rule (PAID_EXPR and statusExpr in
+ * src/features/finance/expenses/payment-status.ts, twins of paymentState): capped at the amount,
+ * and the whole amount once the expense reads as paid. Stock rows (assignments from inventory,
+ * and copies counted at purchase) count as paid: they move no money, and the stock purchase they
+ * came from is a company payable, not this project's.
+ */
+export async function projectPaymentSplit(
+  projectIds?: (string | Types.ObjectId)[],
+  options: SpendOptions & { now?: Date } = {},
+): Promise<Map<string, ProjectPaymentSplit>> {
+  await connectDB();
+  const includeSalaries = await viewerSeesSalaries(options);
+  const salariesHidden = !includeSalaries;
+  const ids = projectIds?.map((id) => new Types.ObjectId(String(id)));
+  const match = ids ? { project: { $in: ids } } : { project: { $ne: null } };
+  const stock = { $or: [{ $eq: ["$paymentMethod", "stock"] }, { $eq: ["$countedAtPurchase", true] }] };
+  const rows = await Expense.aggregate<{ _id: { project: Types.ObjectId; stage: ProjectStage | null }; incurred: number; paid: number; overdue: number }>([
+    { $match: salariesHidden ? { ...match, category: { $ne: "salaries" } } : match },
+    { $addFields: { _status: { $cond: [stock, "paid", statusExpr(options.now ?? new Date())] } } },
+    { $addFields: { _paid: { $cond: [{ $eq: ["$_status", "paid"] }, "$amount", { $min: ["$amount", PAID_EXPR] }] } } },
+    {
+      $group: {
+        _id: { project: "$project", stage: "$stage" },
+        incurred: { $sum: "$amount" },
+        paid: { $sum: "$_paid" },
+        overdue: { $sum: { $cond: [{ $eq: ["$_status", "overdue"] }, { $subtract: ["$amount", "$_paid"] }, 0] } },
+      },
+    },
+  ]);
+  const out = new Map<string, ProjectPaymentSplit>();
+  const get = (id: string) => {
+    if (!out.has(id)) {
+      const byStage = Object.fromEntries(PROJECT_STAGES.map((s) => [s.value, emptyPaymentSplit()])) as Record<ProjectStage, PaymentSplit>;
+      out.set(id, { projectId: id, ...emptyPaymentSplit(), byStage, noStage: emptyPaymentSplit(), salariesHidden });
+    }
+    return out.get(id)!;
+  };
+  for (const row of rows) {
+    const entry = get(String(row._id.project));
+    addSplit(entry, row.incurred, row.paid, row.overdue);
+    const stage = row._id.stage && entry.byStage[row._id.stage] ? entry.byStage[row._id.stage] : entry.noStage;
+    addSplit(stage, row.incurred, row.paid, row.overdue);
+  }
   ids?.forEach((id) => get(String(id)));
   return out;
 }

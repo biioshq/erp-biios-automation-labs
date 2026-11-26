@@ -30,9 +30,9 @@ export function EditBudgetButton({ project, variant = "icon", className }: { pro
   const canEdit = useCan("finance.projects:edit");
   const [open, setOpen] = useState(false);
   if (!canEdit) return null;
-  // Clicks inside the dialog bubble through the React tree to a clickable table row: stopped here.
+  // Clicks and keys inside the dialog bubble through the React tree to a clickable table row: stopped here.
   return (
-    <span className="contents" onClick={(e) => e.stopPropagation()}>
+    <span className="contents" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       {variant === "icon" ? (
         <Button
           variant="ghost"

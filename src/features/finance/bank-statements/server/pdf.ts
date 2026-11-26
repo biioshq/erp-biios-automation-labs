@@ -143,12 +143,35 @@ function cellsOf(line: PdfLine, columns: Column[]): string[] {
 
 type TextItem = { str: string; x: number; y: number; width: number; fontSize: number; height: number };
 
-/** Reads a text PDF into rows of cells, the column names first. */
-export async function readPdfStatement(bytes: Buffer): Promise<{ grid: GridRow[]; headerIndex: number }> {
+/** The longest password passed on to the PDF reader; bank statement passwords are a few characters. */
+export const MAX_PDF_PASSWORD = 128;
+
+/**
+ * A locked PDF: no password was given ("missing") or the one given does not open it ("wrong").
+ * The message never contains the password.
+ */
+export class PdfPasswordError extends StatementReadError {
+  override name = "PdfPasswordError";
+  constructor(readonly reason: "missing" | "wrong") {
+    super(
+      reason === "wrong"
+        ? "That password does not open this PDF. Check it and try again: the bank's email usually says which password it uses, often your customer ID or date of birth."
+        : "This PDF is password protected. Banks often lock statements with your customer ID or date of birth. Type the password to read it, or upload a copy saved without the password.",
+    );
+  }
+}
+
+const SCANNED =
+  "This PDF has no readable statement text: it looks like a scanned or photographed statement. Reading scans is not reliable enough for bank figures. Download the statement from net banking as CSV, Excel or a PDF with text, and upload that.";
+/** A page of a statement has well over a thousand characters; a scan with a scanner's footer line has a few dozen. */
+const SCAN_CHARS_PER_PAGE = 200;
+
+/** Reads a text PDF into rows of cells, the column names first. `password` opens a locked PDF; it is only passed to the PDF reader. */
+export async function readPdfStatement(bytes: Buffer, password?: string): Promise<{ grid: GridRow[]; headerIndex: number }> {
   const { getDocumentProxy, extractTextItems } = await import("unpdf");
   let pages: TextItem[][];
   try {
-    const pdf = await getDocumentProxy(new Uint8Array(bytes));
+    const pdf = await getDocumentProxy(new Uint8Array(bytes), password ? { password: password.slice(0, MAX_PDF_PASSWORD) } : undefined);
     if (pdf.numPages > MAX_PAGES) {
       throw new StatementReadError(`This PDF has ${pdf.numPages} pages. Upload at most ${MAX_PAGES} pages at a time, or download the statement as CSV or Excel.`);
     }
@@ -157,19 +180,16 @@ export async function readPdfStatement(bytes: Buffer): Promise<{ grid: GridRow[]
     if (error instanceof StatementReadError) throw error;
     const name = error instanceof Error ? error.name : "";
     if (name === "PasswordException") {
-      throw new StatementReadError(
-        "This PDF is password protected. Banks often lock statements with your customer ID or date of birth. Open it, save or print a copy without the password, and upload that copy.",
-      );
+      // pdf.js: code 1 is "no password given", code 2 "incorrect password".
+      const code = (error as { code?: unknown }).code;
+      throw new PdfPasswordError(password && code === 2 ? "wrong" : "missing");
     }
     throw new StatementReadError("This PDF could not be opened. Download the statement again, or as CSV or Excel, and upload that file.");
   }
 
   const text = pages.flat().map((t) => t.str).join("");
-  if (text.replace(/\s/g, "").length < MIN_TEXT) {
-    throw new StatementReadError(
-      "This PDF has no text in it: it looks like a scanned or photographed statement. Reading scans is not reliable enough for bank figures. Download the statement from net banking as CSV, Excel or a PDF with text, and upload that.",
-    );
-  }
+  const chars = text.replace(/\s/g, "").length;
+  if (chars < MIN_TEXT) throw new StatementReadError(SCANNED);
 
   const lines: PdfLine[] = [];
   pages.forEach((items, p) => {
@@ -210,5 +230,7 @@ export async function readPdfStatement(bytes: Buffer): Promise<{ grid: GridRow[]
     grid.push({ line: grid.length + 1, page: line.page, near, cells: cellsOf({ ...line, words: line.words.flatMap(splitJoinedAmounts) }, columns) });
     prev = line;
   }
+  // No table and hardly any text: a scan that carries a line of text (a scanner app's footer).
+  if (headerIndex < 0 && chars / Math.max(pages.length, 1) < SCAN_CHARS_PER_PAGE) throw new StatementReadError(SCANNED);
   return { grid, headerIndex };
 }

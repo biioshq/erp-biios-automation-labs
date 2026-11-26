@@ -2,9 +2,10 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, FileText, Landmark, RefreshCw, Upload } from "lucide-react";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, FileText, Landmark, Lock, RefreshCw, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -54,16 +55,34 @@ function download(name: string, csv: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function readOnServer(file: File): Promise<ReadStatementResult> {
+/** The longest password the server takes (MAX_PDF_PASSWORD in server/pdf.ts). */
+const MAX_PASSWORD = 128;
+
+/** A locked PDF: the server needs its password ("missing") or the one typed did not open it ("wrong"). */
+class PasswordNeeded extends Error {
+  constructor(
+    message: string,
+    readonly reason: "missing" | "wrong",
+  ) {
+    super(message);
+  }
+}
+
+/** The password goes in the POST body only, never in the address or anywhere it is kept. */
+async function readOnServer(file: File, password?: string): Promise<ReadStatementResult> {
   const form = new FormData();
   form.append("file", file);
+  if (password) form.append("password", password);
   let res: Response;
   try {
     res = await fetch("/api/bank-statements", { method: "POST", body: form });
   } catch {
     throw new Error("Network error while reading the statement. Check your connection and try again.");
   }
-  const body = (await res.json().catch(() => null)) as (Partial<ReadStatementResult> & { error?: string }) | null;
+  const body = (await res.json().catch(() => null)) as (Partial<ReadStatementResult> & { error?: string; needsPassword?: "missing" | "wrong" }) | null;
+  if (body?.needsPassword === "missing" || body?.needsPassword === "wrong") {
+    throw new PasswordNeeded(body.error ?? "This PDF is password protected.", body.needsPassword);
+  }
   if (!res.ok || !body?.grid) throw new Error(body?.error ?? `The statement could not be read (error ${res.status}).`);
   return body as ReadStatementResult;
 }
@@ -94,6 +113,9 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [dragging, setDragging] = useState(false);
+  // A locked PDF waiting for its password. The password lives only here, until the file is read or changed.
+  const [locked, setLocked] = useState<File | null>(null);
+  const [password, setPassword] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const problemsOfMapping = headerIndex >= 0 ? mappingProblems(mapping) : ["no header"];
@@ -141,6 +163,8 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
     setHeaderIndex(-1);
     setMapping([]);
     setShowMapping(false);
+    setLocked(null);
+    setPassword("");
     if (inputRef.current) inputRef.current.value = "";
   }
 
@@ -180,15 +204,26 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
       setFileError(`This file is ${formatFileSize(f.size)}. Statements up to 4 MB can be uploaded: download a shorter period, or the CSV version.`);
       return;
     }
+    await readFile(f);
+  }
+
+  async function readFile(f: File, pdfPassword?: string) {
     setReading(true);
+    setFileError(null);
     try {
-      const read = await readOnServer(f);
+      const read = await readOnServer(f, pdfPassword);
+      setLocked(null);
+      setPassword("");
       setFile({ ...read, size: f.size });
       setHeaderIndex(read.headerIndex);
       setMapping(read.mapping);
       // The columns are always shown for a check first; the review starts with Continue to review.
       setShowMapping(true);
     } catch (error) {
+      if (error instanceof PasswordNeeded) {
+        setLocked(f);
+        if (error.reason === "wrong") setPassword("");
+      }
       setFileError(error instanceof Error ? error.message : "This statement could not be read.");
     } finally {
       setReading(false);
@@ -460,6 +495,37 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
             <p className="text-sm text-danger" role="alert">
               {fileError}
             </p>
+          ) : null}
+          {locked ? (
+            <form
+              className="flex flex-wrap items-end gap-2 rounded-xl border p-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (password && !reading) void readFile(locked, password);
+              }}
+            >
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <Label htmlFor="statement-pdf-password" className="flex min-w-0 items-center gap-1.5">
+                  <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="truncate">Password for {locked.name}</span>
+                </Label>
+                <Input
+                  id="statement-pdf-password"
+                  type="password"
+                  autoComplete="off"
+                  maxLength={MAX_PASSWORD}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={reading}
+                  autoFocus
+                />
+              </div>
+              <Button type="submit" size="sm" disabled={!password || reading}>
+                {reading ? <Spinner /> : null}
+                Read with password
+              </Button>
+              <p className="w-full text-xs text-muted-foreground">The password is used only to open this file. It is not saved.</p>
+            </form>
           ) : null}
         </div>
       ) : null}

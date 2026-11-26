@@ -10,7 +10,7 @@ import { resourceOf } from "@/lib/permissions";
  * "date" is a period (from and to); "asOf" is one day, kept in `to`; "columns" is the Profit &
  * Loss column layout (one total, or per month, quarter or year).
  */
-export type ReportFilterKey = "date" | "asOf" | "project" | "vendor" | "category" | "columns";
+export type ReportFilterKey = "date" | "asOf" | "project" | "vendor" | "customer" | "category" | "columns";
 
 /** The headings the report cards are grouped under, in order. */
 export const REPORT_GROUPS = [
@@ -201,6 +201,22 @@ export const REPORT_CATALOG: ReportInfo[] = [
     contains: ["Cash inflow, outflow and position", "Expected payments and receipts", "Budget allocation against actual"],
     filters: ["date"],
   },
+  {
+    type: "vendor_statement",
+    group: "expense",
+    label: "Vendor statement",
+    description: "Bills, payments and what is still owed to a vendor.",
+    contains: ["Bills in the period with paid and outstanding today", "Payments made in the period", "Outstanding to each vendor today"],
+    filters: ["date", "vendor"],
+  },
+  {
+    type: "customer_statement",
+    group: "income",
+    label: "Customer statement",
+    description: "Invoices, receipts and the balance for a customer.",
+    contains: ["Invoices in the period with received and outstanding", "Receipts in the period", "What the customer owes today"],
+    filters: ["date", "customer"],
+  },
 ];
 
 /**
@@ -240,6 +256,10 @@ const REPORT_PERMISSIONS: Record<Exclude<ReportType, "scenario">, string[]> = {
   fixed_assets: [exportOf("finance.fixed_assets")],
   depreciation: [exportOf("finance.fixed_assets")],
   equity: [exportOf("finance.equity")],
+  // The vendor statement is the expense report plus payments and outstanding (members export the expense report by default).
+  vendor_statement: ["finance.reports:export"],
+  // The customer statement lists invoices and receipts: the receivables area's export as well.
+  customer_statement: ["finance.reports:export", exportOf("finance.receivables")],
 };
 
 /** The permissions a report type needs, all of them. A type without a card (scenario) is never built here. */

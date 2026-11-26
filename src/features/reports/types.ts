@@ -57,6 +57,8 @@ export type ReportFilters = {
   to: string | null;
   project: string[];
   vendor: string[];
+  /** Customer statement only: customer names. Older log rows lack it. */
+  customer?: string[];
   category: string[];
   /** Inventory only: the movement ledger instead of the valuation. */
   movements: boolean;

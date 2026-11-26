@@ -18,6 +18,8 @@ export type FilterMeta = Pick<ReportInfo, "type" | "filters" | "categories">;
 export type ReportFilterOptions = {
   projects: FilterOption[];
   vendors: FilterOption[];
+  /** Customer statement only. */
+  customers?: FilterOption[];
   categories: FilterOption[];
 };
 
@@ -54,6 +56,7 @@ export function ReportFilterBar({
     (has("asOf") && filters.to) ||
     (has("project") && filters.project.length) ||
     (has("vendor") && filters.vendor.length) ||
+    (has("customer") && filters.customer?.length) ||
     (has("category") && filters.category.length);
 
   return (
@@ -101,6 +104,11 @@ export function ReportFilterBar({
           <FacetedFilter title="Vendor" options={options.vendors} selected={filters.vendor} onChange={(v) => url.set({ vendor: v })} />
         </div>
       ) : null}
+      {has("customer") ? (
+        <div className="max-sm:[&>button]:w-full max-sm:[&>button]:justify-start">
+          <FacetedFilter title="Customer" options={options.customers ?? []} selected={filters.customer ?? []} onChange={(v) => url.set({ customer: v })} />
+        </div>
+      ) : null}
       {has("category") ? (
         <div className="max-sm:[&>button]:w-full max-sm:[&>button]:justify-start">
           <FacetedFilter title="Category" options={options.categories} selected={filters.category} onChange={(v) => url.set({ category: v })} />
@@ -128,6 +136,7 @@ export function ReportFilterBar({
               ...(has("date") || has("asOf") ? { from: null, to: null } : {}),
               ...(has("project") ? { project: null } : {}),
               ...(has("vendor") ? { vendor: null } : {}),
+              ...(has("customer") ? { customer: null } : {}),
               ...(has("category") ? { category: null } : {}),
             })
           }

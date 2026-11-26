@@ -47,6 +47,8 @@ const filtersSchema = z.object({
   to: day,
   project: csvList,
   vendor: csvList,
+  /** Customer statement: customer names. */
+  customer: csvList,
   category: csvList,
   movements: flag,
   q: z
@@ -104,7 +106,8 @@ export function filtersForReport(type: ReportType, filters: ReportFilters): Repo
     from: has("date") ? filters.from : null,
     to: has("date") || has("asOf") ? filters.to : null,
     project: has("project") ? filters.project : [],
-    vendor: [],
+    vendor: has("vendor") ? filters.vendor : [],
+    ...(has("customer") ? { customer: filters.customer ?? [] } : {}),
     category: [],
     movements: false,
     q: "",
@@ -146,6 +149,7 @@ export function reportQueryString(filters: Partial<ReportFilters>, format?: Repo
   const lists: [string, string[] | undefined][] = [
     ["project", filters.project],
     ["vendor", filters.vendor],
+    ["customer", filters.customer],
     ["category", filters.category],
     ["stage", filters.stage],
     ["paymentMethod", filters.paymentMethod],

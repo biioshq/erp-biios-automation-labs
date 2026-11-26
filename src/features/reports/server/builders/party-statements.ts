@@ -20,7 +20,9 @@ import type { ReportData, ReportFilters, ReportRow, ReportSection } from "../../
  * "Today" figures are as of the day the file is built, like the payables and receivables reports.
  */
 
-const key = (name: string) => name.trim().toLowerCase();
+/** A name as printed: a record saved without one (older rows) is grouped under "No name" instead of failing the file. */
+const shown = (name: string | null | undefined) => (name ?? "").trim() || "No name";
+const key = (name: string | null | undefined) => shown(name).toLowerCase();
 const inRange = (d: string | null, from: string, to: string) => Boolean(d && d >= from && d <= to);
 
 /** The period a statement covers: the financial year to date when no dates are given. */
@@ -57,10 +59,10 @@ export async function buildVendorStatementReport(f: ReportFilters): Promise<Repo
 
   type VendorRow = { vendor: string; bills: number; billed: number; paid: number; outstanding: number; overdue: number };
   const byVendor = new Map<string, VendorRow>();
-  const vendorOf = (name: string) => {
+  const vendorOf = (name: string | null | undefined) => {
     const k = key(name);
     let v = byVendor.get(k);
-    if (!v) byVendor.set(k, (v = { vendor: name.trim(), bills: 0, billed: 0, paid: 0, outstanding: 0, overdue: 0 }));
+    if (!v) byVendor.set(k, (v = { vendor: shown(name), bills: 0, billed: 0, paid: 0, outstanding: 0, overdue: 0 }));
     return v;
   };
 
@@ -202,10 +204,10 @@ export async function buildCustomerStatementReport(f: ReportFilters): Promise<Re
 
   type CustomerRow = { customer: string; invoices: number; invoiced: number; received: number; outstanding: number; overdue: number };
   const byCustomer = new Map<string, CustomerRow>();
-  const customerOf = (name: string) => {
+  const customerOf = (name: string | null | undefined) => {
     const k = key(name);
     let c = byCustomer.get(k);
-    if (!c) byCustomer.set(k, (c = { customer: name.trim(), invoices: 0, invoiced: 0, received: 0, outstanding: 0, overdue: 0 }));
+    if (!c) byCustomer.set(k, (c = { customer: shown(name), invoices: 0, invoiced: 0, received: 0, outstanding: 0, overdue: 0 }));
     return c;
   };
 

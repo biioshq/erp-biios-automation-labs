@@ -309,7 +309,9 @@ export const createInvoiceForReceipt = defineAction(
       await linkReceipt(incomeId, String(created._id), false);
     } catch (error) {
       try {
-        await Invoice.deleteOne({ _id: created._id });
+        // Keep it if another receipt was recorded against it meanwhile: deleting it would leave that receipt pointing at nothing.
+        if (await Income.exists({ invoice: created._id })) console.error(`[invoices] kept ${number}: a receipt was linked to it before its own receipt could be`);
+        else await Invoice.deleteOne({ _id: created._id });
       } catch (cleanup) {
         console.error(`[invoices] could not remove ${number} after its receipt link failed`, cleanup);
       }

@@ -246,6 +246,54 @@ function reconcile(drafts: Draft[], opening: number | null): { lines: StatementL
   return { lines, ok };
 }
 
+/** A cell that starts with an opening balance label: "Opening Balance (INR ) : 23,45,678.90", "Balance as on 01-Nov-26". */
+const OPENING_START = /^((opening|op) bal(ance)?|balance as (on|at|of)|(balance )?b f|brought forward)\b/;
+/** A cell that is only that label, the column name of a summary block ("Opening Balance, Dr Count, ..."). */
+const OPENING_ONLY = /^(opening|op) bal(ance)?( (inr|rs))?$/;
+
+/**
+ * The opening balance printed outside the table: in the account block above the column names (the
+ * figure after the label's colon, or in the next cell), or as the "Opening Balance" column of a
+ * summary block, with the figure in the row under it, above the table or after its last line. Null
+ * unless exactly one figure is found.
+ */
+function openingAround(grid: GridRow[], headerIndex: number, lastDraftIndex: number): number | null {
+  const found = new Set<number>();
+  const look = (i: number) => {
+    const cells = grid[i]!.cells.map((c) => c.replace(/\s+/g, " ").trim());
+    cells.forEach((t, j) => {
+      const k = words(t);
+      if (!OPENING_START.test(k) || CLOSING_RE.test(t)) return;
+      const colon = t.lastIndexOf(":");
+      const after = colon >= 0 ? t.slice(colon + 1).trim() : "";
+      // A figure with its paise or commas, so the minutes of a time ("10:42") are never read.
+      if (after && /\d[.,]\d/.test(after)) {
+        const b = readBalance(after);
+        if (typeof b === "number") found.add(b);
+        return;
+      }
+      // The figure in the next cell with text, past a date ("Balance as on", "01-Nov-26", "98,765.43").
+      let n = j + 1;
+      while (n < cells.length && (cells[n] === "" || cells[n] === ":" || (readDate(cells[n]) !== null && readAmount(cells[n]) === "invalid"))) n++;
+      if (n < cells.length) {
+        const b = readBalance(cells[n], cells[n + 1]);
+        if (typeof b === "number") {
+          found.add(b);
+          return;
+        }
+      }
+      if (!OPENING_ONLY.test(k)) return;
+      const below = grid[i + 1];
+      if (!below || (i < headerIndex && i + 1 >= headerIndex)) return;
+      const b = readBalance((below.cells[j] ?? "").trim());
+      if (typeof b === "number") found.add(b);
+    });
+  };
+  for (let i = 0; i < headerIndex; i++) look(i);
+  for (let i = lastDraftIndex + 1; i < grid.length; i++) look(i);
+  return found.size === 1 ? [...found][0]! : null;
+}
+
 /** Reads the transactions under the header row with the given column roles. */
 export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (ColumnRole | null)[]): ParsedStatement {
   const cols = columnsOf(mapping);
@@ -256,7 +304,9 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
   // closing row, a row not read, a footer, a repeated header) ends the run, so text after the table
   // or under a page's last line is never glued onto a narration. Lines after it are still read.
   let chain = false;
-  for (const row of grid.slice(headerIndex + 1)) {
+  let lastDraftIndex = headerIndex;
+  for (let i = headerIndex + 1; i < grid.length; i++) {
+    const row = grid[i]!;
     if (drafts.length >= MAX_STATEMENT_LINES) {
       skipped.push({ line: row.line, reason: `Only the first ${MAX_STATEMENT_LINES} lines of a statement are read. Upload the rest as another file` });
       break;
@@ -264,14 +314,19 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
     const r = readRow(row, cols, drafts.length > 0 && chain);
     chain = r !== null && ("draft" in r || "continuation" in r);
     if (!r) continue;
-    if ("draft" in r) drafts.push(r.draft);
-    else if ("continuation" in r) {
+    if ("draft" in r) {
+      drafts.push(r.draft);
+      lastDraftIndex = i;
+    } else if ("continuation" in r) {
       const last = drafts[drafts.length - 1]!;
       last.narration = `${last.narration} ${r.continuation}`.trim().slice(0, 1000);
     } else if ("opening" in r) {
       if (drafts.length === 0) stated = r.opening;
     } else if ("skip" in r) skipped.push({ line: row.line, reason: r.skip });
   }
+  // No opening row in the table: the one printed in the account block above it, or in the summary
+  // under it, so the first line is checked too.
+  if (stated === null && cols.balance !== undefined && drafts.length > 0) stated = openingAround(grid, headerIndex, lastDraftIndex);
 
   // Oldest first. A statement listed newest first is turned round; one day only is tried both ways.
   const first = drafts[0]?.date ?? "";

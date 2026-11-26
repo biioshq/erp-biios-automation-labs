@@ -22,7 +22,10 @@ const schema = z
 
 type Values = z.infer<typeof schema>;
 
-/** Lets anyone change their own password. Other devices are signed out. */
+/**
+ * Lets people whose role has "Change own password" change their own password (the account menu
+ * hides it otherwise, and auth.ts refuses the call). Other devices are signed out.
+ */
 export function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [error, setError] = useState<string | null>(null);
   const form = useForm<Values>({

@@ -5,7 +5,15 @@ import { defineAction } from "@/server/action";
 import { Role, User } from "@/server/models";
 import { AppError, notFound } from "@/server/errors";
 import { resolveRole } from "@/server/auth/permissions";
-import { ADMIN_ROLE, BUILT_IN_ROLES, MEMBER_DEFAULT_PERMISSIONS, MEMBER_ROLE, normalizePermissions } from "@/lib/permissions";
+import {
+  ADMIN_ROLE,
+  BUILT_IN_ROLES,
+  DEFAULT_ON_PERMISSIONS,
+  MEMBER_DEFAULT_PERMISSIONS,
+  MEMBER_ROLE,
+  deniedDefaults,
+  normalizePermissions,
+} from "@/lib/permissions";
 import { createRoleSchema, renameRoleSchema, roleKeySchema, rolePermissionsSchema } from "./schemas";
 import { assertMayEditRole, assertMayGrant } from "./rules";
 import { missingFrom, slugify } from "./model";
@@ -38,7 +46,9 @@ export const createRole = defineAction(
   createRoleSchema,
   async (input, user) => {
     await assertNameFree(input.name);
-    let permissions: string[] = [];
+    // An empty role still starts with the default-on permissions (such as "Change own password")
+    // that the creator may give; a copy takes the source role's state, ticked or not.
+    let permissions: string[] = DEFAULT_ON_PERMISSIONS.filter((p) => user.isAdmin || user.permissions.includes(p));
     if (input.copyFrom) {
       const source = await resolveRole(input.copyFrom);
       if (!source.exists) throw new AppError("The role to start from no longer exists.", "not_found");
@@ -48,7 +58,16 @@ export const createRole = defineAction(
     assertMayGrant(user, permissions);
     const key = await freeKey(input.name);
     const actor = new Types.ObjectId(user.id);
-    await Role.create({ key, name: input.name, description: input.description, permissions, builtIn: false, createdBy: actor, updatedBy: actor });
+    await Role.create({
+      key,
+      name: input.name,
+      description: input.description,
+      permissions,
+      denied: deniedDefaults(permissions),
+      builtIn: false,
+      createdBy: actor,
+      updatedBy: actor,
+    });
     return { key };
   },
   { permission: "settings.roles:edit", revalidate: REVALIDATE, message: "Role created" },
@@ -79,15 +98,17 @@ export const saveRolePermissions = defineAction(
     const permissions = normalizePermissions(input.permissions);
     assertMayGrant(user, missingFrom(current.permissions, permissions));
     const actor = new Types.ObjectId(user.id);
+    // A default-on permission left unticked is stored in `denied`; ticking it again clears it.
+    const denied = deniedDefaults(permissions);
     if (input.key === MEMBER_ROLE) {
       // Editing Member stores an override; "Reset to default" removes it.
       await Role.updateOne(
         { key: MEMBER_ROLE },
-        { $set: { permissions, updatedBy: actor }, $setOnInsert: { name: "Member", builtIn: true, description: "", createdBy: actor } },
+        { $set: { permissions, denied, updatedBy: actor }, $setOnInsert: { name: "Member", builtIn: true, description: "", createdBy: actor } },
         { upsert: true },
       );
     } else {
-      await Role.updateOne({ key: input.key }, { $set: { permissions, updatedBy: actor } });
+      await Role.updateOne({ key: input.key }, { $set: { permissions, denied, updatedBy: actor } });
     }
     return { key: input.key, count: permissions.length };
   },
@@ -117,7 +138,16 @@ export const duplicateRole = defineAction(
     for (let i = 2; await Role.exists({ name }).collation({ locale: "en", strength: 2 }); i++) name = `Copy of ${source.name} (${i})`;
     const key = await freeKey(name);
     const actor = new Types.ObjectId(user.id);
-    await Role.create({ key, name, description: "", permissions: source.permissions, builtIn: false, createdBy: actor, updatedBy: actor });
+    await Role.create({
+      key,
+      name,
+      description: "",
+      permissions: source.permissions,
+      denied: deniedDefaults(source.permissions),
+      builtIn: false,
+      createdBy: actor,
+      updatedBy: actor,
+    });
     return { key };
   },
   { permission: "settings.roles:edit", revalidate: REVALIDATE, message: "Role copied" },

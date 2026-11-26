@@ -7,10 +7,22 @@ export const SETTINGS_RESOURCES: PermissionResource[] = [
     module: "settings",
     group: "Settings",
     label: "Team members",
-    description: "See the team. Create adds people, edit changes a person's role or name. Only admins can set a new password for someone.",
+    description: "Other people on the team. View lists them, create adds someone, edit changes someone else's role or name. Only admins can set a new password for another person. A person's own password is the next row.",
     actions: ["view", "create", "edit"],
     // Everyone could see the team list before roles existed; only admins could add people.
     memberDefault: ["view"],
+  },
+  {
+    key: "settings.account",
+    module: "settings",
+    group: "Settings",
+    label: "Change own password",
+    description: "Change their own password from the account menu. Untick to hide and block it. An admin can still set a new password for them under Team members.",
+    actions: ["edit"],
+    // Everyone could change their own password before this permission existed, so every role keeps
+    // it (Member, existing custom roles, new roles) until an admin unticks it for that role.
+    memberDefault: ["edit"],
+    defaultOn: ["edit"],
   },
   {
     key: "settings.roles",
@@ -22,6 +34,9 @@ export const SETTINGS_RESOURCES: PermissionResource[] = [
     memberDefault: [],
   },
 ];
+
+/** Changing your own password: the account menu item and Better Auth's /change-password. */
+export const OWN_PASSWORD_PERMISSION = "settings.account:edit";
 
 /** Permissions on data that shows up across many pages rather than on one page. */
 export const DATA_PERMISSIONS: DataPermission[] = [

@@ -35,6 +35,10 @@ export const headerKey = (s: string) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
+const OUT_WORD = "withdraw|debit|(^| )dr( |$)|paid out|money out";
+const IN_WORD = "deposit|credit|(^| )cr( |$)|paid in|money in";
+const BOTH_SIDES = new RegExp(`(${OUT_WORD}).*(${IN_WORD})|(${IN_WORD}).*(${OUT_WORD})`);
+
 /** What a column name means, or null for columns the statement reader does not use (serial number, branch). */
 export function roleOf(header: string): ColumnRole | null {
   const k = headerKey(header);
@@ -44,6 +48,9 @@ export function roleOf(header: string): ColumnRole | null {
   if (/(^| )(balance|bal)( |$)/.test(k)) return "balance";
   if (/value (date|dt)/.test(k)) return "valueDate";
   if (/(^| )(date|dt)( |$)/.test(k)) return "date";
+  // One column named for both sides (Kotak "Withdrawal (Dr)/ Deposit (Cr)") holds every amount; a
+  // Dr / Cr column or mark beside it tells the side.
+  if (BOTH_SIDES.test(k)) return "amount";
   if (/withdraw|debit|(^| )dr( |$)|paid out|money out/.test(k)) return "withdrawal";
   if (/deposit|credit|(^| )cr( |$)|paid in|money in/.test(k)) return "deposit";
   if (/narration|description|particular|remark|details|transaction info/.test(k)) return "narration";

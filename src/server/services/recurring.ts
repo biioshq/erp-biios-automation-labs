@@ -11,6 +11,8 @@ import { round2 } from "@/lib/format";
 import { isInterState, splitGst } from "@/lib/gst";
 import { nextOccurrence, periodLabel } from "@/lib/recurrence";
 import type { RecurringFrequency } from "@/lib/constants";
+import { auditSafely } from "@/server/audit";
+import { expenseCreated } from "@/features/finance/audit/records";
 
 /**
  * Posts due recurring expenses (salaries, rent, bills, subscriptions).
@@ -95,6 +97,8 @@ async function claimAndPost(t: RecurringExpenseDoc): Promise<{ expenseId: string
   if (!claimed) return { expenseId: null, schedule: null };
   try {
     const expense = await postOccurrence(t, due);
+    // The audit trail: by the person who pressed Post now, else by the schedule itself.
+    await auditSafely(() => expenseCreated(expense.toObject(), { source: "recurring", ref: { schedule: String(t._id) }, note: `Posted by schedule ${t.name}` }));
     return { expenseId: String(expense._id), schedule: claimed };
   } catch (error) {
     if (isDuplicateKeyError(error)) return { expenseId: null, schedule: claimed };

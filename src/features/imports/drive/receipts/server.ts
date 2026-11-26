@@ -9,6 +9,7 @@ import { DriveError, downloadDriveFile, getDriveFile, isImageOrPdf, listDriveFol
 import { attachFiles, getFiles, removeFile, storeBuffer } from "@/features/files/server";
 import { assertExpenseCategoryAllowed } from "@/server/expense-categories";
 import { iso } from "@/server/serialize";
+import { withAuditContext } from "@/server/audit";
 import { OCR_MIME_TYPES, type InvoiceExtraction } from "@/lib/ocr";
 import { PAYMENT_METHODS } from "@/lib/constants";
 import { fromDateInput, toDateInput } from "@/lib/dates";
@@ -841,7 +842,8 @@ export async function saveDraft(
       { _id, status: "saving" },
       { $set: { savingKey: { vendor: input.vendor, amount: typeof input.amount === "number" ? input.amount : undefined, date: input.date } } },
     );
-    const result = await create(input);
+    // The audit trail records the expense as imported from Google Drive, with its draft.
+    const result = await withAuditContext({ source: "drive", ref: { draft: id } }, () => create(input));
     if (!result.ok) {
       const made = await recover(projectId);
       if (made) return made;

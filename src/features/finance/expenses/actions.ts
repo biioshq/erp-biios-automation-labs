@@ -17,6 +17,8 @@ import { getExpense } from "./queries";
 import { generatedNote, isGeneratedExpense } from "./sources";
 import { HALF_PAISA, assertAccountUsable, assertMaySalary, toObjectId } from "./server";
 import type { ExpenseDetail } from "./types";
+import { auditSafely } from "@/server/audit";
+import { expenseCreated, expenseDeleted, expenseEdited } from "@/features/finance/audit/records";
 
 const REVALIDATE: [string, "layout"][] = [["/finance", "layout"]];
 
@@ -202,6 +204,7 @@ export const createExpense = defineAction(
     const number = await nextNumber("expense", undefined, doc.date);
     const created = await Expense.create({ ...doc, ...payment.set, number, source: "manual", createdBy: new Types.ObjectId(user.id) });
     if (input.receiptId) await attachFiles([input.receiptId], { type: "expense", id: String(created._id) }, input.projectId);
+    await auditSafely(() => expenseCreated(created.toObject()));
     return { id: String(created._id), number };
   },
   { revalidate: REVALIDATE, message: "Expense added", permission: "finance.expenses:create" },
@@ -242,6 +245,10 @@ export const updateExpense = defineAction(
     // A replaced receipt is deleted from storage.
     if (existing.receipt && String(existing.receipt) !== input.receiptId) await removeFile(String(existing.receipt));
     if (input.receiptId) await attachFiles([input.receiptId], { type: "expense", id: input.id }, input.projectId);
+    await auditSafely(async () => {
+      const after = await Expense.findById(existing._id).lean();
+      return after ? expenseEdited(existing, after) : null;
+    });
     return { id: input.id };
   },
   { revalidate: REVALIDATE, message: "Expense updated", permission: "finance.expenses:edit" },
@@ -267,6 +274,7 @@ export const deleteExpense = defineAction(
     }
     await Expense.deleteOne({ _id: existing._id });
     if (existing.receipt) await removeFile(String(existing.receipt));
+    await auditSafely(() => expenseDeleted(existing));
     return { id };
   },
   { revalidate: REVALIDATE, message: "Expense deleted", permission: "finance.expenses:delete" },

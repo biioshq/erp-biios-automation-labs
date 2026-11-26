@@ -8,6 +8,7 @@ import { AppError, isDuplicateKeyError } from "@/server/errors";
 import { assertUser, can, type SessionUser } from "@/server/auth/session";
 import type { ActionResult } from "@/lib/action-result";
 import { bumpChanges } from "@/server/changes";
+import { withAuditContext } from "@/server/audit";
 
 type ActionOptions = {
   /**
@@ -58,7 +59,8 @@ export function defineAction<S extends z.ZodType, R>(
       await connectDB();
       // The collections added with Finance, Roles and Analytics get their indexes before their first write.
       if (!options.readOnly) await ensureNewCollectionIndexes();
-      const data = await handler(parsed.data, user);
+      // The audit trail names the person behind every change made inside the action.
+      const data = await withAuditContext({ actor: { id: user.id, name: user.name } }, () => handler(parsed.data, user));
       for (const path of options.revalidate ?? []) {
         if (Array.isArray(path)) revalidatePath(path[0], path[1]);
         else revalidatePath(path);

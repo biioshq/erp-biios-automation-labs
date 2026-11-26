@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   AccountTransfer,
+  AuditLog,
   BankAccount,
   BankPartyRule,
   BankStatement,
@@ -33,6 +34,7 @@ type IndexedModel = { modelName: string; createIndexes(): Promise<unknown> };
  */
 const NEW_COLLECTION_MODELS: IndexedModel[] = [
   AccountTransfer,
+  AuditLog,
   BankAccount,
   BankPartyRule,
   BankStatement,

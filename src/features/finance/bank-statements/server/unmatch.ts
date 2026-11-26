@@ -8,6 +8,7 @@ import type { StatementLine, UnmatchResult } from "../types";
 import { STALE_CLAIM_MS } from "./claims";
 import { lineHash } from "./hash";
 import { describeLinks } from "./links";
+import { auditUnmatch } from "@/features/finance/audit/bank";
 
 /**
  * Unmatching a statement line: the line stops pointing at the record it became, and the record
@@ -81,6 +82,7 @@ export async function unmatchLine(id: string, userId: string): Promise<UnmatchRe
     { timestamps: false, returnDocument: "before", projection: { action: 1, statement: 1 } },
   ).lean();
   if (!done) return { status: "already", message: "This line is already unmatched. Review it to add it again." };
+  await auditUnmatch(_id, line.link);
   if (done.statement) {
     const field = countField(done.action);
     // Bookkeeping of the counts only: the line is unmatched either way.

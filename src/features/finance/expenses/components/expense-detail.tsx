@@ -20,6 +20,7 @@ import { ExpenseSourceBadge, NatureBadge } from "./expense-badges";
 import { PaymentsPanel } from "./payments-panel";
 import { BankLineLink } from "@/features/finance/bank-statements/components/bank-line-link";
 import { useCan } from "@/components/current-user";
+import { AuditHistory } from "@/features/finance/audit/components/audit-history";
 
 function Row({ icon: Icon, label, children }: { icon: typeof Tag; label: string; children: React.ReactNode }) {
   return (
@@ -243,6 +244,8 @@ export function ExpenseDetailView({
             <p className="text-sm whitespace-pre-wrap text-muted-foreground">{expense.notes}</p>
           </section>
         ) : null}
+
+        <AuditHistory key={expense.id} type="expense" id={expense.id} number={expense.number} />
 
         <p className="text-xs text-muted-foreground">
           Added {formatDateTime(expense.createdAt)}

@@ -143,4 +143,14 @@ export const FINANCE_OPS_RESOURCES: PermissionResource[] = [
     actions: ["view", "export"],
     memberDefault: ["view", "export"],
   },
+  {
+    key: "finance.audit",
+    module: "finance",
+    group: "Reports",
+    label: "Audit trail",
+    description:
+      "Who added, edited, imported, reclassified, paid or deleted income, expenses and invoices, and when; also the History section on expense and income records. Salary entries also need Individual salaries.",
+    actions: ["view"],
+    memberDefault: [],
+  },
 ];

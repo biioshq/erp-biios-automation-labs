@@ -12,6 +12,7 @@ import type { StoredLineReview } from "./types";
 import { reviewLines } from "./server/review";
 import { addStatementLines } from "./server/commit";
 import { storedStatementLine, unmatchLine } from "./server/unmatch";
+import { auditPartyRule } from "@/features/finance/audit/settings";
 
 /**
  * Bank statement actions. A statement turns into expenses, income, capital, loans and transfers
@@ -77,7 +78,7 @@ export const unmatchStatementLine = defineAction(statementLineIdSchema, async ({
 export const updatePartyRule = defineAction(
   partyRuleSchema,
   async ({ id, party, category, projectId, stage }, user) => {
-    const rule = await BankPartyRule.findById(id, { side: 1, category: 1, project: 1 }).lean();
+    const rule = await BankPartyRule.findById(id, { side: 1, key: 1, party: 1, category: 1, project: 1, stage: 1 }).lean();
     if (!rule) throw notFound("The remembered party");
     const salaries = can(user, "data.salaries");
     if ((rule.category === "salaries" || category === "salaries") && !salaries) throw new AppError("Your role cannot change salary payments.", "forbidden");
@@ -106,6 +107,7 @@ export const updatePartyRule = defineAction(
     }
     if (!set.updatedBy) delete set.updatedBy;
     await BankPartyRule.updateOne({ _id: rule._id }, { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
+    await auditPartyRule(rule, { ...rule, party, category: category || null, project: projectId || null, stage: projectId && rule.side === "out" ? stage : null });
     return { id };
   },
   { permission: "finance.bank_statements:edit", revalidate: ["/finance/bank-statements"], message: "Remembered party saved" },
@@ -115,10 +117,11 @@ export const updatePartyRule = defineAction(
 export const deletePartyRule = defineAction(
   partyRuleIdSchema,
   async ({ id }, user) => {
-    const rule = await BankPartyRule.findById(id, { category: 1 }).lean();
+    const rule = await BankPartyRule.findById(id, { side: 1, key: 1, party: 1, category: 1, project: 1, stage: 1 }).lean();
     if (!rule) return { id };
     if (rule.category === "salaries" && !can(user, "data.salaries")) throw new AppError("Your role cannot change salary payments.", "forbidden");
-    await BankPartyRule.deleteOne({ _id: rule._id });
+    const removed = await BankPartyRule.deleteOne({ _id: rule._id });
+    if (removed.deletedCount) await auditPartyRule(rule, null);
     return { id };
   },
   { permission: "finance.bank_statements:edit", revalidate: ["/finance/bank-statements"], message: "Remembered party removed" },

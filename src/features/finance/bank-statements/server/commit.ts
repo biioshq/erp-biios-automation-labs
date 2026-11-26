@@ -21,6 +21,7 @@ import { learnFromLine } from "./rules";
 import { analyseNarration } from "../parse/narration";
 import { lineKindOf, type BankLineKind } from "../kinds";
 import { COMPANY } from "@/config/company";
+import { auditStatementLines } from "@/features/finance/audit/bank";
 
 /**
  * Adds reviewed statement lines to the books, one line at a time so one bad line never stops the
@@ -554,6 +555,8 @@ export async function addStatementLines(input: AddLinesValues, userId: string, o
     const { result, link } = await addOne(l, ctx);
     results.push({ ...result, link });
   }
+  // The audit trail: what each line made, paid or matched, with this statement. Best effort.
+  await auditStatementLines(input.accountId, input.lines, results, statementId);
   if (statementId) {
     const count = (s: AddLineResult["status"]) => results.filter((r) => r.status === s).length;
     await BankStatement.updateOne({ _id: statementId }, { $inc: { added: count("added"), matched: count("matched"), ignored: count("ignored") } });

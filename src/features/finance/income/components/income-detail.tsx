@@ -15,6 +15,7 @@ import { BankLineLink } from "@/features/finance/bank-statements/components/bank
 import type { IncomeDetail } from "../types";
 import { useCan } from "@/components/current-user";
 import { createInvoiceHref, needsInvoice } from "../invoice-flag";
+import { AuditHistory } from "@/features/finance/audit/components/audit-history";
 
 function Row({ icon: Icon, label, children }: { icon: typeof User; label: string; children: React.ReactNode }) {
   return (
@@ -152,6 +153,8 @@ export function IncomeDetailView({
             <p className="text-sm whitespace-pre-wrap text-muted-foreground">{income.notes}</p>
           </section>
         ) : null}
+
+        <AuditHistory key={income.id} type="income" id={income.id} number={income.number} />
 
         <p className="text-xs text-muted-foreground">
           Recorded {formatDateTime(income.createdAt)}

@@ -390,7 +390,12 @@ export function renderDocument(spec: DocumentSpec, company: CompanyIdentity): Bu
     }
     doc.setDrawColor(226, 230, 238).setLineWidth(0.5).line(MARGIN, pageH - 38, right, pageH - 38);
     set("normal", 7.5, MUTED);
-    if (company.footerNote) doc.text(clean(company.footerNote), MARGIN, pageH - 26);
+    if (company.footerNote) {
+      // At most two lines, in the room left of the page number.
+      const noteLines = wrap(company.footerNote, contentW - 80, 7.5).slice(0, 2);
+      set("normal", 7.5, MUTED);
+      doc.text(noteLines, MARGIN, noteLines.length > 1 ? pageH - 29 : pageH - 26);
+    }
     doc.text(`Page ${page} of ${total}`, right, pageH - 26, { align: "right" });
   }
 

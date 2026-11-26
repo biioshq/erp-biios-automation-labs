@@ -201,6 +201,15 @@ export const REPORT_CATALOG: ReportInfo[] = [
     contains: ["Cash inflow, outflow and position", "Expected payments and receipts", "Budget allocation against actual"],
     filters: ["date"],
   },
+  {
+    type: "daily",
+    group: "cash",
+    label: "Daily overview",
+    description: "Income received, expenses, payments made and what is owed, day by day.",
+    contains: ["Each day: income, expenses, payments, owed", "Vendor-wise and customer-wise totals", "Every transaction of the period"],
+    filters: ["date", "project", "vendor", "category"],
+    categories: "expense",
+  },
 ];
 
 /**
@@ -230,6 +239,7 @@ const REPORT_PERMISSIONS: Record<Exclude<ReportType, "scenario">, string[]> = {
   ca: ["finance.reports:export"],
   project_financials: ["finance.reports:export"],
   cash_budget: ["finance.reports:export", "data.financial_position"],
+  daily: ["finance.reports:export", "finance.daily:view"],
   balance_sheet: ["finance.statements:export"],
   profit_loss: ["finance.statements:export"],
   cash_flow: ["finance.statements:export"],

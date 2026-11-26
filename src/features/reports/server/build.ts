@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ReportType } from "@/lib/constants";
 import { buildCaReport } from "./builders/ca";
+import { buildDailyReport } from "./builders/daily";
 import { buildExpenseReport } from "./builders/expense";
 import { buildFinanceReport } from "./builders/finance";
 import { buildGstReport } from "./builders/gst";
@@ -54,6 +55,8 @@ export function buildReport(type: ReportType, filters: ReportFilters): Promise<R
       return buildProjectFinancialsReport(filters);
     case "cash_budget":
       return buildCashBudgetReport(filters);
+    case "daily":
+      return buildDailyReport(filters);
     case "scenario":
       // What-if scenarios are exported from their own page (src/features/analytics/scenarios/server/export.ts).
       // parseReportRequest refuses the type, so this is reached only by a caller that skipped it.

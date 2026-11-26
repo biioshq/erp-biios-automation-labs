@@ -366,17 +366,19 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
   }
   if (!grid.some((r) => r.page !== undefined)) joinHardCuts(drafts, pieces);
   // No opening row in the table: the one printed in the account block above it, or in the summary
-  // under it, so the first line is checked too.
-  if (stated === null && cols.balance !== undefined && drafts.length > 0) stated = openingAround(grid, headerIndex, lastDraftIndex);
+  // under it, so the first line is checked too. An opening row in the table is only trusted for a
+  // statement listed oldest first; one printed outside the table is the period's opening either way.
+  const around = stated === null && cols.balance !== undefined && drafts.length > 0 ? openingAround(grid, headerIndex, lastDraftIndex) : null;
+  const startOf = (newest: boolean) => (newest ? around : (stated ?? around));
 
   // Oldest first. A statement listed newest first is turned round; one day only is tried both ways.
   const first = drafts[0]?.date ?? "";
   const last = drafts[drafts.length - 1]?.date ?? "";
   let newestFirst = first > last;
   let ordered = newestFirst ? [...drafts].reverse() : drafts;
-  let result = reconcile(ordered, newestFirst ? null : stated);
+  let result = reconcile(ordered, startOf(newestFirst));
   if (first === last && drafts.length > 1) {
-    const reversed = reconcile([...drafts].reverse(), null);
+    const reversed = reconcile([...drafts].reverse(), startOf(true));
     if (reversed.ok > result.ok) {
       newestFirst = true;
       ordered = [...drafts].reverse();
@@ -386,9 +388,10 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
   const lines = result.lines;
 
   const firstLine = lines[0];
+  const start = startOf(newestFirst);
   const opening =
-    !newestFirst && stated !== null
-      ? stated
+    start !== null
+      ? start
       : firstLine && firstLine.balance !== null
         ? round2(firstLine.balance + firstLine.withdrawal - firstLine.deposit)
         : null;
@@ -406,7 +409,7 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
     to: lines.length ? lines.reduce((m, l) => (l.date > m ? l.date : m), lines[0]!.date) : null,
     opening,
     closing,
-    openingStated: !newestFirst && stated !== null,
+    openingStated: start !== null,
     totalDeposits: round2(lines.reduce((s, l) => s + l.deposit, 0)),
     totalWithdrawals: round2(lines.reduce((s, l) => s + l.withdrawal, 0)),
     newestFirst,

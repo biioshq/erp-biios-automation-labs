@@ -140,6 +140,11 @@ export function RecurringDetailView({
           ) : null}
           <Row icon={CreditCard} label="Payment">
             {labelOf(PAYMENT_METHODS, schedule.paymentMethod)}
+            <p className="text-xs text-muted-foreground">
+              {schedule.category === "salaries" && schedule.paymentMethod !== "credit"
+                ? "Recorded as paid on each date."
+                : "Each bill waits in Outstanding payments until paid."}
+            </p>
           </Row>
           <Row icon={Percent} label="GST">
             {schedule.gstRate > 0 ? (

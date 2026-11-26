@@ -26,6 +26,18 @@ const MAX_CATCH_UP = 36;
 
 export const occurrenceKey = (scheduleId: Types.ObjectId | string, due: Date) => `${scheduleId}:${toDateInput(due)}`;
 
+/**
+ * A bill from a schedule waits in Outstanding payments until it is paid (ticked, or matched on a
+ * bank statement): it is posted with an empty payments list, which means nothing paid yet, and is
+ * due on its date. The schedule's method stays on it as the way it is meant to be paid. Salaries
+ * post as paid, as before. "On credit" schedules post as they always did (unpaid, no payments list).
+ * Only new postings get this; expenses posted earlier are never touched.
+ */
+export function postedAsBill(category: string, paymentMethod: string, due: Date): { payments: never[]; dueDate: Date } | Record<string, never> {
+  if (category === "salaries" || paymentMethod === "credit") return {};
+  return { payments: [], dueDate: due };
+}
+
 async function postOccurrence(t: RecurringExpenseDoc, due: Date) {
   const rate = t.gstRate ?? 0;
   const amount = round2(t.amount);
@@ -59,6 +71,7 @@ async function postOccurrence(t: RecurringExpenseDoc, due: Date) {
       })()
     : undefined;
 
+  const paymentMethod = t.paymentMethod ?? "bank_transfer";
   return Expense.create({
     number: await nextNumber("expense", undefined, due),
     vendor: t.vendor,
@@ -66,7 +79,8 @@ async function postOccurrence(t: RecurringExpenseDoc, due: Date) {
     description: `${t.name} · ${periodLabel(due, t.frequency as RecurringFrequency)}`,
     amount,
     date: due,
-    paymentMethod: t.paymentMethod ?? "bank_transfer",
+    paymentMethod,
+    ...postedAsBill(t.category, paymentMethod, due),
     project: t.project ?? undefined,
     stage: t.project ? (t.stage ?? undefined) : undefined,
     notes: t.notes ?? undefined,
@@ -140,7 +154,7 @@ export async function postDueRecurringExpenses(now: Date = new Date()): Promise<
       type: "system",
       severity: "info",
       title: `${posted} recurring expense${posted === 1 ? "" : "s"} posted`,
-      body: "Salaries and bills due today were added to Expenses.",
+      body: "Salaries and bills due today were added to Expenses. Bills wait in Outstanding payments until paid.",
       href: "/finance/expenses?source=recurring",
     }).catch(() => {});
   }

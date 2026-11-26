@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CircleCheck, Download, Package, RotateCcw } from "lucide-react";
+import { CircleCheck, Download, Package, ReceiptText, RotateCcw } from "lucide-react";
 import { useCan } from "@/components/current-user";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -37,6 +37,7 @@ export function AddResult({
   const ignored = count("ignored");
   const done = results.filter((r) => r.href && (r.status === "added" || r.status === "matched"));
   const any = added + matched + ignored > 0;
+  const followUps = results.filter((r) => r.note && r.status === "added");
   const canAddAssets = useCan("finance.fixed_assets:create");
 
   return (
@@ -64,6 +65,31 @@ export function AddResult({
                 <span className="min-w-0 flex-1 basis-60 [overflow-wrap:anywhere]">
                   {line.narration.slice(0, 80)}
                   <span className="text-muted-foreground"> · {reason}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {followUps.length ? (
+        <div className="space-y-2 rounded-lg border p-3 text-sm">
+          <p className="flex items-center gap-2 font-medium">
+            <ReceiptText className="size-4 text-muted-foreground" aria-hidden />
+            Receipts and invoices
+          </p>
+          <ul className="space-y-1">
+            {followUps.map((r) => (
+              <li key={r.hash} className="flex flex-wrap items-start gap-x-3 gap-y-1">
+                <span className="w-16 shrink-0 font-mono text-xs text-muted-foreground tabular-nums">Row {r.line}</span>
+                <span className={cn("min-w-0 flex-1 basis-60 [overflow-wrap:anywhere]", r.note!.startsWith("Not linked") && "text-warning")}>
+                  {r.href ? (
+                    <Link href={r.href} className="text-brand-ink underline-offset-2 hover:underline">
+                      {r.label}
+                    </Link>
+                  ) : null}
+                  {r.href ? " · " : ""}
+                  {r.note}
                 </span>
               </li>
             ))}

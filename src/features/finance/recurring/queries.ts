@@ -14,7 +14,6 @@ import type { ExpenseCategory, PaymentMethod, ProjectStage, RecurringFrequency, 
 import { getExpenseCategoryLabeler } from "@/server/expense-categories";
 import { GROUP_CATEGORIES } from "./schemas";
 import { paymentSummaryOf } from "@/features/finance/expenses/queries";
-import { isFixedCommitment } from "./fixed";
 import type { LastPosted, PostedExpense, RecurringDetail, RecurringRow, RecurringSummary } from "./types";
 
 type PopulatedProject = { _id: Types.ObjectId; name: string; code: string; color?: string } | null;
@@ -45,8 +44,6 @@ function toRow(t: RecurringExpenseDoc & { project?: unknown; employee?: unknown 
     project: project?._id ? { id: String(project._id), name: project.name, code: project.code, color: project.color ?? "#4a82cc" } : null,
     stage: (t.stage as ProjectStage | undefined) ?? null,
     employee: employee?._id ? { id: String(employee._id), name: employee.name } : null,
-    fixed: typeof t.fixed === "boolean" ? t.fixed : null,
-    fixedCommitment: isFixedCommitment(t),
   };
 }
 

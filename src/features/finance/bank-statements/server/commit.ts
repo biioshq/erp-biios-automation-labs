@@ -18,6 +18,7 @@ import { lineHash } from "./hash";
 import { reopenableFilter } from "./claims";
 import { describeLinks, linkExists, type LinkRef } from "./links";
 import { learnFromLine } from "./rules";
+import { confirmReceiptLink, invoiceForReceipt } from "./invoice-link";
 import { analyseNarration } from "../parse/narration";
 import { lineKindOf, type BankLineKind } from "../kinds";
 import { COMPANY } from "@/config/company";
@@ -46,7 +47,8 @@ type Prior = {
   unmatchedBy?: Types.ObjectId | null;
 };
 type Claim = { id: Types.ObjectId; fresh: true } | { id: Types.ObjectId; fresh: false; prior: Prior };
-type Ctx = { accountId: string; statementId: () => Promise<Types.ObjectId>; userId: string; salaries: boolean };
+/** `notes`: a follow-up for the results screen per claimed line (such as the invoice a receipt was linked to). */
+type Ctx = { accountId: string; statementId: () => Promise<Types.ObjectId>; userId: string; salaries: boolean; notes: Map<string, string> };
 
 const amountOf = (l: AddLineValues) => (l.withdrawal > 0 ? l.withdrawal : l.deposit);
 const isOut = (l: AddLineValues) => l.withdrawal > 0;
@@ -352,7 +354,10 @@ async function createRecord(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       if (out) throw new AppError("A withdrawal cannot be income. Choose New expense or another action.", "invalid");
       if (!d.party) throw new AppError("Enter who paid.", "invalid");
       await assertProject(d.projectId, null);
+      // Pays an open customer invoice: linked to it when the receipt rules allow.
+      const link = await invoiceForReceipt({ invoiceId: d.invoiceId, client: d.party, projectId: d.projectId, amount, date: l.date });
       const created = await Income.create({
+        ...(link.invoice ? { invoice: link.invoice } : {}),
         number: await nextNumber("income", undefined, date),
         client: d.party,
         project: d.projectId ? oid(d.projectId) : undefined,
@@ -366,6 +371,12 @@ async function createRecord(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
         bankTransaction: txn,
         createdBy: user,
       });
+      // Best effort: the income is saved, and the link already passed the receipt rules.
+      const note = await confirmReceiptLink(created._id, link).catch((e: unknown) => {
+        console.error("[bank-statements] could not check an invoice link", e);
+        return link.note;
+      });
+      if (note) ctx.notes.set(String(txn), note);
       return { kind: "income", id: String(created._id) };
     }
     case "capital":
@@ -505,7 +516,7 @@ async function addOne(l: AddLineValues, ctx: Ctx): Promise<{ result: Omit<AddLin
     if (!claim.fresh) await moveCount(claim.prior).catch((e: unknown) => console.error("[bank-statements] could not move a count", e));
     const status = l.decision.action === "ignore" ? "ignored" : l.decision.action === "match" ? "matched" : "added";
     const message = status === "ignored" ? "Ignored" : status === "matched" ? "Tied to the record already in the books" : "Added";
-    return { result: { ...base, status, message }, link };
+    return { result: { ...base, status, message, note: ctx.notes.get(String(claim.id)) ?? null }, link };
   } catch (error) {
     await releaseClaim(claim).catch((e: unknown) => console.error("[bank-statements] could not release a claim", e));
     if (error instanceof AppError) return { result: { ...base, status: "failed", message: error.message }, link: null };
@@ -530,6 +541,7 @@ export async function addStatementLines(input: AddLinesValues, userId: string, o
     accountId: input.accountId,
     userId,
     salaries: options.salaries ?? false,
+    notes: new Map(),
     statementId: async () => {
       if (!statementId) {
         const s = input.statement;

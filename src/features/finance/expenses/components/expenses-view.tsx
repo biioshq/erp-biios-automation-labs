@@ -276,7 +276,12 @@ export function ExpensesView({
         header: "Payment",
         enableSorting: false,
         // A bill bought "On credit" and paid later shows how it was paid (its latest payment), not "On credit".
-        cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{labelOf(PAYMENT_METHODS, paidWith(row.original))}</span>,
+        // A bill with a payments list and nothing paid yet (a recurring bill waiting to be paid) has moved no money.
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap text-muted-foreground">
+            {row.original.payment.explicit && !row.original.payment.lastMethod ? "Not paid yet" : labelOf(PAYMENT_METHODS, paidWith(row.original))}
+          </span>
+        ),
       },
       {
         id: "status",

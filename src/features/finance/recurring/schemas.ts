@@ -29,8 +29,6 @@ export const recurringFormSchema = z
     startDate: dateInput,
     endDate: optionalDateInput,
     notes: optionalText(2000),
-    /** A fixed commitment (Fixed payments). Left out, the schedule keeps the default rule (rent counts as fixed). */
-    fixed: z.boolean().optional(),
   })
   .superRefine((v, ctx) => {
     if (v.projectId && !v.stage) {

@@ -134,6 +134,11 @@ export type LineDecision = {
   loanGroup?: string;
   /** capital / drawing */
   holderId?: string;
+  /**
+   * income: the open customer invoice this receipt pays. The new income is linked to it when the
+   * invoice receipt rules allow (checked again on the server); otherwise it is added unlinked.
+   */
+  invoiceId?: string;
 };
 
 export type ImportedInfo = {
@@ -156,6 +161,8 @@ export type ReviewLine = StatementLine & {
   attention: boolean;
   /** What the narration says the line is (charges, interest, ATM...), for the line's type in the review. */
   narrationKind?: LineKind;
+  /** A deposit that pays an open customer invoice: the invoice, so the review can link the receipt to it or not. */
+  invoice?: { id: string; number: string; client: string; outstanding: number } | null;
 };
 
 export type Picker = { value: string; label: string; description?: string };
@@ -180,6 +187,8 @@ export type AddLineResult = {
   /** The record the line became or was tied to, for follow-up links on the results screen. */
   recordKind?: string | null;
   recordId?: string | null;
+  /** A follow-up worth saying, such as the invoice a receipt was linked to, or why it was not. */
+  note?: string | null;
 };
 
 export type AddBatchResult = { statementId: string | null; results: AddLineResult[] };

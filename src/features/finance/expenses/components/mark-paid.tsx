@@ -74,7 +74,8 @@ export function MarkPaidButton({
   onUndone,
   compact = false,
 }: {
-  expense: { id: string; number: string; vendor: string; outstanding: number };
+  /** `paymentMethod`: the method the bill was saved with. When money is paid that way (a recurring bill's planned method), the confirm starts with it. */
+  expense: { id: string; number: string; vendor: string; outstanding: number; paymentMethod?: string };
   accounts: BankAccountOption[];
   defaults: PaymentDefaults;
   /** Called with the expense id once it is paid (the row can leave the list straight away). */
@@ -86,12 +87,13 @@ export function MarkPaidButton({
   const canPay = useCan("finance.payments:create");
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const planned = PAYING_METHODS.find((m) => m.value === expense.paymentMethod)?.value as PaymentMethod | undefined;
   const initial = (): ExpensePaymentInput => ({
     id: expense.id,
     date: toDateInput(new Date()),
     amount: expense.outstanding,
-    paymentMethod: defaults.paymentMethod,
-    accountId: defaults.accountId ?? undefined,
+    paymentMethod: planned ?? defaults.paymentMethod,
+    accountId: (planned && planned !== defaults.paymentMethod ? defaults.byMethod[planned] : defaults.accountId) ?? undefined,
     reference: "",
     note: "",
   });

@@ -44,6 +44,12 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const DAY = 86_400_000;
 /** Lines and records further apart than this are never the same payment. */
 const MATCH_DAYS = 3;
+/**
+ * A payment recorded by hand on an expense (Mark as paid, Record payment) may be dated up to this
+ * many days from its bank line, when the amount is the same to the paisa and the narration names the
+ * vendor (or the payee is remembered as that vendor). People often tick a bill paid on another day.
+ */
+const HAND_PAYMENT_DAYS = 30;
 
 type Side = "dr" | "cr";
 type Candidate = Omit<MatchOption, "score"> & { side: Side; party: string; refs: string[] };
@@ -64,6 +70,10 @@ function placement(book: AccountBook, target: string, method: string | null | un
 async function loadCandidates(accountId: string, book: AccountBook, from: Date, to: Date): Promise<Candidate[]> {
   const target = `cash:${accountId}`;
   const range = { $gte: from, $lte: to };
+  // `from` and `to` already reach MATCH_DAYS past the lines; payments recorded by hand reach HAND_PAYMENT_DAYS.
+  const payFrom = addDays(from, MATCH_DAYS - HAND_PAYMENT_DAYS);
+  const payTo = addDays(to, HAND_PAYMENT_DAYS - MATCH_DAYS);
+  const payRange = { $gte: payFrom, $lte: payTo };
   const out: Candidate[] = [];
   const add = (c: Candidate) => out.push(c);
 
@@ -73,7 +83,7 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
         countedAtPurchase: { $ne: true },
         // Loan interest is part of its repayment, which is offered as one line.
         source: { $nin: ["inventory_assignment", "inventory_wastage", "liability_interest"] },
-        $or: [{ date: range, payments: { $exists: false } }, { "payments.date": range }],
+        $or: [{ date: range, payments: { $exists: false } }, { "payments.date": payRange }],
       },
       { number: 1, vendor: 1, amount: 1, date: 1, paymentMethod: 1, account: 1, payments: 1, bankTransaction: 1, gst: 1 },
     ).lean(),
@@ -104,7 +114,7 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
       continue;
     }
     for (const pay of e.payments) {
-      if (pay.bankTransaction || pay.date < from || pay.date > to) continue;
+      if (pay.bankTransaction || pay.date < payFrom || pay.date > payTo) continue;
       const p = placement(book, target, pay.paymentMethod, pay.account);
       if (!p.ok) continue;
       add({
@@ -219,7 +229,12 @@ function pairScore(line: StatementLine, c: Candidate, alias = ""): number | null
     if (sim < 0.5 && !refHit && days > 30) return null;
     return 40 + sim * 40 + (refHit ? 30 : 0) - Math.min(Math.abs(days), 30);
   }
-  if (Math.abs(days) > MATCH_DAYS) return null;
+  if (Math.abs(days) > MATCH_DAYS) {
+    // A payment ticked by hand on another day: the same amount, and the narration (or the remembered party) names the vendor.
+    // Kept below any named bill (at least 30), so this month's outstanding bill wins over last month's hand payment.
+    if (c.kind !== "expensePayment" || Math.abs(days) > HAND_PAYMENT_DAYS || sim < 0.5) return null;
+    return 10 + sim * 15 - Math.abs(days) / 3 - (c.otherAccount ? 5 : 0);
+  }
   return 100 - Math.abs(days) * 15 + sim * 30 + (refHit ? 40 : 0) - (c.otherAccount ? 25 : 0);
 }
 
@@ -379,7 +394,7 @@ function ownAccountIn(ctx: Context, narration: string): OwnAccount | null {
 const cleanNarration = (n: string) => n.replace(/\s+/g, " ").trim().slice(0, 80);
 
 /** What an unmatched line most likely is, with notes for what the admin should check. */
-function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; notes: string[]; attention: boolean } {
+function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; notes: string[]; attention: boolean; invoice?: ReviewLine["invoice"] } {
   const side = sideOf(line);
   const amount = amountOf(line);
   const info = analyseNarration(line.narration, side, { exclude: [COMPANY.name] });
@@ -500,11 +515,6 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
   const incomeCategory: IncomeCategory = fromColumn ?? fromRule ?? "project_payment";
   if (rule) notes.push(`Remembered from your earlier choice: ${rule.party}.`);
   if (fromColumn) notes.push("Category from the file's category column.");
-  if (invoice) {
-    notes.push(
-      `Looks like a payment of invoice ${invoice.number} (${invoice.client}, ${invoice.outstanding.toFixed(2)} still owed). After adding, link this receipt to the invoice on the income record so the invoice shows as paid.`,
-    );
-  }
   if (!rule && !known && !invoice) {
     notes.push(
       "The payer is not a known customer. Choose New income only if this pays for a sale or a service; otherwise choose Capital introduced, Loan received or Transfer between own accounts.",
@@ -516,7 +526,25 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
     attention = true;
   }
   const projectId = openProject(ctx, rule?.projectId)?.id ?? openProject(ctx, invoice?.project)?.id;
-  return { decision: decide("income", { party: party ?? cleanNarration(line.narration), incomeCategory, projectId }), notes, attention };
+  // The receipt is linked to the invoice on adding only where the invoice receipt rules allow it: the same client or project.
+  const linkable = Boolean(
+    invoice && ((party && party.trim().toLowerCase() === invoice.client.trim().toLowerCase()) || (invoice.project && projectId === invoice.project)),
+  );
+  if (invoice) {
+    const about = `Looks like a payment of invoice ${invoice.number} (${invoice.client}, ${invoice.outstanding.toFixed(2)} still owed).`;
+    notes.push(
+      linkable
+        ? `${about} The new income is linked to that invoice, so the invoice shows as paid. Untick the link in the line's details if it pays something else.`
+        : `${about} The payer here is ${party}, so the receipt is not linked to it. Link it from the income record if it pays that invoice.`,
+    );
+    if (!linkable) attention = true;
+  }
+  return {
+    decision: decide("income", { party: party ?? cleanNarration(line.narration), incomeCategory, projectId, invoiceId: linkable ? invoice!.id : undefined }),
+    notes,
+    attention,
+    invoice: invoice ? { id: invoice.id, number: invoice.number, client: invoice.client, outstanding: invoice.outstanding } : null,
+  };
 }
 
 async function loadContext(accountId: string): Promise<{ ctx: Context; book: AccountBook }> {
@@ -767,7 +795,14 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
     const s = suggest(line, ctx);
     if (match) {
       const partBill = match.kind === "bill" && Math.abs(match.amount - amountOf(line)) >= 0.005;
+      const gap = Math.abs(dayNumber(line.date) - dayNumber(match.date));
+      const farPayment = match.kind === "expensePayment" && gap > MATCH_DAYS;
       const notes = [
+        ...(farPayment
+          ? [
+              `Already recorded: ${match.label.replace(/^Payment on /, "")} has a payment of the same amount recorded by hand on ${formatDate(match.date)}, ${gap} days from this line. Tie the line to it rather than adding a new expense, unless it is a separate payment.`,
+            ]
+          : []),
         ...(match.otherAccount ? [`${match.label} is counted in ${match.otherAccount}, since it names no account. If it was paid from this account, set its account on the record.`] : []),
         ...(partBill ? [`Part payment: ${amountOf(line).toFixed(2)} of the ${match.amount.toFixed(2)} still owed on ${match.label.replace(/^Pays /, "")}. Check it is this bill.`] : []),
         ...(match.kind === "bill"
@@ -783,10 +818,11 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
         ...base,
         imported: null,
         candidates: options,
+        invoice: s.invoice ?? null,
         // The suggestion stays underneath, so switching to "New ..." starts from it.
         suggestion: { ...s.decision, action: "match", matchKey: match.key },
         notes: [...again, ...notes],
-        attention: lineIssues || Boolean(match.otherAccount) || partBill || again.length > 0,
+        attention: lineIssues || Boolean(match.otherAccount) || partBill || farPayment || again.length > 0,
       };
     }
     // An unpaid bill for the same amount whose vendor the narration does not name: offered, not picked.
@@ -797,6 +833,7 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
       ...base,
       imported: null,
       candidates: options,
+      invoice: s.invoice ?? null,
       suggestion: s.decision,
       notes: [...again, ...early, ...billNote, ...s.notes],
       attention: lineIssues || s.attention || again.length > 0 || early.length > 0 || billNote.length > 0,

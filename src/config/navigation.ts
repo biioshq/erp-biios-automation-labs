@@ -16,6 +16,7 @@ import {
   FileBarChart,
   FolderKanban,
   LayoutDashboard,
+  Lock,
   ListTodo,
   Loader,
   PackagePlus,
@@ -90,6 +91,8 @@ export type NavItem = {
    * with children shows when any child shows.
    */
   permission?: string;
+  /** Shows the entry when the person holds any one of these (overrides `permission`). */
+  anyPermission?: string[];
   /**
    * Pages that sit under this entry. The sidebar lists only the parent; the
    * children show as tabs at the top of each of these pages. The first child
@@ -136,17 +139,26 @@ export const MODULES: NavModule[] = [
         icon: Receipt,
         keywords: ["bills", "spend", "gst", "vendor"],
         children: [
-          { title: "Expense records", tab: "Expenses", href: "/finance/expenses", permission: "finance.expenses:view", icon: Receipt, keywords: ["bills", "spend", "gst", "vendor", "direct", "indirect"] },
-          { title: "Payment tracking", tab: "Payments", href: "/finance/payments", permission: "finance.payments:view", icon: CalendarClock, keywords: ["unpaid", "partly paid", "overdue", "upcoming", "due"] },
+          { title: "Bank statement import", tab: "Bank import", href: "/finance/bank-statements", permission: "finance.bank_statements:view", icon: Landmark, keywords: ["statement", "deposit", "withdrawal", "reconcile", "bank", "upload"] },
+          { title: "Total expenses", tab: "Total expenses", href: "/finance/expenses", permission: "finance.expenses:view", icon: Receipt, keywords: ["bills", "spend", "gst", "vendor", "direct", "indirect", "expense records", "paid"] },
+          { title: "Outstanding payments", tab: "Outstanding", href: "/finance/payments", permission: "finance.payments:view", icon: CalendarClock, keywords: ["unpaid", "partly paid", "overdue", "upcoming", "due", "mark as paid", "payment tracking"] },
           {
             title: "Recurring expenses",
             tab: "Recurring",
             href: "/finance/recurring",
             permission: "finance.recurring:view",
             icon: Repeat,
-            keywords: ["salary", "salaries", "rent", "bills", "subscriptions", "monthly"],
+            keywords: ["salary", "salaries", "rent", "bills", "subscriptions", "monthly", "weekly", "yearly"],
           },
-          { title: "Bank statements", tab: "Bank statements", href: "/finance/bank-statements", permission: "finance.bank_statements:view", icon: Landmark, keywords: ["statement", "deposit", "withdrawal", "reconcile", "bank"] },
+          {
+            title: "Fixed payments",
+            tab: "Fixed payments",
+            href: "/finance/expenses/fixed",
+            permission: "finance.recurring:view",
+            anyPermission: ["finance.recurring:view", "finance.liabilities:view"],
+            icon: Lock,
+            keywords: ["emi", "loan instalment", "rent", "commitment", "fixed"],
+          },
           { title: "Import", href: "/finance/import", permission: "finance.import:view", icon: Upload, keywords: ["csv", "bulk", "google drive", "bills", "receipts", "income"] },
           { title: "Expense summary", tab: "Summary", href: "/finance/expenses/summary", permission: "finance.expenses:view", icon: ChartColumn, keywords: ["category-wise", "vendor-wise", "monthly", "paid vs unpaid"] },
         ],
@@ -498,6 +510,7 @@ export type CanFn = (permission: string) => boolean;
 
 /** True when the person may open this page (entries without a permission show to everyone). */
 export function canOpen(item: NavItem, can: CanFn): boolean {
+  if (item.anyPermission?.length) return item.anyPermission.some((p) => can(p));
   return !item.permission || can(item.permission);
 }
 

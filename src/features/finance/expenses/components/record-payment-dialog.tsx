@@ -51,7 +51,8 @@ function RecordPaymentDialogButton({
   expense: { id: string; number: string; vendor: string; outstanding: number };
   accounts: BankAccountOption[];
   variant?: "default" | "outline" | "ghost";
-  size?: "sm" | "default";
+  /** "icon-sm" shows the icon only, with `label` as its name. */
+  size?: "sm" | "default" | "icon-sm";
   label?: string;
   /** Called after a payment is saved (the page also refreshes through the live-change event). */
   onRecorded?: () => void;
@@ -101,9 +102,15 @@ function RecordPaymentDialogButton({
 
   return (
     <>
-      <Button type="button" variant={variant} size={size} onClick={show}>
-        <HandCoins /> {label}
-      </Button>
+      {size === "icon-sm" ? (
+        <Button type="button" variant={variant} size="icon-sm" onClick={show} aria-label={label} title={label}>
+          <HandCoins />
+        </Button>
+      ) : (
+        <Button type="button" variant={variant} size={size} onClick={show}>
+          <HandCoins /> {label}
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={(o) => !pending && setOpen(o)}>
         <DialogContent className="sm:max-w-md">
           <form onSubmit={onSubmit} noValidate className="space-y-5">

@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
 import { CalendarClock, Eye, History, Landmark, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DataTable, DataTableColumnHeader } from "@/components/data-table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -18,16 +19,21 @@ import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { BankAccountOption } from "@/server/lookups";
 import { deleteExpensePayment } from "../payment-actions";
-import type { PaymentHistoryRow, PaymentTabTotals } from "../payment-queries";
-import { PAYMENT_TABS, type PaymentTab } from "../payment-tabs";
+import type { PaymentDefaults, PaymentHistoryRow, PaymentTabTotals } from "../payment-queries";
+import { DEFAULT_PAYMENT_TAB, PAYMENT_TABS, type PaymentTab } from "../payment-tabs";
 import { takesPayments } from "../sources";
 import type { ExpenseRow } from "../types";
-import { PaymentStatusBadge } from "./expense-badges";
+import { BankMarker, PaymentStateCell } from "./expense-badges";
+import { BulkMarkPaidButton, MarkPaidButton } from "./mark-paid";
 import { RecordPaymentButton } from "./record-payment-dialog";
 import { BankLineLink } from "@/features/finance/bank-statements/components/bank-line-link";
 import { bankLineHref } from "@/features/finance/bank-statements/line-href";
 
 const EMPTY: Record<PaymentTab, { title: string; description: string }> = {
+  outstanding: {
+    title: "Nothing outstanding",
+    description: "Every expense saved as Not paid yet or Partly paid shows here until it is paid. Tick Mark as paid when you pay one.",
+  },
   unpaid: { title: "No unpaid bills", description: "Expenses saved as Not paid yet show here until a payment is recorded or they fall due." },
   partial: { title: "No part-paid bills", description: "Expenses with part of the amount paid show here until the rest is paid or falls due." },
   upcoming: { title: "Nothing due in the next 30 days", description: "Unpaid and part-paid bills due today or within 30 days show here." },
@@ -45,7 +51,7 @@ export function PaymentTabs({ tab, totals }: { tab: PaymentTab; totals: PaymentT
   const hrefFor = (value: PaymentTab) => {
     const params = new URLSearchParams(searchParams.toString());
     ["page", "sort", "tab"].forEach((k) => params.delete(k));
-    if (value !== "unpaid") params.set("tab", value);
+    if (value !== DEFAULT_PAYMENT_TAB) params.set("tab", value);
     const qs = params.toString();
     return qs ? `?${qs}` : "?";
   };
@@ -91,6 +97,25 @@ function ViewLink({ id }: { id: string }) {
   );
 }
 
+/** "No due date" when none was saved: the status still counts the expense date as due. */
+function DueDateCell({ row }: { row: ExpenseRow }) {
+  if (row.payment.outstanding <= 0) return <span className="text-muted-foreground/60">-</span>;
+  if (!row.dueDate) {
+    return (
+      <div className="whitespace-nowrap text-xs text-muted-foreground">
+        <p>No due date</p>
+        {/* The status counts from the expense date when no due date was saved. */}
+        {row.payment.status === "overdue" ? <p className="text-[11px]">Counted from {formatDate(row.date)}</p> : null}
+      </div>
+    );
+  }
+  return (
+    <span className={cn("whitespace-nowrap", row.payment.status === "overdue" ? "font-medium text-danger" : "text-muted-foreground")}>
+      {formatDate(row.dueDate)}
+    </span>
+  );
+}
+
 /** Unpaid, part-paid, upcoming, overdue or paid expenses: what each one costs, what is paid and what is owed. */
 export function PaymentExpensesTable({
   tab,
@@ -99,6 +124,7 @@ export function PaymentExpensesTable({
   page,
   pageSize,
   accounts,
+  defaults,
 }: {
   tab: Exclude<PaymentTab, "history">;
   rows: ExpenseRow[];
@@ -106,17 +132,95 @@ export function PaymentExpensesTable({
   page: number;
   pageSize: number;
   accounts: BankAccountOption[];
+  /** What Mark as paid starts with (method and account). */
+  defaults: PaymentDefaults;
 }) {
+  const canPay = useCan("finance.payments:create");
+  // Paid rows leave the list at once; the page refresh then brings the next ones in.
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const hide = useCallback((ids: string[]) => {
+    setHidden((h) => new Set([...h, ...ids]));
+    setSelected((s) => new Set([...s].filter((id) => !ids.includes(id))));
+  }, []);
+  const unhide = useCallback((ids: string[]) => setHidden((h) => new Set([...h].filter((id) => !ids.includes(id)))), []);
+  const shown = useMemo(() => rows.filter((r) => !hidden.has(r.id)), [rows, hidden]);
+  const payable = (r: ExpenseRow) => takesPayments(r.source) && r.payment.outstanding > 0;
+  const selectable = canPay && tab !== "paid";
+  const payableShown = useMemo(() => shown.filter(payable), [shown]);
+  const selectedRows = useMemo(() => payableShown.filter((r) => selected.has(r.id)), [payableShown, selected]);
+  const allSelected = payableShown.length > 0 && selectedRows.length === payableShown.length;
+  const toggle = (id: string, on: boolean) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  const actions = (r: ExpenseRow) => (
+    <>
+      {payable(r) ? (
+        <>
+          <MarkPaidButton
+            expense={{ id: r.id, number: r.number, vendor: r.vendor, outstanding: r.payment.outstanding }}
+            accounts={accounts}
+            defaults={defaults}
+            onPaid={(id) => hide([id])}
+            onUndone={unhide}
+          />
+          <RecordPaymentButton
+            expense={{ id: r.id, number: r.number, vendor: r.vendor, outstanding: r.payment.outstanding }}
+            accounts={accounts}
+            size="icon-sm"
+            variant="ghost"
+            label="Record a part payment"
+          />
+        </>
+      ) : null}
+      <ViewLink id={r.id} />
+    </>
+  );
+
   const columns = useMemo<ColumnDef<ExpenseRow>[]>(
     () => [
+      ...(selectable
+        ? [
+            {
+              id: "select",
+              header: () => (
+                <Checkbox
+                  aria-label="Select all on this page"
+                  checked={allSelected ? true : selectedRows.length ? "indeterminate" : false}
+                  onCheckedChange={(v) => setSelected(v === true ? new Set(payableShown.map((r) => r.id)) : new Set())}
+                  disabled={!payableShown.length}
+                />
+              ),
+              enableHiding: false,
+              enableSorting: false,
+              meta: { className: "w-8" },
+              cell: ({ row }) =>
+                payable(row.original) ? (
+                  <Checkbox
+                    aria-label={`Select ${row.original.number}`}
+                    checked={selected.has(row.original.id)}
+                    onCheckedChange={(v) => toggle(row.original.id, v === true)}
+                  />
+                ) : null,
+            } satisfies ColumnDef<ExpenseRow>,
+          ]
+        : []),
       {
         id: "vendor",
         meta: { label: "Vendor" },
         header: ({ column }) => <DataTableColumnHeader column={column} title="Vendor" />,
         enableHiding: false,
         cell: ({ row }) => (
-          <div className="min-w-44">
-            <p className="truncate font-medium">{row.original.vendor}</p>
+          <div className="min-w-40">
+            <p className="flex items-center gap-1.5 font-medium">
+              <span className="truncate">{row.original.vendor}</span>
+              {row.original.fromBank ? <BankMarker /> : null}
+            </p>
             <p className="truncate font-mono text-[11px] text-muted-foreground">
               {row.original.number}
               <span className="font-sans"> · {row.original.categoryLabel}</span>
@@ -125,37 +229,17 @@ export function PaymentExpensesTable({
         ),
       },
       {
-        id: "date",
-        meta: { label: "Expense date" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Date" />,
-        cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{formatDate(row.original.date)}</span>,
-      },
-      {
-        id: "due",
-        meta: { label: "Due" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Due" />,
+        id: "description",
+        meta: { label: "Description" },
+        header: "Description",
+        enableSorting: false,
         cell: ({ row }) =>
-          row.original.payment.dueOn ? (
-            <span className={cn("whitespace-nowrap", row.original.payment.status === "overdue" ? "font-medium text-danger" : "text-muted-foreground")}>
-              {formatDate(row.original.payment.dueOn)}
+          row.original.description ? (
+            <span className="block max-w-56 truncate text-muted-foreground" title={row.original.description}>
+              {row.original.description}
             </span>
           ) : (
             <span className="text-muted-foreground/60">-</span>
-          ),
-      },
-      {
-        id: "project",
-        meta: { label: "Project" },
-        header: "Project",
-        enableSorting: false,
-        cell: ({ row }) =>
-          row.original.project ? (
-            <span className="flex min-w-28 items-center gap-1.5 truncate text-sm">
-              <span className="size-2 shrink-0 rounded-full" style={{ background: row.original.project.color }} />
-              {row.original.project.name}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">Overhead</span>
           ),
       },
       {
@@ -179,11 +263,38 @@ export function PaymentExpensesTable({
         cell: ({ row }) => <Money value={row.original.payment.outstanding} className={row.original.payment.outstanding > 0 ? "font-semibold" : "text-muted-foreground"} />,
       },
       {
+        id: "date",
+        meta: { label: "Expense date" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Date" />,
+        cell: ({ row }) => <span className="whitespace-nowrap text-muted-foreground">{formatDate(row.original.date)}</span>,
+      },
+      {
+        id: "due",
+        meta: { label: "Due date" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Due" />,
+        cell: ({ row }) => <DueDateCell row={row.original} />,
+      },
+      {
         id: "status",
         meta: { label: "Status" },
         header: "Status",
         enableSorting: false,
-        cell: ({ row }) => <PaymentStatusBadge payment={row.original.payment} />,
+        cell: ({ row }) => <PaymentStateCell payment={row.original.payment} />,
+      },
+      {
+        id: "project",
+        meta: { label: "Project" },
+        header: "Project",
+        enableSorting: false,
+        cell: ({ row }) =>
+          row.original.project ? (
+            <span className="flex min-w-28 items-center gap-1.5 truncate text-sm">
+              <span className="size-2 shrink-0 rounded-full" style={{ background: row.original.project.color }} />
+              {row.original.project.name}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">Overhead</span>
+          ),
       },
       {
         id: "actions",
@@ -191,23 +302,11 @@ export function PaymentExpensesTable({
         header: () => <span className="sr-only">Actions</span>,
         enableHiding: false,
         enableSorting: false,
-        cell: ({ row }) => (
-          <div className="flex items-center justify-end gap-1">
-            {takesPayments(row.original.source) && row.original.payment.outstanding > 0 ? (
-              <RecordPaymentButton
-                expense={{ id: row.original.id, number: row.original.number, vendor: row.original.vendor, outstanding: row.original.payment.outstanding }}
-                accounts={accounts}
-                size="sm"
-                variant="outline"
-                label="Pay"
-              />
-            ) : null}
-            <ViewLink id={row.original.id} />
-          </div>
-        ),
+        cell: ({ row }) => <div className="flex items-center justify-end gap-1">{actions(row.original)}</div>,
       },
     ],
-    [accounts],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [accounts, defaults, selectable, selected, allSelected, selectedRows.length, payableShown],
   );
 
   return (
@@ -215,42 +314,56 @@ export function PaymentExpensesTable({
       id={`payments-${tab}`}
       mode="server"
       columns={columns}
-      data={rows}
+      data={shown}
       total={total}
       page={page}
       pageSize={pageSize}
       dateRange={{ label: "Expense date" }}
       searchPlaceholder="Search vendor, number, invoice…"
       getRowId={(r) => r.id}
-      initialHidden={tab === "paid" ? ["due", "paid"] : ["project"]}
+      initialHidden={tab === "paid" ? ["due", "paid", "description"] : ["paid"]}
+      toolbarActions={
+        selectable && selectedRows.length ? (
+          <BulkMarkPaidButton
+            selected={selectedRows.map((r) => ({ id: r.id, number: r.number, outstanding: r.payment.outstanding }))}
+            accounts={accounts}
+            defaults={defaults}
+            onPaid={hide}
+            onUndone={unhide}
+          />
+        ) : undefined
+      }
       renderMobileRow={(r) => (
         <div className="min-w-0 space-y-1.5">
           <div className="flex items-start justify-between gap-3">
-            <p className="min-w-0 flex-1 truncate font-medium">{r.vendor}</p>
+            {selectable && payable(r) ? (
+              <span className="pt-0.5" onClick={(e) => e.stopPropagation()}>
+                <Checkbox aria-label={`Select ${r.number}`} checked={selected.has(r.id)} onCheckedChange={(v) => toggle(r.id, v === true)} />
+              </span>
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-1.5 font-medium">
+                <span className="truncate">{r.vendor}</span>
+                {r.fromBank ? <BankMarker /> : null}
+              </p>
+              {r.description ? <p className="truncate text-xs text-muted-foreground">{r.description}</p> : null}
+            </div>
             <Money value={tab === "paid" ? r.amount : r.payment.outstanding} className="shrink-0 font-semibold" />
           </div>
           <p className="truncate text-xs text-muted-foreground">
             <span className="font-mono">{r.number}</span> · {formatDate(r.date)}
-            {r.payment.dueOn ? ` · due ${formatDate(r.payment.dueOn)}` : ""}
+            {r.payment.outstanding > 0 ? (r.dueDate ? ` · due ${formatDate(r.dueDate)}` : " · no due date") : ""}
+            {r.project ? ` · ${r.project.name}` : ""}
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <PaymentStatusBadge payment={r.payment} className="h-5 px-2 text-[11px]" />
-            {tab !== "paid" ? (
+            <PaymentStateCell payment={r.payment} compact />
+            {tab !== "paid" && r.payment.paid > 0 ? (
               <span className="text-[11px] text-muted-foreground">
                 <Money value={r.payment.paid} /> paid of <Money value={r.amount} />
               </span>
             ) : null}
             <span className="ml-auto flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-              {takesPayments(r.source) && r.payment.outstanding > 0 ? (
-                <RecordPaymentButton
-                  expense={{ id: r.id, number: r.number, vendor: r.vendor, outstanding: r.payment.outstanding }}
-                  accounts={accounts}
-                  size="sm"
-                  variant="outline"
-                  label="Pay"
-                />
-              ) : null}
-              <ViewLink id={r.id} />
+              {actions(r)}
             </span>
           </div>
         </div>

@@ -57,7 +57,7 @@ export default async function ExpenseSummaryPage({ searchParams }: { searchParam
             </Button>
             <Button asChild variant="outline">
               <Link href="/finance/payments">
-                <CalendarClock /> Payment tracking
+                <CalendarClock /> Outstanding payments
               </Link>
             </Button>
           </>
@@ -142,7 +142,7 @@ export default async function ExpenseSummaryPage({ searchParams }: { searchParam
           description="What is paid and what is owed on the expenses of this range, as of today."
           actions={
             <Button asChild variant="outline" size="sm">
-              <Link href="/finance/payments">Open payment tracking</Link>
+              <Link href="/finance/payments">Open outstanding payments</Link>
             </Button>
           }
         >

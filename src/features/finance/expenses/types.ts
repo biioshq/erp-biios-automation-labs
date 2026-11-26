@@ -13,6 +13,10 @@ export type ExpensePaymentSummary = {
   dueOn: string | null;
   /** True when payments are recorded one by one; false for the old meaning (paid on its date, or On credit). */
   explicit: boolean;
+  /** The day of the latest payment (the expense date for one paid in full on its date); null when nothing is paid. */
+  lastPaidOn?: string | null;
+  /** How the latest payment was made: for a bill bought "On credit" and paid later, the method actually used. */
+  lastMethod?: PaymentMethod | null;
 };
 
 /** A row in the expenses table. */
@@ -48,6 +52,10 @@ export type ExpenseRow = {
   /** Direct (on a project, or a direct category) or indirect (overhead). */
   nature: ExpenseNature;
   payment: ExpensePaymentSummary;
+  /** The due date as saved (no fallback to the expense date); null when none was given. */
+  dueDate?: string | null;
+  /** Came from, or was paid through, a bank statement line. */
+  fromBank?: boolean;
 };
 
 /** One payment recorded against an expense. */
@@ -116,4 +124,13 @@ export type ExpenseDetail = ExpenseRow & {
  * `count` is every listed row. `total` and `tax` always leave out rows counted at purchase (stock
  * expensed when it was bought), so they never count it twice.
  */
-export type ExpenseSummary = { count: number; total: number; tax: number };
+export type ExpenseSummary = {
+  count: number;
+  total: number;
+  tax: number;
+  /** Of `total`, what is paid and what is still owed (paid + outstanding = total), same rows. */
+  paid?: number;
+  outstanding?: number;
+  /** Rows with something still owed. */
+  outstandingCount?: number;
+};

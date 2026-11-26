@@ -11,6 +11,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Switch } from "@/components/ui/switch";
 import { ComboboxField, DateField, FormSection, NumberField, SelectField, TextField, TextareaField } from "@/components/forms/fields";
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
@@ -29,10 +30,14 @@ import { createRecurring, updateRecurring } from "../actions";
 import { ordinal } from "../format";
 import { RECURRING_TEMPLATES, recurringFormSchema, type RecurringFormInput, type RecurringFormValues, type RecurringTemplate } from "../schemas";
 import type { RecurringDetail } from "../types";
+import { isFixedCommitment } from "../fixed";
 import { formValidation } from "@/components/forms/form-options";
 import { useCan } from "@/components/current-user";
 
-const PAYMENT_OPTIONS = PAYMENT_METHODS.filter((m) => m.value !== "stock");
+// "On credit" keeps its stored value; here it says what it does to each posted expense.
+const PAYMENT_OPTIONS = PAYMENT_METHODS.filter((m) => m.value !== "stock").map((m) =>
+  m.value === "credit" ? { value: m.value, label: "Post as unpaid (appears in Outstanding payments until paid)" } : { value: m.value, label: m.label },
+);
 const DAY_OPTIONS = [...Array.from({ length: 28 }, (_, i) => ({ value: i + 1, label: `${ordinal(i + 1)} of the month` })), { value: 31, label: "Last day of the month" }];
 
 function defaultsFrom(
@@ -60,6 +65,8 @@ function defaultsFrom(
     startDate: schedule ? toDateInput(schedule.startDate) : toDateInput(new Date()),
     endDate: schedule?.endDate ? toDateInput(schedule.endDate) : undefined,
     notes: schedule?.notes ?? "",
+    // Unset unless the schedule has its own flag: the switch then shows the default rule (rent is fixed).
+    fixed: typeof schedule?.fixed === "boolean" ? schedule.fixed : undefined,
   };
 }
 
@@ -130,10 +137,11 @@ export function RecurringForm({
     ...formValidation,
   });
   const { control, setValue, getValues } = form;
-  const [amount, gstRate, gstin, frequency, dayOfMonth, startDate, endDate, projectId] = useWatch({
+  const [amount, gstRate, gstin, frequency, dayOfMonth, startDate, endDate, projectId, category, fixed, paymentMethod] = useWatch({
     control,
-    name: ["amount", "gstRate", "gstin", "frequency", "dayOfMonth", "startDate", "endDate", "projectId"],
+    name: ["amount", "gstRate", "gstin", "frequency", "dayOfMonth", "startDate", "endDate", "projectId", "category", "fixed", "paymentMethod"],
   });
+  const fixedOn = isFixedCommitment({ fixed, category });
 
   const tax = useMemo(() => {
     if (!amount || !gstRate) return null;
@@ -434,7 +442,34 @@ export function RecurringForm({
 
         <FormSection title="Payment and notes" icon={<Wallet />}>
           <div className="grid gap-4 sm:grid-cols-2">
-            <SelectField control={control} name="paymentMethod" label="Payment method" required options={PAYMENT_OPTIONS} />
+            <SelectField
+              control={control}
+              name="paymentMethod"
+              label="Payment method"
+              required
+              options={PAYMENT_OPTIONS}
+              className="sm:col-span-2"
+              description={
+                paymentMethod === "credit"
+                  ? "Each posted expense waits in Outstanding payments until someone marks it paid."
+                  : "Each posted expense is recorded as paid in full on its date."
+              }
+            />
+          </div>
+          <div className="flex items-start justify-between gap-4 rounded-lg border bg-surface px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Fixed commitment</p>
+              <p className="text-xs text-muted-foreground">
+                A payment the company must make, such as rent or a lease. It is listed under Fixed payments.
+                {fixed === undefined && fixedOn ? " Rent counts as fixed unless you turn this off." : ""}
+              </p>
+            </div>
+            <Switch
+              checked={fixedOn}
+              onCheckedChange={(on) => setValue("fixed", on, { shouldDirty: true })}
+              aria-label="Fixed commitment"
+              className="mt-0.5 shrink-0"
+            />
           </div>
           <TextareaField control={control} name="notes" label="Notes" placeholder="Anything the accountant should know" rows={3} />
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

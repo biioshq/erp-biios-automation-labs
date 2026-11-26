@@ -443,9 +443,9 @@ export function ExpenseForm({
                 : bankMatched
                   ? "Paid as the bank statement shows."
                 : payment === "partial"
-                  ? "What was paid on the expense date. Record later payments from the expense or Payment tracking."
+                  ? "What was paid on the expense date. Record later payments from the expense or Outstanding payments."
                   : payment === "none"
-                    ? "Saved as on credit. Record payments from the expense or Payment tracking when you pay."
+                    ? "Saved as on credit. Record payments from the expense or Outstanding payments when you pay."
                     : "Paid on the expense date."
             }
             icon={<HandCoins />}
@@ -457,7 +457,7 @@ export function ExpenseForm({
                   {expense.payments.length === 1 ? "payment" : "payments"}
                   {expense.payment.outstanding > 0 ? `, ${formatCurrency(expense.payment.outstanding, { exact: true })} still owed.` : ", nothing owed."}{" "}
                   <span className="text-muted-foreground">
-                    Record or delete payments from the expense drawer or Payment tracking. The amount can&apos;t go below what is paid.
+                    Record or delete payments from the expense drawer or Outstanding payments. The amount can&apos;t go below what is paid.
                   </span>
                 </p>
                 {expense.payment.outstanding > 0 ? (

@@ -42,6 +42,8 @@ function toDocument(v: RecurringFormValues) {
     startDate: fromDateInput(v.startDate),
     endDate: v.endDate ? fromDateInput(v.endDate) : null,
     notes: v.notes,
+    // Only written when the form sets it; otherwise the default rule applies (src/features/finance/recurring/fixed.ts).
+    fixed: v.fixed,
   };
 }
 
@@ -153,6 +155,8 @@ export const updateRecurring = defineAction(
     const set: Record<string, unknown> = { nextRunDate };
     const unset: Record<string, 1> = {};
     for (const [key, value] of Object.entries(doc)) {
+      // A form that does not send the fixed-commitment flag leaves it as it is.
+      if (key === "fixed" && value === undefined) continue;
       if (value === undefined) unset[key] = 1;
       else set[key] = value;
     }

@@ -11,6 +11,7 @@ import { round2 } from "@/lib/format";
 import { searchRegex, type ListParams } from "@/lib/list-params";
 import type { PaymentMethod } from "@/lib/constants";
 import { expenseRowsByIds } from "./queries";
+import { PAYING_METHODS } from "./schemas";
 import { DUE_EXPR, NOT_FROM_STOCK, PAID_EXPR, statusExpr } from "./payment-status";
 import type { PaymentTab } from "./payment-tabs";
 import type { ExpenseRow } from "./types";
@@ -64,8 +65,12 @@ function tabMatch(tab: Exclude<PaymentTab, "history">, now: Date): Record<string
   if (tab === "upcoming") {
     return { _status: { $in: ["unpaid", "partial"] }, _due: { $gte: startOfDayIST(now), $lte: endOfDayIST(addDays(now, 30)) } };
   }
+  if (tab === "outstanding") return { _status: { $in: OUTSTANDING_STATUSES } };
   return { _status: tab };
 }
+
+/** Everything still owed: the Outstanding tab is these three together. */
+const OUTSTANDING_STATUSES = ["unpaid", "partial", "overdue"];
 
 /** A $facet branch that returns nothing ($limit must be positive). */
 const NOTHING: PipelineStage.FacetPipelineStage[] = [{ $match: { _id: { $exists: false } } }];
@@ -123,6 +128,10 @@ export async function getPaymentTracking(tab: PaymentTab, params: ListParams, no
   const owed = (s: string): TabTotal => ({ count: status(s)?.n ?? 0, total: round2(status(s)?.outstanding ?? 0) });
   const history = await paymentHistory(base, params, tab === "history");
   const totals: PaymentTabTotals = {
+    outstanding: {
+      count: OUTSTANDING_STATUSES.reduce((n, st) => n + (status(st)?.n ?? 0), 0),
+      total: round2(OUTSTANDING_STATUSES.reduce((n, st) => n + (status(st)?.outstanding ?? 0), 0)),
+    },
     unpaid: owed("unpaid"),
     partial: owed("partial"),
     overdue: owed("overdue"),
@@ -215,4 +224,35 @@ async function paymentHistory(base: Record<string, unknown>, params: ListParams,
     recordedAt: d.payment.createdAt ? new Date(d.payment.createdAt).toISOString() : null,
   }));
   return { totals, rows };
+}
+
+/** What Mark as paid starts with: the method, the account it is paid from, and each method's default account. */
+export type PaymentDefaults = {
+  paymentMethod: PaymentMethod;
+  /** The default account for that method; null when none is set (the ledger then uses the method's default). */
+  accountId: string | null;
+  /** Method to the open account set as its default (Cash & bank), for when the method is changed. */
+  byMethod: Partial<Record<PaymentMethod, string>>;
+};
+
+const PAYING = new Set<string>(PAYING_METHODS.map((m) => m.value));
+
+/**
+ * Bank transfer from the account set as its default. With none set for bank transfer, the first bank
+ * account that is a default for some method, with that method. Otherwise bank transfer with no account.
+ */
+export async function getPaymentDefaults(): Promise<PaymentDefaults> {
+  await connectDB();
+  const accounts = await BankAccount.find({ archivedAt: null }, { kind: 1, name: 1, defaultFor: 1 }).sort({ kind: 1, name: 1 }).lean();
+  const byMethod: Partial<Record<PaymentMethod, string>> = {};
+  for (const a of accounts) {
+    for (const m of a.defaultFor ?? []) {
+      if (PAYING.has(m) && !byMethod[m as PaymentMethod]) byMethod[m as PaymentMethod] = String(a._id);
+    }
+  }
+  if (byMethod.bank_transfer) return { paymentMethod: "bank_transfer", accountId: byMethod.bank_transfer, byMethod };
+  const bank = accounts.find((a) => a.kind === "bank" && (a.defaultFor ?? []).some((m) => PAYING.has(m)));
+  const method = bank ? ((bank.defaultFor ?? []).find((m) => PAYING.has(m)) as PaymentMethod | undefined) : undefined;
+  if (bank && method) return { paymentMethod: method, accountId: String(bank._id), byMethod };
+  return { paymentMethod: "bank_transfer", accountId: null, byMethod };
 }

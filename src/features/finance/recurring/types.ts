@@ -1,4 +1,5 @@
 import type { PaymentMethod, ProjectStage, RecurringFrequency, RecurringStatus } from "@/lib/constants";
+import type { ExpensePaymentStatus } from "@/features/finance/expenses/types";
 
 /** A row in the recurring expenses table. */
 export type RecurringRow = {
@@ -27,6 +28,23 @@ export type RecurringRow = {
   project: { id: string; name: string; code: string; color: string } | null;
   stage: ProjectStage | null;
   employee: { id: string; name: string } | null;
+  /** The stored flag; null when it was never set. */
+  fixed?: boolean | null;
+  /** Counts as a fixed commitment (the flag, or the default rule for rent). */
+  fixedCommitment?: boolean;
+  /** The latest expense it posted, with where its payment stands today. */
+  lastPosted?: LastPosted | null;
+};
+
+/** The latest expense a schedule posted: paid, or still outstanding. */
+export type LastPosted = {
+  id: string;
+  number: string;
+  date: string;
+  amount: number;
+  status: ExpensePaymentStatus;
+  outstanding: number;
+  lastPaidOn: string | null;
 };
 
 export type PostedExpense = { id: string; number: string; date: string; amount: number };

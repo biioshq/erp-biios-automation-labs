@@ -111,8 +111,8 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   const [pageBySide, setPageBySide] = useState<{ out: number; in: number }>({ out: 0, in: 0 });
   const [editing, setEditing] = useState<number | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  /** Lines that were waiting for a choice when "Add all lines" ticked them, for the confirm. */
-  const [addAllUnchecked, setAddAllUnchecked] = useState(0);
+  /** The confirm is for "Add all lines": every line that can be added, ticked or not. The ticks are left as they are. */
+  const [addAllMode, setAddAllMode] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [dragging, setDragging] = useState(false);
   // A locked PDF waiting for its password. The password lives only here, until the file is read or changed.
@@ -263,11 +263,14 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
     setSelected((all) => all.map((x, i) => (i === index ? true : x)));
   }
 
-  /** Ticks every line not added before, so Add takes the whole statement with the suggestions shown. */
+  /** Opens the confirm for every line that can be added; nothing is ticked until Add is pressed there. */
   function addAll() {
     if (!review) return;
-    setAddAllUnchecked(rows.filter((r) => !r.selected && !r.line.imported).length);
-    setSelected(review.lines.map((l) => !l.imported));
+    if (!allRows.length) {
+      toast.info("Nothing more can be added yet: the lines left need details or a check first.");
+      return;
+    }
+    setAddAllMode(true);
     setConfirmOpen(true);
   }
 
@@ -419,6 +422,14 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
 
   const editingLine = editing !== null && review ? review.lines[editing]! : null;
   const busy = reading || reviewing || Boolean(run?.busy);
+  // "Add all lines": every line not added before and not missing details, except the ones that may
+  // already be in the books (holdBack), unless the person ticked them.
+  const allRows = rows.filter((r) => !r.line.imported && r.problem === null && (r.selected || !r.line.holdBack));
+  const confirmRows = addAllMode ? allRows : ready;
+  const confirmSides = confirmRows.reduce((s, r) => (isWithdrawal(r.line) ? { ...s, out: s.out + amountOf(r.line) } : { ...s, in: s.in + amountOf(r.line) }), { out: 0, in: 0 });
+  const confirmUnchecked = addAllMode ? allRows.filter((r) => !r.selected).length : 0;
+  const confirmHeld = addAllMode ? rows.filter((r) => !r.line.imported && !r.selected && r.problem === null && r.line.holdBack).length : 0;
+  const confirmBlocked = addAllMode ? rows.filter((r) => !r.line.imported && r.problem !== null).length : blocked;
   const readySides = ready.reduce((s, r) => (isWithdrawal(r.line) ? { ...s, out: s.out + amountOf(r.line) } : { ...s, in: s.in + amountOf(r.line) }), { out: 0, in: 0 });
   const waitingTotal = rows.filter((r) => !r.selected && !r.line.imported && (r.line.attention || r.problem !== null)).length;
   const totals = ready.reduce(
@@ -723,9 +734,9 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
             totals={totals}
             sides={readySides}
             waiting={waitingTotal}
-            notTicked={rows.filter((r) => !r.selected && !r.line.imported).length}
+            notTicked={allRows.filter((r) => !r.selected).length}
             onAdd={() => {
-              setAddAllUnchecked(0);
+              setAddAllMode(false);
               setConfirmOpen(true);
             }}
             onAddAll={addAll}
@@ -738,14 +749,14 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
         open={confirmOpen}
         onOpenChange={(o) => {
           setConfirmOpen(o);
-          if (!o) setAddAllUnchecked(0);
+          if (!o) setAddAllMode(false);
         }}
-        title={`Add ${plural(ready.length, "line", "lines")} to the books?`}
+        title={`Add ${plural(confirmRows.length, "line", "lines")} to the books?`}
         description={
           <>
             <span className="block">Each line goes to the place shown, tied to this statement&apos;s account:</span>
             <span className="mt-2 block space-y-1">
-              {destinationTotals(ready).map((d) => (
+              {destinationTotals(confirmRows).map((d) => (
                 <span key={d.key} className="flex items-baseline justify-between gap-4 text-sm">
                   <span>
                     {d.label} <span className="text-muted-foreground">({formatNumber(d.count)})</span>
@@ -755,14 +766,22 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
               ))}
             </span>
             <span className="mt-2 block text-muted-foreground">
-              Money out <Money value={readySides.out} exact />, money in <Money value={readySides.in} exact />.
-              {blocked ? ` ${plural(blocked, "ticked line still needs", "ticked lines still need")} details and will not be added.` : ""}
-              {waitingTotal ? ` ${plural(waitingTotal, "line that needs", "lines that need")} your choice stay${waitingTotal === 1 ? "s" : ""} out until ticked.` : ""}
+              Money out <Money value={confirmSides.out} exact />, money in <Money value={confirmSides.in} exact />.
+              {confirmBlocked
+                ? ` ${plural(confirmBlocked, addAllMode ? "line still needs" : "ticked line still needs", addAllMode ? "lines still need" : "ticked lines still need")} details and will not be added.`
+                : ""}
+              {!addAllMode && waitingTotal ? ` ${plural(waitingTotal, "line that needs", "lines that need")} your choice stay${waitingTotal === 1 ? "s" : ""} out until ticked.` : ""}
             </span>
-            {addAllUnchecked ? (
+            {confirmUnchecked ? (
               <span className="mt-2 block rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-sm text-foreground">
-                {plural(addAllUnchecked, "line was", "lines were")} not ticked yet (a payer that is not a known customer, no category from earlier records, or a possible
-                refund). {addAllUnchecked === 1 ? "It is" : "They are"} added as suggested; you can change any record afterwards on Total expenses or Income.
+                {plural(confirmUnchecked, "line was", "lines were")} not ticked yet (a payer that is not a known customer, no category from earlier records, or a possible
+                refund). {confirmUnchecked === 1 ? "It is" : "They are"} added as suggested; you can change any record afterwards on Total expenses or Income.
+              </span>
+            ) : null}
+            {confirmHeld ? (
+              <span className="mt-2 block text-sm text-muted-foreground">
+                {plural(confirmHeld, "line that may already be in the books is", "lines that may already be in the books are")} left for you to check (same amount as an
+                unpaid bill, paid from another account, or a balance that does not agree). Tick {confirmHeld === 1 ? "it" : "them"} to add.
               </span>
             ) : null}
           </>
@@ -770,8 +789,9 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
         confirmLabel="Add"
         destructive={false}
         onConfirm={() => {
+          if (!confirmRows.length) return;
           void addLines(
-            ready.map((r) => r.index),
+            confirmRows.map((r) => r.index),
             null,
           );
         }}

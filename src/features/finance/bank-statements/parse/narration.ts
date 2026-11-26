@@ -199,6 +199,28 @@ export function containsName(name: string, text: string): boolean {
 }
 
 /**
+ * True when a payment line names this vendor well enough to pay its bill: every distinctive word of the
+ * name is in the text as a whole word (or the name is there with its spaces left out). "M/s" and
+ * one-letter initials are left out, and the last word may be cut short by the bank as long as at
+ * least five of its letters are kept ("SRI BALAJI AGENCIE"). One shared word is never enough:
+ * "IRCTC WEB" does not name "Amazon Web Services".
+ */
+export function namesVendor(name: string, text: string): boolean {
+  let words = nameKey(name).split(" ").filter(Boolean);
+  if (words[0] === "m" && words[1] === "s") words = words.slice(2);
+  words = words.filter((w) => w.length >= 2 && !WEAK.has(w));
+  if (words.join("").length < 4) return false;
+  const hay = ` ${nameKey(text)} `;
+  if (words.every((w) => hay.includes(` ${w} `))) return true;
+  if (words.join("").length >= 6 && hay.replace(/ /g, "").includes(words.join(""))) return true;
+  const last = words[words.length - 1]!;
+  if (words.length >= 2 && last.length >= 6 && words.slice(0, -1).every((w) => hay.includes(` ${w} `))) {
+    for (let k = last.length - 1; k >= 5; k--) if (hay.includes(` ${last.slice(0, k)} `)) return true;
+  }
+  return false;
+}
+
+/**
  * containsName for one name tested against many texts, with the name's words worked out once.
  * The test takes the text as ` ${nameKey(text)} ` (padded) and the same without spaces. Null for a
  * name too short to test, as containsName would always say no.

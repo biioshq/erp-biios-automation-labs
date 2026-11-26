@@ -328,7 +328,7 @@ export function AssetsView({
         <EmptyState
           icon={Icon}
           title={`No ${labels.singular}s recorded yet`}
-          description={kind === "intangible" ? "Add software and licences the company owns, with their useful life, to see their amortisation and carrying value." : "Add furniture, machines, vehicles and computers the company owns, with their useful life, to see depreciation and book value."}
+          description={kind === "intangible" ? "Add software and licences the company owns, with their useful life, to see their amortization and carrying value." : "Add furniture, machines, vehicles and computers the company owns, with their useful life, to see depreciation and book value."}
           action={
             canCreate ? (
               <Button onClick={() => openNew()}>

@@ -159,6 +159,11 @@ export type ReviewLine = StatementLine & {
   suggestion: LineDecision;
   notes: string[];
   attention: boolean;
+  /**
+   * Why "Add all lines" leaves this line for a person (it may already be in the books, or its amount
+   * does not agree with the balance). Ticking it by hand still adds it.
+   */
+  holdBack?: string | null;
   /** What the narration says the line is (charges, interest, ATM...), for the line's type in the review. */
   narrationKind?: LineKind;
   /** A deposit that pays an open customer invoice: the invoice, so the review can link the receipt to it or not. */

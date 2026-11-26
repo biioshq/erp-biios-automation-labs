@@ -13,7 +13,7 @@ import { invoiceBalances } from "@/server/finance/summaries";
 import { INCOME_CATEGORIES, type BankLineAction, type IncomeCategory, type ProjectStage } from "@/lib/constants";
 import type { LineDecision, MatchKind, MatchOption, ReviewLine, StatementLine, StatementPickers } from "../types";
 import { STATEMENT_METHODS } from "../schemas";
-import { analyseNarration, categoryFromWords, containsName, nameKey, nameSimilarity, type NarrationInfo } from "../parse/narration";
+import { analyseNarration, categoryFromWords, containsName, nameKey, nameSimilarity, namesVendor, type NarrationInfo } from "../parse/narration";
 import { lineHash, occurrences } from "./hash";
 import { isReopenable } from "./claims";
 import { describeLinks } from "./links";
@@ -233,7 +233,7 @@ function namedIn(line: StatementLine, c: Candidate, alias = ""): { sim: number; 
   return {
     sim: c.party ? nameSimilarity(c.party, named) : 0,
     // Every distinctive word of the vendor: one shared word ("Web", "Amazon") is not enough to pay a bill.
-    whole: c.party ? containsName(c.party, named) : false,
+    whole: c.party ? namesVendor(c.party, named) : false,
     refHit: c.refs.some((r) => alnum(r).length >= 4 && hay.includes(alnum(r))),
   };
 }
@@ -421,7 +421,7 @@ function ownAccountIn(ctx: Context, narration: string): OwnAccount | null {
 const cleanNarration = (n: string) => n.replace(/\s+/g, " ").trim().slice(0, 80);
 
 /** What an unmatched line most likely is, with notes for what the admin should check. */
-function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; notes: string[]; attention: boolean; invoice?: ReviewLine["invoice"] } {
+function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; notes: string[]; attention: boolean; invoice?: ReviewLine["invoice"]; holdBack?: string } {
   const side = sideOf(line);
   const amount = amountOf(line);
   const info = analyseNarration(line.narration, side, { exclude: [COMPANY.name] });
@@ -508,7 +508,7 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
       (p) =>
         Math.abs(p.amount - line.withdrawal) < 0.005 &&
         Math.abs(dayNumber(p.date) - dayNumber(line.date)) <= HAND_PAYMENT_DAYS &&
-        containsName(p.party, `${party ?? ""} ${line.narration}`),
+        namesVendor(p.party, `${party ?? ""} ${line.narration}`),
     );
     if (recordedElsewhere) {
       // First, so it is the note the review table shows on the line.
@@ -521,6 +521,7 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
       decision: decide("expense", { party: party ?? cleanNarration(line.narration), category, holderId: owner?.id, projectId: project?.projectId, stage: project?.stage }),
       notes,
       attention,
+      holdBack: recordedElsewhere ? "It may already be recorded as a payment from another account." : undefined,
     };
   }
 
@@ -864,6 +865,7 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
         suggestion: { ...s.decision, action: "match", matchKey: match.key },
         notes: [...again, ...notes],
         attention: lineIssues || Boolean(match.otherAccount) || partBill || farPayment || again.length > 0,
+        holdBack: line.check === "mismatch" ? "Its amount does not agree with the running balance." : null,
       };
     }
     // An unpaid bill for the same amount whose vendor the narration does not name: offered, not picked.
@@ -878,6 +880,10 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
       suggestion: s.decision,
       notes: [...again, ...early, ...billNote, ...s.notes],
       attention: lineIssues || s.attention || again.length > 0 || early.length > 0 || billNote.length > 0,
+      // "Add all lines" leaves these for a person: adding them as new could record the same money twice.
+      holdBack: billNote.length
+        ? "An unpaid bill has the same amount."
+        : (s.holdBack ?? (line.check === "mismatch" ? "Its amount does not agree with the running balance." : null)),
     };
   });
   return { lines: out, pickers: ctx.pickers };

@@ -38,14 +38,14 @@ export async function AssetRegisterPage({ kind, searchParams }: { kind: AssetKin
         title={labels.page}
         description={
           kind === "intangible"
-            ? "Software, licences and other assets without a physical form, with their amortisation and carrying value."
+            ? "Software, licences and other assets without a physical form, with their amortization and carrying value."
             : "Furniture, machinery, vehicles, buildings and computers the company owns, with depreciation and book value."
         }
         actions={
           <>
             <Button variant="outline" asChild>
               <Link href={kind === "intangible" ? "/finance/assets/intangible/amortization" : "/finance/assets/fixed/depreciation"}>
-                <TrendingDown /> {labels.charge} summary
+                <TrendingDown /> {kind === "intangible" ? "Amortization" : "Depreciation on assets"}
               </Link>
             </Button>
             {can(user, "finance.fixed_assets:create") ? (

@@ -31,13 +31,37 @@ function columnsOf(mapping: (ColumnRole | null)[]): Columns {
 
 const cell = (cells: string[], i: number | undefined) => (i === undefined ? "" : (cells[i] ?? "").replace(/\s+/g, " ").trim());
 
-const OPENING_RE = /opening balance|balance b\/?f|brought forward|balance forward|^b\/f$/i;
+const OPENING_RE = /opening balance|balance b\/?f|brought forward|balance forward|^b\/f$|\bbalance as (on|at|of)\b/i;
 const CLOSING_RE = /closing balance|balance c\/?f|carried forward/i;
+
+/** Lowercase words of a cell, as headerKey makes them ("Balance B/F" is "balance b f"). */
+const words = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+/**
+ * A whole cell that only labels a summary row: "Total", "Total Debits", "Grand Total", "TRANSACTION
+ * TOTAL", "Closing Balance", "Opening Balance", "Balance as on 01-Nov-26", "B/F", "C/F". The label has
+ * to be the whole cell, so a real narration such as "TOTAL MALL" or "TOTALENERGIES" stays a line.
+ */
+const SUMMARY_LABEL =
+  /^((grand|sub|page|transaction|txn|statement|day|net) )?(sub ?)?totals?( (of|for|debits?|credits?|withdrawals?|deposits?|dr|cr|amounts?|transactions?|count|and|in|out|inr|rs))*$|^(opening|closing|op|cl) bal(ance)?( (inr|rs))?( as (on|at|of)( .*)?)?$|^balance as (on|at|of)( .*)?$|^(bal(ance)? )?(b f|c f|brought forward|carried forward)$|^bal(ance)? forward$/;
+const OPENING_LABEL = /^(opening|op) bal|^balance as (on|at|of)|b f$|brought forward$|^balance forward$/;
+/** Text that only appears after the table or in a page footer: it never continues a narration. */
+const TRAILER_RE =
+  /end of (the )?statement|computer generated|system generated|does not require (a |any )?signature|registered office|regd\.? office|^page( no\.?)? ?:? ?\d+( of \d+)?$|^legends?\b|please (examine|check|note)|statement summary/i;
+
+const isSummaryLabel = (s: string) => {
+  const k = words(s);
+  return k !== "" && SUMMARY_LABEL.test(k);
+};
 
 /** A line read from a row, before the balance check. `side` is null when only the balance can tell. */
 type Draft = Omit<StatementLine, "withdrawal" | "deposit" | "check"> & { amount: number; side: "dr" | "cr" | null; fromSign: boolean };
 
-type RowResult = { draft: Draft } | { continuation: string } | { opening: number } | { skip: string } | null;
+/** `summary`: a total, opening or closing row; never a line and never reported as one not read. */
+type RowResult = { draft: Draft } | { continuation: string } | { opening: number } | { summary: true } | { skip: string } | null;
 
 function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
   const cells = row.cells;
@@ -54,21 +78,39 @@ function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
 
   if (!date) {
     const text = [narration, reference].filter(Boolean).join(" ");
-    if (OPENING_RE.test(cells.join(" ")) && cols.balance !== undefined) {
+    const joined = cells
+      .map((c) => c.trim())
+      .filter(Boolean)
+      .join(" ");
+    const closing = CLOSING_RE.test(joined);
+    if (OPENING_RE.test(joined) && !closing && cols.balance !== undefined) {
       const b = readBalance(cell(cells, cols.balance), cell(cells, cols.balanceSide));
       if (typeof b === "number") return { opening: b };
     }
+    const labelled = cells.some(isSummaryLabel);
     // A narration that wrapped onto the next row of the file: no date and no amounts.
-    if (text && !anyAmount && !dateRaw && prevExists && row.near !== false) return { continuation: text };
-    // Summary rows under the table ("Opening Balance, Dr Count..." then the figures) are not lines.
-    const summary = CLOSING_RE.test(cells.join(" ")) || (dateRaw !== "" && readAmount(dateRaw) !== "invalid");
-    if (anyAmount && !summary && (dateRaw || narration)) {
+    if (text && !anyAmount && !dateRaw && !labelled && prevExists && row.near !== false) return { continuation: text };
+    // Total, opening and closing rows, and the figures under a summary header ("Opening Balance, Dr
+    // Count..." then the numbers), are not lines and not rows that failed to read.
+    if (labelled || closing || (anyAmount && OPENING_RE.test(joined)) || (dateRaw !== "" && readAmount(dateRaw) !== "invalid")) return { summary: true };
+    if (anyAmount && (dateRaw || narration)) {
       return { skip: dateRaw ? `The date "${dateRaw}" could not be read` : "No date on this row" };
     }
     return null;
   }
 
-  if (OPENING_RE.test(narration) && cols.balance !== undefined) {
+  // A dated summary row ("31/05/25, Total Debits, 72,80,507.58") is never a line. The opening one
+  // gives the balance the first line starts from.
+  if (isSummaryLabel(narration)) {
+    const k = words(narration);
+    if (OPENING_LABEL.test(k) && !CLOSING_RE.test(narration) && cols.balance !== undefined) {
+      const b = readBalance(cell(cells, cols.balance), cell(cells, cols.balanceSide));
+      if (typeof b === "number") return { opening: b };
+    }
+    return { summary: true };
+  }
+
+  if (OPENING_RE.test(narration) && !CLOSING_RE.test(narration) && cols.balance !== undefined) {
     const w = readAmount(cell(cells, cols.withdrawal));
     const d = readAmount(cell(cells, cols.deposit));
     const a = readAmount(cell(cells, cols.amount));
@@ -220,7 +262,7 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
       last.narration = `${last.narration} ${r.continuation}`.trim().slice(0, 1000);
     } else if ("opening" in r) {
       if (drafts.length === 0) stated = r.opening;
-    } else skipped.push({ line: row.line, reason: r.skip });
+    } else if ("skip" in r) skipped.push({ line: row.line, reason: r.skip });
   }
 
   // Oldest first. A statement listed newest first is turned round; one day only is tried both ways.

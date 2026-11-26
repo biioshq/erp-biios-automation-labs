@@ -279,7 +279,10 @@ export const applyReceiptToInvoice = defineAction(
 export const createInvoiceForReceipt = defineAction(
   invoiceFormSchema.and(createForReceiptSchema),
   async (input, user) => {
-    if (!can(user, "finance.income:view")) throw new AppError("You do not have permission to open income records.", "forbidden");
+    // Linking a receipt to an invoice is an invoices edit (as Apply advance is) and needs the receipt to be visible.
+    if (!can(user, "finance.income:view") || !can(user, "finance.invoices:edit")) {
+      throw new AppError("You do not have permission to link a receipt to an invoice.", "forbidden");
+    }
     const { incomeId, ...form } = input;
     await assertUsableFile(form.fileId, user.id);
     const income = await Income.findById(incomeId, RECEIPT_FIELDS).lean();
@@ -324,7 +327,7 @@ export type InvoicePrefill = { incomeId: string; incomeNumber: string; client: s
 /** What the invoice form starts with for "Create invoice" on a receipt, or why it cannot be made (error). */
 export async function fetchInvoicePrefill(raw: z.input<typeof prefillInput>): Promise<{ ok: true; prefill: InvoicePrefill } | { ok: false; error: string }> {
   const user = await getCurrentUser();
-  if (!user || !can(user, "finance.invoices:create") || !can(user, "finance.income:view")) {
+  if (!user || !can(user, "finance.invoices:create") || !can(user, "finance.invoices:edit") || !can(user, "finance.income:view")) {
     return { ok: false, error: "You do not have permission to create an invoice for a receipt." };
   }
   const parsed = prefillInput.safeParse(raw);

@@ -94,8 +94,8 @@ export function parseReportFilters(sp: URLSearchParams | Record<string, string |
 export function filtersForReport(type: ReportType, filters: ReportFilters): ReportFilters {
   if (isLegacyReport(type)) {
     // Payment status, direct / indirect and department narrow the expense report only.
-    const expenseOnly = { status: [], nature: [], department: [] };
-    if (type === "expense") return filters;
+    const expenseOnly = { status: [], nature: [], department: [], customer: [] };
+    if (type === "expense") return { ...filters, customer: [] };
     if (type !== "ca") return { ...filters, ...expenseOnly };
     return { ...filters, ...expenseOnly, q: "", stage: [], paymentMethod: [], source: [], movementType: [], item: [], movements: false };
   }

@@ -64,7 +64,10 @@ export function IncomeView({
 }) {
   const canDelete = useCan("finance.income:delete");
   const canEdit = useCan("finance.income:edit");
-  const canCreateInvoice = useCan("finance.invoices:create");
+  // Creating the invoice also links the receipt to it, which Apply advance does with the invoices edit permission.
+  const mayCreateInvoice = useCan("finance.invoices:create");
+  const mayLinkInvoice = useCan("finance.invoices:edit");
+  const canCreateInvoice = mayCreateInvoice && mayLinkInvoice;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

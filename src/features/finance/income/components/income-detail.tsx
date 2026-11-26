@@ -51,7 +51,9 @@ export function IncomeDetailView({
   canDelete?: boolean;
 }) {
   const canEdit = useCan("finance.income:edit");
-  const canCreateInvoice = useCan("finance.invoices:create");
+  const mayCreateInvoice = useCan("finance.invoices:create");
+  const mayLinkInvoice = useCan("finance.invoices:edit");
+  const canCreateInvoice = mayCreateInvoice && mayLinkInvoice;
   const noInvoice = needsInvoice(income);
   return (
     <>

@@ -81,8 +81,8 @@ export function AccountMenuItems({
   // While methods are loading, keep the item; hide it once we know the account has no password (Google only).
   const canChangePassword = account.methods?.password !== false;
   const canSeeTeam = useCan("settings.team:view");
-  const canSeeRoles = useCan("settings.roles:view");
   const canSeeCompany = useCan("settings.company:view");
+  const canSeeRoles = useCan("settings.roles:view");
   return (
     <>
       <DropdownMenuGroup>
@@ -94,19 +94,19 @@ export function AccountMenuItems({
             </Link>
           </DropdownMenuItem>
         ) : null}
-        {canSeeRoles ? (
-          <DropdownMenuItem asChild>
-            <Link href="/settings/roles">
-              <ShieldCheck />
-              Roles and permissions
-            </Link>
-          </DropdownMenuItem>
-        ) : null}
         {canSeeCompany ? (
           <DropdownMenuItem asChild>
             <Link href="/settings/company">
               <Building2 />
               Business details
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
+        {canSeeRoles ? (
+          <DropdownMenuItem asChild>
+            <Link href="/settings/roles">
+              <ShieldCheck />
+              Roles and permissions
             </Link>
           </DropdownMenuItem>
         ) : null}

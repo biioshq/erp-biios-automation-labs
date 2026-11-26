@@ -11,7 +11,6 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Switch } from "@/components/ui/switch";
 import { ComboboxField, DateField, FormSection, NumberField, SelectField, TextField, TextareaField } from "@/components/forms/fields";
 import { FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import { Money } from "@/components/shared/money";
@@ -30,7 +29,6 @@ import { createRecurring, updateRecurring } from "../actions";
 import { ordinal } from "../format";
 import { RECURRING_TEMPLATES, recurringFormSchema, type RecurringFormInput, type RecurringFormValues, type RecurringTemplate } from "../schemas";
 import type { RecurringDetail } from "../types";
-import { isFixedCommitment } from "../fixed";
 import { formValidation } from "@/components/forms/form-options";
 import { useCan } from "@/components/current-user";
 
@@ -65,8 +63,6 @@ function defaultsFrom(
     startDate: schedule ? toDateInput(schedule.startDate) : toDateInput(new Date()),
     endDate: schedule?.endDate ? toDateInput(schedule.endDate) : undefined,
     notes: schedule?.notes ?? "",
-    // Unset unless the schedule has its own flag: the switch then shows the default rule (rent is fixed).
-    fixed: typeof schedule?.fixed === "boolean" ? schedule.fixed : undefined,
   };
 }
 
@@ -137,11 +133,10 @@ export function RecurringForm({
     ...formValidation,
   });
   const { control, setValue, getValues } = form;
-  const [amount, gstRate, gstin, frequency, dayOfMonth, startDate, endDate, projectId, category, fixed, paymentMethod] = useWatch({
+  const [amount, gstRate, gstin, frequency, dayOfMonth, startDate, endDate, projectId, paymentMethod] = useWatch({
     control,
-    name: ["amount", "gstRate", "gstin", "frequency", "dayOfMonth", "startDate", "endDate", "projectId", "category", "fixed", "paymentMethod"],
+    name: ["amount", "gstRate", "gstin", "frequency", "dayOfMonth", "startDate", "endDate", "projectId", "paymentMethod"],
   });
-  const fixedOn = isFixedCommitment({ fixed, category });
 
   const tax = useMemo(() => {
     if (!amount || !gstRate) return null;
@@ -452,23 +447,8 @@ export function RecurringForm({
               description={
                 paymentMethod === "credit"
                   ? "Each posted expense waits in Outstanding payments until someone marks it paid."
-                  : "Each posted expense is recorded as paid in full on its date."
+                  : "Bills from this schedule wait in Outstanding payments until paid. Salaries are recorded as paid."
               }
-            />
-          </div>
-          <div className="flex items-start justify-between gap-4 rounded-lg border bg-surface px-3 py-2.5">
-            <div className="min-w-0">
-              <p className="text-sm font-medium">Fixed commitment</p>
-              <p className="text-xs text-muted-foreground">
-                A payment the company must make, such as rent or a lease. It is listed under Fixed payments.
-                {fixed === undefined && fixedOn ? " Rent counts as fixed unless you turn this off." : ""}
-              </p>
-            </div>
-            <Switch
-              checked={fixedOn}
-              onCheckedChange={(on) => setValue("fixed", on, { shouldDirty: true })}
-              aria-label="Fixed commitment"
-              className="mt-0.5 shrink-0"
             />
           </div>
           <TextareaField control={control} name="notes" label="Notes" placeholder="Anything the accountant should know" rows={3} />

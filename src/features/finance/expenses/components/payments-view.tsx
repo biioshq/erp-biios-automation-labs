@@ -163,7 +163,7 @@ export function PaymentExpensesTable({
       {payable(r) ? (
         <>
           <MarkPaidButton
-            expense={{ id: r.id, number: r.number, vendor: r.vendor, outstanding: r.payment.outstanding }}
+            expense={{ id: r.id, number: r.number, vendor: r.vendor, outstanding: r.payment.outstanding, paymentMethod: r.paymentMethod }}
             accounts={accounts}
             defaults={defaults}
             onPaid={(id) => hide([id])}

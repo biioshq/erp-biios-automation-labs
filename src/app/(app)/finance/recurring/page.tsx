@@ -2,17 +2,19 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { CalendarClock, EyeOff, Landmark, PauseCircle, Plus, Repeat } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Page, PageHeader } from "@/components/shared/page";
+import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
 import { Money } from "@/components/shared/money";
 import { parseListParams } from "@/lib/list-params";
-import { formatNumber } from "@/lib/format";
+import { formatNumber, round2 } from "@/lib/format";
 import { NoAccess } from "@/components/shared/no-access";
 import { can, requireUser } from "@/server/auth/session";
 import { getEmployeeOptions, getProjectOptions, getVendorNames } from "@/server/lookups";
 import { getRecurringSummary, listRecurring } from "@/features/finance/recurring/queries";
 import { RECURRING_FILTER_KEYS, RECURRING_SORT_KEYS } from "@/features/finance/recurring/schemas";
 import { RecurringView } from "@/features/finance/recurring/components/recurring-view";
+import { getLoanInstalments } from "@/features/finance/recurring/loan-instalments";
+import { LoanInstalmentsTable } from "@/features/finance/recurring/components/loan-instalments-table";
 import { getExpenseCategories } from "@/server/expense-categories";
 
 export const metadata: Metadata = { title: "Recurring expenses" };
@@ -26,14 +28,20 @@ export default async function RecurringPage({ searchParams }: PageProps<"/financ
     sortable: RECURRING_SORT_KEYS,
     defaultSort: { id: "nextRunDate", desc: false },
   });
-  const [data, summary, projects, vendors, employees, categories] = await Promise.all([
+  // Loan EMIs are paid on a cycle too. They come from Liabilities, so only with its view permission.
+  const seesLoans = can(user, "finance.liabilities:view");
+  const [data, summary, projects, vendors, employees, categories, loans] = await Promise.all([
     listRecurring(params),
     getRecurringSummary(),
     getProjectOptions(),
     getVendorNames(),
     getEmployeeOptions(),
     getExpenseCategories(),
+    seesLoans ? getLoanInstalments() : Promise.resolve(null),
   ]);
+  const committed = round2(summary.committedMonthly + (loans?.monthly ?? 0));
+  const schedulesHint = `${formatNumber(summary.activeCount)} active schedule${summary.activeCount === 1 ? "" : "s"}`;
+  const loansHint = loans?.withInstalment ? ` and ${formatNumber(loans.withInstalment)} loan EMI${loans.withInstalment === 1 ? "" : "s"}` : "";
   const canCreate = can(user, "finance.recurring:create");
   // The list leaves salary schedules out without the salaries data permission.
   const seesSalaries = can(user, "data.salaries");
@@ -43,7 +51,11 @@ export default async function RecurringPage({ searchParams }: PageProps<"/financ
       <PageHeader
         eyebrow="Finance"
         title="Recurring expenses"
-        description="Salaries, rent, bills and subscriptions that post themselves on their due dates."
+        description={
+          seesLoans
+            ? "Everything paid on a cycle: salaries, rent, bills and subscriptions that post themselves on their due dates, and loan EMIs."
+            : "Salaries, rent, bills and subscriptions that post themselves on their due dates."
+        }
         actions={
           canCreate ? (
             <Button asChild className="max-sm:w-full">
@@ -60,8 +72,8 @@ export default async function RecurringPage({ searchParams }: PageProps<"/financ
           label="Committed per month"
           icon={Repeat}
           tone="brand"
-          value={<Money value={summary.committedMonthly} compact />}
-          hint={`${formatNumber(summary.activeCount)} active schedule${summary.activeCount === 1 ? "" : "s"}`}
+          value={<Money value={committed} compact />}
+          hint={`${schedulesHint}${loansHint}`}
           className="p-4 sm:p-5"
         />
         <StatCard
@@ -96,6 +108,22 @@ export default async function RecurringPage({ searchParams }: PageProps<"/financ
       )}
 
       <RecurringView data={data} summary={summary} projects={projects} vendors={vendors} employees={employees} categories={categories} />
+
+      {loans ? (
+        <Section
+          title="Loan and borrowing instalments (EMIs)"
+          description={
+            <>
+              From each loan&apos;s terms and the repayments recorded, counted in Committed per month above.{" "}
+              {loans.overdueCount ? `${formatNumber(loans.overdueCount)} instalment${loans.overdueCount === 1 ? " is" : "s are"} overdue. ` : ""}
+              Record a repayment on the loan: the interest part is saved as an expense.
+            </>
+          }
+          contentClassName="p-0 sm:p-0"
+        >
+          <LoanInstalmentsTable rows={loans.rows} />
+        </Section>
+      ) : null}
     </Page>
   );
 }

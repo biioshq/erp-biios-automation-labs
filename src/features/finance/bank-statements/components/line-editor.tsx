@@ -294,6 +294,22 @@ function DecisionFields({
           <Field label="Description" htmlFor="line-description">
             <Input id="line-description" value={d.description ?? ""} maxLength={1000} onChange={(e) => set({ description: e.target.value })} />
           </Field>
+          {d.action === "income" && line.invoice ? (
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={d.invoiceId === line.invoice.id}
+                onChange={(e) => set({ invoiceId: e.target.checked ? line.invoice!.id : undefined })}
+              />
+              <span className="min-w-0 flex-1 space-y-0.5">
+                <span className="block font-medium">Pays invoice {line.invoice.number}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {line.invoice.client} · <Money value={line.invoice.outstanding} exact /> still owed. The new income is linked to it, so the invoice shows as paid.
+                </span>
+              </span>
+            </label>
+          ) : null}
         </>
       ) : null}
 

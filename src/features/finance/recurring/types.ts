@@ -28,10 +28,6 @@ export type RecurringRow = {
   project: { id: string; name: string; code: string; color: string } | null;
   stage: ProjectStage | null;
   employee: { id: string; name: string } | null;
-  /** The stored flag; null when it was never set. */
-  fixed?: boolean | null;
-  /** Counts as a fixed commitment (the flag, or the default rule for rent). */
-  fixedCommitment?: boolean;
   /** The latest expense it posted, with where its payment stands today. */
   lastPosted?: LastPosted | null;
 };

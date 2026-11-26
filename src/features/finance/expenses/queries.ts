@@ -177,11 +177,19 @@ export async function expenseListFilter(params: Pick<ListParams, "q" | "filters"
   return expenseFilter(params, { directCategories: directCategoryValues(categories), now });
 }
 
-export async function listExpenses(params: ListParams): Promise<Paginated<ExpenseRow> & { summary: ExpenseSummary }> {
+/**
+ * The Total expenses list with its header figures. `options.where` narrows it to a view of its own
+ * (Fixed payments lists one-off purchases of goods this way), with the same rows and totals.
+ */
+export async function listExpenses(
+  params: ListParams,
+  options: { where?: Record<string, unknown> } = {},
+): Promise<Paginated<ExpenseRow> & { summary: ExpenseSummary }> {
   await connectDB();
   const now = new Date();
   const [scope, base, categories] = await Promise.all([salaryScope(), expenseListFilter(params, now), getExpenseCategories()]);
-  const filter = (Object.keys(scope).length ? { $and: [base, scope] } : base) as typeof base;
+  const parts = [base, ...(Object.keys(scope).length ? [scope] : []), ...(options.where ? [options.where] : [])];
+  const filter = (parts.length > 1 ? { $and: parts } : base) as typeof base;
   const [docs, total, summary] = await Promise.all([
     Expense.find(filter)
       .sort(mongoSort(params.sort ?? { id: "date", desc: true }))

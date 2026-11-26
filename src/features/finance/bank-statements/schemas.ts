@@ -58,6 +58,7 @@ export const lineDecisionSchema = z.object({
   loanName: optionalText(160),
   loanGroup: optionalText(80),
   holderId: optionalObjectId,
+  invoiceId: optionalObjectId,
 });
 
 export const addLinesSchema = z.object({

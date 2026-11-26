@@ -513,7 +513,11 @@ function cutAcross(w: Word, k: number, L: Layout): [Word, Word] | null {
     const x = edges[at]!;
     // Elsewhere ("...-881406434764" glued to "0000828374") only right where the column starts.
     if (target !== null ? Math.abs(x - target) > (joint ? reach : 0.2 * w.size) : !joint || x < from) continue;
-    if (!fits(w.text.slice(0, at).trim(), left, L.shapes[k] ?? null) || !fits(w.text.slice(at).trim(), right, L.shapes[k + 1] ?? null)) continue;
+    const head = w.text.slice(0, at).trim();
+    // An amount glued to the reference before it ("TRANSFER TO 4897000003 13,321.48"): the amount sits
+    // in its column's band, so the reference may be any text, spaces and all.
+    const headFits = money && left === "reference" ? /\S/.test(head) : fits(head, left, L.shapes[k] ?? null);
+    if (!headFits || !fits(w.text.slice(at).trim(), right, L.shapes[k + 1] ?? null)) continue;
     // Nearest the column's start (a space before a letter-digit join, a join before anything else); an amount as long as it reads.
     const score = target !== null ? Math.abs(x - target) + (space ? 0 : joint ? 0.15 * w.size : 0.3 * w.size) : at;
     if (!best || score < best.score) best = { at, score };

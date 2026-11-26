@@ -120,8 +120,13 @@ function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
   const balance = readBalance(balanceCell, cell(cells, cols.balanceSide));
   if (balance === "invalid") issues.push(`The balance "${balanceCell}" could not be read`);
   const valueDate = readDate(cell(cells, cols.valueDate)) ?? undefined;
+  // The file's own vendor and category columns ride along with the line; they are never part of its hash.
+  const vendor = cell(cells, cols.vendor).slice(0, 200) || undefined;
+  const category = cell(cells, cols.category).slice(0, 80) || undefined;
   return {
     draft: {
+      vendor,
+      category,
       line: row.line,
       page: row.page,
       date,
@@ -189,6 +194,8 @@ function reconcile(drafts: Draft[], opening: number | null): { lines: StatementL
       balance: d.balance,
       check,
       issues,
+      ...(d.vendor ? { vendor: d.vendor } : {}),
+      ...(d.category ? { category: d.category } : {}),
     };
   });
   return { lines, ok };

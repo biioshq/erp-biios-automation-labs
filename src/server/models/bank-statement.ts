@@ -1,5 +1,6 @@
 import { Schema, model, models, type InferSchemaType, type Model, type Types } from "mongoose";
 import { BANK_LINE_ACTIONS, valuesOf } from "@/lib/constants";
+import { BANK_LINE_KIND_VALUES } from "@/features/finance/bank-statements/kinds";
 
 /** One uploaded statement file: which account, which period, how many lines were added. */
 const bankStatementSchema = new Schema(
@@ -51,6 +52,13 @@ const bankTransactionSchema = new Schema(
      */
     unmatchedAt: { type: Date },
     unmatchedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    /**
+     * Optional, absent on lines added before it existed: the line's type (deposit, withdrawal,
+     * transfer, bank charges...) and its row and page in the uploaded file. None of them is part of `hash`.
+     */
+    kind: { type: String, enum: BANK_LINE_KIND_VALUES },
+    row: { type: Number, min: 0 },
+    page: { type: Number, min: 0 },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },

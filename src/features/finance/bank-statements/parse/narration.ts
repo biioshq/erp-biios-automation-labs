@@ -198,6 +198,20 @@ export function containsName(name: string, text: string): boolean {
   return words.join("").length >= 6 && hay.replace(/ /g, "").includes(words.join(""));
 }
 
+/**
+ * containsName for one name tested against many texts, with the name's words worked out once.
+ * The test takes the text as ` ${nameKey(text)} ` (padded) and the same without spaces. Null for a
+ * name too short to test, as containsName would always say no.
+ */
+export function nameTest(name: string): ((padded: string, flat: string) => boolean) | null {
+  const words = nameKey(name)
+    .split(" ")
+    .filter((w) => w && !WEAK.has(w));
+  const joined = words.join("");
+  if (joined.length < 4) return null;
+  return (padded, flat) => words.every((w) => padded.includes(` ${w} `)) || (joined.length >= 6 && flat.includes(joined));
+}
+
 /** Expense category from the narration's words, for lines whose vendor has no history. */
 const CATEGORY_RULES: [RegExp, string][] = [
   [/\brent\b|\blease\b/i, "rent"],

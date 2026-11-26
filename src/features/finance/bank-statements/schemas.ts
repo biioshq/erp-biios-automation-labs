@@ -28,6 +28,9 @@ export const statementLineSchema = z.object({
   balance: z.number().finite().nullable(),
   check: z.enum(["ok", "fixed", "mismatch", "unchecked"]),
   issues: z.array(z.string().max(300)).max(10),
+  /** From the file's own vendor and category columns, when mapped. Never part of the line's hash. */
+  vendor: optionalText(200),
+  category: optionalText(80),
 });
 
 export const reviewStatementSchema = z.object({
@@ -82,5 +85,16 @@ export type LineDecisionValues = z.output<typeof lineDecisionSchema>;
 export type AddLineValues = AddLinesValues["lines"][number];
 
 export const statementIdSchema = z.object({ id: objectId });
+
+/** A remembered party, edited on the bank statements page. Empty category or project clears it. */
+export const partyRuleSchema = z.object({
+  id: objectId,
+  party: z.string().trim().min(1, "Enter the name").max(200),
+  category: optionalText(80),
+  projectId: optionalObjectId,
+  stage: z.enum(valuesOf(PROJECT_STAGES)).optional(),
+});
+export const partyRuleIdSchema = z.object({ id: objectId });
+export type PartyRuleInput = z.input<typeof partyRuleSchema>;
 /** One stored statement line (a BankTransaction). */
 export const statementLineIdSchema = z.object({ id: objectId });

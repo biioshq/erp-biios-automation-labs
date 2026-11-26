@@ -19,6 +19,7 @@ import type { AddLinesInput } from "../schemas";
 import type { LineDecision, StoredLine, StoredLineReview } from "../types";
 import { addStatementBatch, reviewStoredLine, unmatchStatementLine } from "../actions";
 import { decisionProblem, toWire, wireDecision } from "../review-state";
+import { lineKindLabel } from "../kinds";
 import { ActionBadge } from "./line-badges";
 import { LineEditor } from "./line-editor";
 
@@ -101,7 +102,11 @@ export function StoredLinesTable({ lines, statement, focus }: { lines: StoredLin
                   <p className="line-clamp-2 text-sm [overflow-wrap:anywhere]" title={l.narration}>
                     {l.narration || "No narration"}
                   </p>
-                  {l.reference ? <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">Ref {l.reference}</p> : null}
+                  {l.reference || l.kind || l.row ? (
+                    <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                      {[l.kind ? lineKindLabel(l.kind) : null, l.row ? `Row ${l.row} of the file` : null, l.reference ? `Ref ${l.reference}` : null].filter(Boolean).join(" · ")}
+                    </p>
+                  ) : null}
                 </TableCell>
                 <TableCell className="text-right">{l.withdrawal ? <Money value={l.withdrawal} exact className="text-danger" /> : null}</TableCell>
                 <TableCell className="text-right">{l.deposit ? <Money value={l.deposit} exact className="text-success" /> : null}</TableCell>

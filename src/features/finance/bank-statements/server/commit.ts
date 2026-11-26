@@ -17,6 +17,10 @@ import type { AddLineValues, AddLinesValues } from "../schemas";
 import { lineHash } from "./hash";
 import { reopenableFilter } from "./claims";
 import { describeLinks, linkExists, type LinkRef } from "./links";
+import { learnFromLine } from "./rules";
+import { analyseNarration } from "../parse/narration";
+import { lineKindOf, type BankLineKind } from "../kinds";
+import { COMPANY } from "@/config/company";
 
 /**
  * Adds reviewed statement lines to the books, one line at a time so one bad line never stops the
@@ -42,10 +46,19 @@ type Prior = {
   unmatchedBy?: Types.ObjectId | null;
 };
 type Claim = { id: Types.ObjectId; fresh: true } | { id: Types.ObjectId; fresh: false; prior: Prior };
-type Ctx = { accountId: string; statementId: () => Promise<Types.ObjectId>; userId: string };
+type Ctx = { accountId: string; statementId: () => Promise<Types.ObjectId>; userId: string; salaries: boolean };
 
 const amountOf = (l: AddLineValues) => (l.withdrawal > 0 ? l.withdrawal : l.deposit);
 const isOut = (l: AddLineValues) => l.withdrawal > 0;
+
+/** The line's type, worked out here from its narration and action (never taken from the browser). */
+function kindOf(l: AddLineValues): BankLineKind {
+  const side = isOut(l) ? "dr" : "cr";
+  return lineKindOf(side, analyseNarration(l.narration, side, { exclude: [COMPANY.name] }).kind, l.decision.action, l.decision.matchKey);
+}
+
+/** Where the line sat in the uploaded file. A line reviewed again from its statement's page has no row (0). */
+const placeOf = (l: AddLineValues) => ({ ...(l.line > 0 ? { row: l.line } : {}), ...(l.page !== undefined && l.page >= 0 ? { page: l.page } : {}) });
 
 function statementNote(l: AddLineValues): string {
   return [`From the bank statement: ${l.narration}`, l.reference ? `Reference: ${l.reference}` : null].filter(Boolean).join("\n").slice(0, 4000);
@@ -120,6 +133,8 @@ async function claimLine(l: AddLineValues, hash: string, ctx: Ctx): Promise<Clai
     deposit: round2(l.deposit),
     balance: l.balance ?? undefined,
     action: l.decision.action,
+    kind: kindOf(l),
+    ...placeOf(l),
     createdBy: Types.ObjectId.isValid(ctx.userId) ? oid(ctx.userId) : undefined,
   };
   try {
@@ -480,7 +495,12 @@ async function addOne(l: AddLineValues, ctx: Ctx): Promise<{ result: Omit<AddLin
   try {
     const held = claim.fresh ? null : await recordHolding(claim.id);
     const link = held ?? (await createRecord(l, claim.id, ctx));
-    if (link) await BankTransaction.updateOne({ _id: claim.id }, { $set: { link: { kind: link.kind, id: oid(link.id) } } });
+    // A reopened line takes this add's type and row with its new link; a fresh claim has them already.
+    const reopenedFields = claim.fresh ? {} : { kind: kindOf(l), ...placeOf(l) };
+    if (link) await BankTransaction.updateOne({ _id: claim.id }, { $set: { link: { kind: link.kind, id: oid(link.id) }, ...reopenedFields } });
+    else if (!claim.fresh) await BankTransaction.updateOne({ _id: claim.id }, { $set: reopenedFields });
+    // Remembered for the next statement. Best effort, after the record is saved: it never fails the line.
+    if (!held && link) await learnFromLine(l, link, ctx.userId, ctx.salaries);
     // Bookkeeping of the counts only: the line is added either way.
     if (!claim.fresh) await moveCount(claim.prior).catch((e: unknown) => console.error("[bank-statements] could not move a count", e));
     const status = l.decision.action === "ignore" ? "ignored" : l.decision.action === "match" ? "matched" : "added";
@@ -496,7 +516,8 @@ async function addOne(l: AddLineValues, ctx: Ctx): Promise<{ result: Omit<AddLin
 }
 
 /** Adds a batch of reviewed lines for one account. Safe to repeat: lines already added are reported, not added again. */
-export async function addStatementLines(input: AddLinesValues, userId: string): Promise<AddBatchResult> {
+/** `options.salaries`: the person may see salaries, so a salary payee's remembered party may change. */
+export async function addStatementLines(input: AddLinesValues, userId: string, options: { salaries?: boolean } = {}): Promise<AddBatchResult> {
   await requireIndexes(BankTransaction);
   const account = await BankAccount.findById(input.accountId, { kind: 1, archivedAt: 1, name: 1 }).lean();
   if (!account) throw notFound("The bank account");
@@ -508,6 +529,7 @@ export async function addStatementLines(input: AddLinesValues, userId: string): 
   const ctx: Ctx = {
     accountId: input.accountId,
     userId,
+    salaries: options.salaries ?? false,
     statementId: async () => {
       if (!statementId) {
         const s = input.statement;
@@ -541,7 +563,7 @@ export async function addStatementLines(input: AddLinesValues, userId: string): 
     statementId: statementId ? String(statementId) : null,
     results: results.map(({ link, ...r }) => {
       const i = link ? info.get(`${link.kind}:${link.id}`) : undefined;
-      return { ...r, label: i?.label ?? null, href: i?.href ?? null };
+      return { ...r, label: i?.label ?? null, href: i?.href ?? null, recordKind: link?.kind ?? null, recordId: link?.id ?? null };
     }),
   };
 }

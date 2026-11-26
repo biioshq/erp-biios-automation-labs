@@ -141,7 +141,7 @@ export function decisionSummary(line: ReviewLine, d: LineDecision, pickers: Stat
 
 /** The CSV of lines that were not added, with the reason, to fix and upload again. */
 export function notAddedCsv(rows: { line: ReviewLine; reason: string }[]): string {
-  const out: (string | number | null)[][] = [["Row", "Date", "Narration", "Reference", "Withdrawal", "Deposit", "Balance", "Reason"]];
+  const out: (string | number | null)[][] = [["Row", "Date", "Narration", "Reference", "Withdrawal", "Deposit", "Balance", "Reason", "Vendor", "Category"]];
   for (const { line, reason } of rows) {
     out.push([
       line.line,
@@ -152,6 +152,8 @@ export function notAddedCsv(rows: { line: ReviewLine; reason: string }[]): strin
       line.deposit ? line.deposit.toFixed(2) : "",
       line.balance === null ? "" : line.balance.toFixed(2),
       reason,
+      line.vendor ?? "",
+      line.category ?? "",
     ]);
   }
   return toCsv(out);
@@ -171,6 +173,8 @@ export function toWire(l: StatementLine): StatementLine {
     balance: l.balance,
     check: l.check,
     issues: l.issues.slice(0, 10).map((i) => i.slice(0, 300)),
+    vendor: l.vendor?.slice(0, 200).trim() || undefined,
+    category: l.category?.slice(0, 80).trim() || undefined,
   };
 }
 

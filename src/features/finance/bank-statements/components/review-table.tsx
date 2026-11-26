@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import type { LineDecision, ReviewLine, StatementPickers } from "../types";
 import { actionsFor, decisionSummary } from "../review-state";
 import { CheckBadge } from "./line-badges";
+import { lineKindLabel, lineKindOf } from "../kinds";
 
 export type TableRowState = { index: number; line: ReviewLine; decision: LineDecision; problem: string | null; selected: boolean };
 
@@ -55,7 +56,7 @@ export function ReviewTable({
                 onCheckedChange={(v) => onToggleAll(selectable.map((r) => r.index), v === true)}
               />
             </TableHead>
-            <TableHead className="w-24">Date</TableHead>
+            <TableHead className="w-28">Date and type</TableHead>
             <TableHead>Narration</TableHead>
             <TableHead className="w-32 text-right">Withdrawal</TableHead>
             <TableHead className="w-32 text-right">Deposit</TableHead>
@@ -91,6 +92,7 @@ function Row({
   const { line, decision: d, problem, index } = row;
   const summary = line.imported ? null : decisionSummary(line, d, pickers);
   const warn = !line.imported && (line.attention || problem);
+  const kind = lineKindOf(line.withdrawal > 0 ? "dr" : "cr", line.narrationKind ?? null, line.imported ? line.imported.action : d.action, line.imported ? null : d.matchKey);
   return (
     <TableRow className={cn("align-top", line.imported && "text-muted-foreground", row.selected && "bg-brand/5")}>
       <TableCell className="pt-3">
@@ -101,13 +103,19 @@ function Row({
           onCheckedChange={(v) => onToggle(index, v === true)}
         />
       </TableCell>
-      <TableCell className="pt-3 whitespace-nowrap tabular-nums">{formatDateShort(line.date)}</TableCell>
+      <TableCell className="pt-3">
+        <span className="block whitespace-nowrap tabular-nums">{formatDateShort(line.date)}</span>
+        <span className="block text-xs text-muted-foreground">{lineKindLabel(kind)}</span>
+        <span className="block font-mono text-[11px] text-muted-foreground/80 tabular-nums">Row {line.line}</span>
+      </TableCell>
       <TableCell className="max-w-[340px] min-w-[220px]">
         <p className="line-clamp-2 text-sm [overflow-wrap:anywhere]" title={line.narration}>
           {line.narration || "No narration"}
         </p>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           {line.reference ? <span className="text-xs text-muted-foreground [overflow-wrap:anywhere]">Ref {line.reference}</span> : null}
+          {line.vendor ? <span className="text-xs text-muted-foreground [overflow-wrap:anywhere]">Vendor column: {line.vendor}</span> : null}
+          {line.category ? <span className="text-xs text-muted-foreground [overflow-wrap:anywhere]">Category column: {line.category}</span> : null}
           {line.check !== "ok" ? <CheckBadge check={line.check} /> : null}
           {warn ? (
             <span className="inline-flex items-center gap-1 text-xs text-warning">

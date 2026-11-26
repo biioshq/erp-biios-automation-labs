@@ -1,6 +1,6 @@
 import "server-only";
 
-import { BankAccount, EquityHolder, Expense, Income, Liability, Project } from "@/server/models";
+import { BankAccount, EquityHolder, Expense, Income, Invoice, Liability, Project } from "@/server/models";
 import { loadExpenseCategories } from "@/server/expense-categories";
 import { loadFinanceGroups } from "@/server/finance-groups";
 import { liabilityState } from "@/server/finance/summaries";
@@ -77,14 +77,70 @@ export async function loadVendorHistory(): Promise<Map<string, VendorHistory>> {
   return out;
 }
 
-/** Client names from income and projects. */
+/** Client names from income, invoices and projects. */
 export async function loadClientNames(): Promise<string[]> {
-  const [fromIncome, fromProjects] = await Promise.all([Income.distinct("client"), Project.distinct("client")]);
+  const [fromIncome, fromInvoices, fromProjects] = await Promise.all([Income.distinct("client"), Invoice.distinct("client"), Project.distinct("client")]);
   const seen = new Map<string, string>();
-  for (const n of [...fromIncome, ...fromProjects] as unknown[]) {
+  for (const n of [...fromIncome, ...fromInvoices, ...fromProjects] as unknown[]) {
     if (typeof n !== "string" || !n.trim()) continue;
     const k = n.trim().toLowerCase();
     if (!seen.has(k)) seen.set(k, n.trim());
   }
   return [...seen.values()];
+}
+
+/** Expenses older than this do not suggest a project for a vendor's new lines. */
+const PROJECT_HISTORY_DAYS = 180;
+
+export type ProjectRef = { id: string; code: string; name: string; status: string };
+
+export type VendorProjects = {
+  /** The vendor's expenses in the window, with or without a project. */
+  total: number;
+  projects: Map<string, { count: number; stages: Map<string, number> }>;
+};
+
+/** Projects, and which projects and stages each vendor's recent expenses went to, for suggesting a line's project. */
+export async function loadProjectHistory(): Promise<{ projects: ProjectRef[]; byVendor: Map<string, VendorProjects>; stageOf: Map<string, string> }> {
+  const [projects, rows] = await Promise.all([
+    Project.find({}, { code: 1, name: 1, status: 1 }).lean(),
+    Expense.aggregate<{ _id: { v: string | null; p: unknown; s: string | null }; n: number }>([
+      { $match: { date: { $gte: addDays(new Date(), -PROJECT_HISTORY_DAYS) }, source: { $in: ["manual", "recurring", "inventory_purchase"] } } },
+      { $group: { _id: { v: { $toLower: "$vendor" }, p: "$project", s: "$stage" }, n: { $sum: 1 } } },
+    ]),
+  ]);
+  const byVendor = new Map<string, VendorProjects>();
+  const stageCount = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const key = String(r._id.v ?? "")
+      .trim()
+      .replace(/\s+/g, " ");
+    if (!key) continue;
+    const v = byVendor.get(key) ?? { total: 0, projects: new Map() };
+    v.total += r.n;
+    if (r._id.p) {
+      const pid = String(r._id.p);
+      const p = v.projects.get(pid) ?? { count: 0, stages: new Map<string, number>() };
+      p.count += r.n;
+      if (r._id.s) {
+        p.stages.set(r._id.s, (p.stages.get(r._id.s) ?? 0) + r.n);
+        const sc = stageCount.get(pid) ?? new Map<string, number>();
+        sc.set(r._id.s, (sc.get(r._id.s) ?? 0) + r.n);
+        stageCount.set(pid, sc);
+      }
+      v.projects.set(pid, p);
+    }
+    byVendor.set(key, v);
+  }
+  // Each project's most used stage, for a project named in a narration.
+  const stageOf = new Map<string, string>();
+  for (const [pid, sc] of stageCount) {
+    const top = [...sc.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (top) stageOf.set(pid, top[0]);
+  }
+  return {
+    projects: projects.map((p) => ({ id: String(p._id), code: p.code, name: p.name, status: p.status })),
+    byVendor,
+    stageOf,
+  };
 }

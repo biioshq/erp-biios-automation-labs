@@ -29,7 +29,7 @@ import type { BankAccountOption, EmployeeOption, ProjectOption } from "@/server/
 import { createFixedAsset, discardUnsavedAssetFile, updateFixedAsset } from "../actions";
 import { labelsFor, type AssetKind } from "../labels";
 import { PAID_METHODS, assetFormSchema, type AssetFormInput, type AssetFormValues } from "../schemas";
-import type { AssetDetail } from "../types";
+import type { AssetDetail, LinkableExpense } from "../types";
 import { ExpensePicker, type PickedExpense } from "./expense-picker";
 
 export type AssetFormOptions = {
@@ -86,12 +86,28 @@ function defaultsFrom(kind: AssetKind, asset?: AssetDetail | null, group?: strin
   };
 }
 
+/** The defaults of a new asset funded by an expense: what picking the expense in the form sets. */
+function withExpense(values: AssetFormInput, e: LinkableExpense | null | undefined): AssetFormInput {
+  if (!e) return values;
+  return {
+    ...values,
+    name: values.name || (e.description ?? "").slice(0, 160),
+    // GST shown on the bill is usually claimed back, so it is not part of the asset's cost.
+    purchaseCost: round2(e.amount - (e.gst ?? 0)),
+    purchaseDate: toDateInput(e.date),
+    vendor: values.vendor || e.vendor,
+    invoiceNumber: values.invoiceNumber || (e.invoiceNumber ?? ""),
+    funding: { ...values.funding, mode: "expense", expenseId: e.id },
+  };
+}
+
 /** Create or edit a fixed or intangible asset: what it is, how it was paid, how it depreciates, where it is. */
 export function AssetForm({
   kind,
   asset,
   options,
   defaultGroup,
+  fromExpense = null,
   canDeleteBills = false,
   onDone,
   onCancel,
@@ -100,6 +116,8 @@ export function AssetForm({
   asset?: AssetDetail | null;
   options: AssetFormOptions;
   defaultGroup?: string;
+  /** A new asset funded by this expense (the link from a bank statement's results): filled in as picking it would. */
+  fromExpense?: LinkableExpense | null;
   /** People who may delete assets and expenses may delete the unpaid bill the asset created when it stops pointing at it. */
   canDeleteBills?: boolean;
   onDone: (id: string) => void;
@@ -107,14 +125,15 @@ export function AssetForm({
 }) {
   const labels = labelsFor(kind);
   const [pending, startTransition] = useTransition();
-  const [picked, setPicked] = useState<PickedExpense | null>(asset?.funding.expense ?? null);
+  const prefill = asset ? null : fromExpense;
+  const [picked, setPicked] = useState<PickedExpense | null>(asset?.funding.expense ?? prefill ?? null);
   const [files, setFiles] = useState<FileDTO[]>([]);
   // Subgroups added from this form show at once; the page refresh then brings their real place and name.
   const [added, setAdded] = useState<GroupOption[]>([]);
   const groups = useMemo(() => [...options.groups, ...added.filter((a) => !options.groups.some((g) => g.key === a.key))], [options.groups, added]);
   const form = useForm<AssetFormInput, unknown, AssetFormValues>({
     resolver: zodResolver(assetFormSchema),
-    defaultValues: defaultsFrom(kind, asset, defaultGroup),
+    defaultValues: withExpense(defaultsFrom(kind, asset, defaultGroup), prefill),
     ...formValidation,
   });
   const { control, setValue, getValues, setError, register } = form;

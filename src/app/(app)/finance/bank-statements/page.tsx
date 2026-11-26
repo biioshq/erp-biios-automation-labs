@@ -8,7 +8,8 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { NoAccess } from "@/components/shared/no-access";
 import { can, requireUser } from "@/server/auth/session";
 import { getBankAccountOptions } from "@/server/lookups";
-import { listStatements, statementOfLine } from "@/features/finance/bank-statements/queries";
+import { getStatementPickers, listPartyRules, listStatements, statementOfLine } from "@/features/finance/bank-statements/queries";
+import { PartyRules } from "@/features/finance/bank-statements/components/party-rules";
 import { StatementImport } from "@/features/finance/bank-statements/components/statement-import";
 import { AccountFilter, PastStatements } from "@/features/finance/bank-statements/components/past-statements";
 
@@ -31,7 +32,7 @@ export default async function BankStatementsPage({ searchParams }: { searchParam
   const account = typeof params.account === "string" ? params.account : null;
   const accounts = await getBankAccountOptions();
   const current = account && accounts.some((a) => a.value === account) ? account : null;
-  const statements = await listStatements(current);
+  const [statements, rules, pickers] = await Promise.all([listStatements(current), listPartyRules(can(user, "data.salaries")), getStatementPickers()]);
 
   return (
     <Page>
@@ -87,6 +88,12 @@ export default async function BankStatementsPage({ searchParams }: { searchParam
       ) : null}
       <Section title="Past statements" description="Open one to see each line and the record it became." actions={<AccountFilter accounts={accounts} current={current} />}>
         <PastStatements rows={statements} />
+      </Section>
+      <Section
+        title="Remembered parties"
+        description="Names from your statements and what their lines became. The review suggests the same vendor or client, category and project next time, and says so in its notes."
+      >
+        <PartyRules rows={rules} options={{ categories: pickers.categories, projects: pickers.projects }} canEdit={can(user, "finance.bank_statements:edit")} />
       </Section>
     </Page>
   );

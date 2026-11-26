@@ -55,6 +55,7 @@ export { ExpenseDraft, type ExpenseDraftDoc, EXPENSE_DRAFT_STATUSES, type Expens
 export { BankAccount, type BankAccountDoc } from "./bank-account";
 export { AccountTransfer, type AccountTransferDoc } from "./account-transfer";
 export { BankStatement, type BankStatementDoc, BankTransaction, type BankTransactionDoc } from "./bank-statement";
+export { BankPartyRule, type BankPartyRuleDoc } from "./bank-party-rule";
 export { FinanceGroup, type FinanceGroupDoc } from "./finance-group";
 export { FixedAsset, type FixedAssetDoc } from "./fixed-asset";
 export { Investment, type InvestmentDoc } from "./investment";

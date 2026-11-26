@@ -2,10 +2,12 @@ import "server-only";
 
 import { Types } from "mongoose";
 import { connectDB } from "@/server/db";
-import { BankAccount, BankStatement, BankTransaction, User } from "@/server/models";
+import { BankAccount, BankPartyRule, BankStatement, BankTransaction, Project, User } from "@/server/models";
+import { loadExpenseCategories } from "@/server/expense-categories";
 import { toDateInput } from "@/lib/dates";
-import type { BankLineAction } from "@/lib/constants";
-import type { StatementPickers, StatementRow, StoredLine, StoredLineState } from "./types";
+import { INCOME_CATEGORIES, type BankLineAction, type ProjectStage } from "@/lib/constants";
+import type { PartyRuleRow, StatementPickers, StatementRow, StoredLine, StoredLineState } from "./types";
+import type { BankLineKind } from "./kinds";
 import { describeLinks } from "./server/links";
 import { isReopenable } from "./server/claims";
 import { loadPickers } from "./server/context";
@@ -15,6 +17,37 @@ import { loadPickers } from "./server/context";
 export async function getStatementPickers(): Promise<StatementPickers> {
   await connectDB();
   return loadPickers();
+}
+
+/**
+ * Remembered parties, most recently used first. Without the salaries permission, parties
+ * remembered as salary payments are left out: their names are the people paid.
+ */
+export async function listPartyRules(includeSalaries: boolean, limit = 500): Promise<PartyRuleRow[]> {
+  await connectDB();
+  const docs = await BankPartyRule.find(includeSalaries ? {} : { category: { $ne: "salaries" } })
+    .sort({ lastUsedAt: -1, _id: -1 })
+    .limit(limit)
+    .lean();
+  const projectIds = [...new Set(docs.flatMap((d) => (d.project ? [String(d.project)] : [])))].map((id) => new Types.ObjectId(id));
+  const [projects, categories] = await Promise.all([projectIds.length ? Project.find({ _id: { $in: projectIds } }, { name: 1 }).lean() : [], loadExpenseCategories()]);
+  const projectName = new Map(projects.map((p) => [String(p._id), p.name]));
+  const label = (side: string, v: string | null | undefined) =>
+    !v ? null : side === "in" ? (INCOME_CATEGORIES.find((c) => c.value === v)?.label ?? v) : (categories.find((c) => c.value === v)?.label ?? v);
+  return docs.map((d) => ({
+    id: String(d._id),
+    side: d.side as "in" | "out",
+    key: d.key,
+    token: d.token ?? null,
+    party: d.party,
+    category: d.category ?? null,
+    categoryLabel: label(d.side, d.category),
+    projectId: d.project ? String(d.project) : null,
+    projectName: d.project ? (projectName.get(String(d.project)) ?? "Deleted project") : null,
+    stage: (d.stage as ProjectStage | undefined) ?? null,
+    hits: d.hits ?? 0,
+    lastUsedAt: d.lastUsedAt ? d.lastUsedAt.toISOString() : null,
+  }));
 }
 
 /** Past uploads, newest first, optionally for one account. */
@@ -88,6 +121,8 @@ export async function getStatementLines(id: string): Promise<{ statement: Statem
         href: i?.href ?? null,
         unmatchedAt: !t.link && t.unmatchedAt ? t.unmatchedAt.toISOString() : null,
         unmatchedBy: !t.link && t.unmatchedBy ? (unmatcherName.get(String(t.unmatchedBy)) ?? null) : null,
+        kind: (t.kind as BankLineKind | undefined) ?? null,
+        row: typeof t.row === "number" ? t.row : null,
       };
     }),
   };

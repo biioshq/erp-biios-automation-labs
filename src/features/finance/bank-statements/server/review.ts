@@ -226,11 +226,16 @@ function toOption(c: Candidate, score: number): MatchOption {
  * known about the line's party: the file's vendor column and the remembered party it stands for
  * (a payee once matched to vendor X's bill names X from then on).
  */
-function namedIn(line: StatementLine, c: Candidate, alias = ""): { sim: number; refHit: boolean } {
+function namedIn(line: StatementLine, c: Candidate, alias = ""): { sim: number; whole: boolean; refHit: boolean } {
   const text = `${line.narration} ${line.reference ?? ""}`;
   const hay = alnum(text);
   const named = alias ? `${text} ${alias}` : text;
-  return { sim: c.party ? nameSimilarity(c.party, named) : 0, refHit: c.refs.some((r) => alnum(r).length >= 4 && hay.includes(alnum(r))) };
+  return {
+    sim: c.party ? nameSimilarity(c.party, named) : 0,
+    // Every distinctive word of the vendor: one shared word ("Web", "Amazon") is not enough to pay a bill.
+    whole: c.party ? containsName(c.party, named) : false,
+    refHit: c.refs.some((r) => alnum(r).length >= 4 && hay.includes(alnum(r))),
+  };
 }
 
 /** How well a record fits a line, or null when it cannot be the same payment. */
@@ -240,18 +245,19 @@ function pairScore(line: StatementLine, c: Candidate, alias = ""): number | null
   const part = c.kind === "bill" && amountOf(line) < c.amount - 0.005;
   if (!part && Math.abs(c.amount - amountOf(line)) >= 0.005) return null;
   const days = dayNumber(line.date) - dayNumber(c.date);
-  const { sim, refHit } = namedIn(line, c, alias);
+  const { sim, whole, refHit } = namedIn(line, c, alias);
   if (c.kind === "bill") {
     // A bill is paid on or after its date; long after only when the narration names the vendor.
     if (days < -MATCH_DAYS) return null;
-    if (part) return sim >= 0.5 || refHit ? 20 + sim * 40 + (refHit ? 30 : 0) - Math.min(Math.abs(days), 30) : null;
-    if (sim < 0.5 && !refHit && days > 30) return null;
+    // Part of a bill only when the line names the whole vendor or the bill's number.
+    if (part) return whole || refHit ? 20 + sim * 40 + (refHit ? 30 : 0) - Math.min(Math.abs(days), 30) : null;
+    if (!whole && !refHit && days > 30) return null;
     return 40 + sim * 40 + (refHit ? 30 : 0) - Math.min(Math.abs(days), 30);
   }
   if (Math.abs(days) > MATCH_DAYS) {
     // A payment ticked by hand on another day: the same amount, and the narration (or the remembered party) names the vendor.
     // Kept below any named bill (at least 30), so this month's outstanding bill wins over last month's hand payment.
-    if (c.kind !== "expensePayment" || Math.abs(days) > HAND_PAYMENT_DAYS || sim < 0.5) return null;
+    if (c.kind !== "expensePayment" || Math.abs(days) > HAND_PAYMENT_DAYS || !whole) return null;
     return 10 + sim * 15 - Math.abs(days) / 3 - (c.otherAccount ? 5 : 0);
   }
   return 100 - Math.abs(days) * 15 + sim * 30 + (refHit ? 40 : 0) - (c.otherAccount ? 25 : 0);
@@ -502,7 +508,7 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
       (p) =>
         Math.abs(p.amount - line.withdrawal) < 0.005 &&
         Math.abs(dayNumber(p.date) - dayNumber(line.date)) <= HAND_PAYMENT_DAYS &&
-        (nameSimilarity(p.party, party ?? "") >= 0.5 || nameSimilarity(p.party, line.narration) >= 0.5),
+        containsName(p.party, `${party ?? ""} ${line.narration}`),
     );
     if (recordedElsewhere) {
       // First, so it is the note the review table shows on the line.
@@ -747,12 +753,12 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
   const unnamedBill = (i: number, c: Candidate) => {
     if (c.kind !== "bill") return false;
     const n = namedIn(lines[i]!, c, aliasOf(i));
-    return n.sim < 0.5 && !n.refHit;
+    return !n.whole && !n.refHit;
   };
   /** The vendor was not in the narration itself, only in the file's vendor column or the remembered party. */
   const namedByAliasOnly = (i: number, c: Candidate) => {
     const plain = namedIn(lines[i]!, c);
-    return plain.sim < 0.5 && !plain.refHit;
+    return !plain.whole && !plain.refHit;
   };
   for (const p of pairs) {
     if (chosen.has(p.i) || used.has(p.c.key) || unnamedBill(p.i, p.c)) continue;

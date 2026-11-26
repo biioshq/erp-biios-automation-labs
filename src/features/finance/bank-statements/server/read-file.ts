@@ -146,8 +146,11 @@ export function formatOf(name: string): StatementFormat | null {
 
 const OLE_SIGNATURE = [0xd0, 0xcf, 0x11, 0xe0];
 
-/** Reads the file and finds its columns. Throws StatementReadError with a message for the admin. */
-export async function readStatementFile(bytes: Buffer, fileName: string): Promise<ReadStatementResult> {
+/**
+ * Reads the file and finds its columns. Throws StatementReadError with a message for the admin
+ * (PdfPasswordError for a locked PDF). `options.password` opens a locked PDF and is used for nothing else.
+ */
+export async function readStatementFile(bytes: Buffer, fileName: string, options?: { password?: string }): Promise<ReadStatementResult> {
   const format = formatOf(fileName);
   if (!format) throw new StatementReadError("Upload the statement as CSV, Excel (.xlsx or .xls) or PDF.");
   const notes: string[] = [];
@@ -157,7 +160,7 @@ export async function readStatementFile(bytes: Buffer, fileName: string): Promis
 
   if (format === "pdf") {
     if (bytes.subarray(0, 5).toString("latin1") !== "%PDF-") throw new StatementReadError("This file is not a PDF. Check that you picked the right file.");
-    ({ grid, headerIndex } = await readPdfStatement(bytes));
+    ({ grid, headerIndex } = await readPdfStatement(bytes, options?.password));
     if (headerIndex < 0) {
       throw new StatementReadError(
         "The table of transactions was not found in this PDF (no row with a date, narration and amount columns). Download the statement as CSV or Excel and upload that.",

@@ -540,6 +540,10 @@ function placeText(w: Word, L: Layout, minCol: number): Piece[] {
       if (cut) return [{ w: cut[0], col: k }, ...placeText(cut[1], L, k + 1)];
       break;
     }
+    // Narration text that starts where the narrations start stays in the narration, however far it runs.
+    const own = Math.max(minCol, colAt(L.bounds, w.x1 + 0.01));
+    const start = L.starts[own];
+    if (L.roles[own] === "narration" && start !== null && start !== undefined && Math.abs(w.x1 - start) <= tol && !AMOUNT_ONLY.test(w.text)) return [{ w, col: own }];
   }
   return [{ w, col: Math.max(minCol, colAt(L.bounds, (w.x1 + w.x2) / 2)) }];
 }
@@ -570,6 +574,10 @@ function wrapsLikeNarration(pieces: Piece[], L: Layout): boolean {
     if (!WRAPS_INTO(L.roles[col] ?? null)) return false;
     if (!L.fromBody) return true;
     const tol = Math.max(1, w.size * 0.5);
+    // A wrapped narration line with one long word ("POWER-tata@oksbi-...-PAYMENT") may run on under
+    // the amounts' names: it starts where the narrations start. A footer starts at the margin.
+    const start = L.starts[col];
+    if (L.roles[col] === "narration" && start !== null && start !== undefined && Math.abs(w.x1 - start) <= tol) return true;
     for (let c = 0; c < L.header.length; c++) {
       const lo = c === 0 ? -Infinity : L.bounds[c - 1]!;
       const hi = c === L.header.length - 1 ? Infinity : L.bounds[c]!;

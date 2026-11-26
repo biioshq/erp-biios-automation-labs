@@ -203,8 +203,8 @@ export async function listExpenses(
     // Totals leave out stock counted at purchase, whatever the filter: the purchase itself is
     // already in them. Project spend and the project's expenses tab count it.
     // Paid and outstanding use the expressions the status filters use (payment-status.ts), so the
-    // header agrees with every row's status. Paid is capped at the amount, so paid + outstanding = total.
-    Expense.aggregate<{ total: number; tax: number; paid: number; outstanding: number; outstandingCount: number }>([
+    // header agrees with every row's status. Paid is capped at the amount, so paid + from stock + outstanding = total.
+    Expense.aggregate<{ total: number; tax: number; paid: number; fromStock: number; outstanding: number; outstandingCount: number }>([
       { $match: { $and: [filter, COMPANY_EXPENSES] } },
       { $addFields: { _outstanding: OUTSTANDING_EXPR } },
       {
@@ -212,7 +212,9 @@ export async function listExpenses(
           _id: null,
           total: { $sum: "$amount" },
           tax: { $sum: { $add: [{ $ifNull: ["$gst.cgst", 0] }, { $ifNull: ["$gst.sgst", 0] }, { $ifNull: ["$gst.igst", 0] }, { $ifNull: ["$gst.cess", 0] }] } },
-          paid: { $sum: { $min: ["$amount", PAID_EXPR] } },
+          // Stock used from inventory moves no money: it is shown apart from what was paid.
+          paid: { $sum: { $cond: [{ $eq: ["$paymentMethod", "stock"] }, 0, { $min: ["$amount", PAID_EXPR] }] } },
+          fromStock: { $sum: { $cond: [{ $eq: ["$paymentMethod", "stock"] }, { $min: ["$amount", PAID_EXPR] }, 0] } },
           outstanding: { $sum: "$_outstanding" },
           outstandingCount: { $sum: { $cond: [{ $gt: ["$_outstanding", HALF_PAISA] }, 1, 0] } },
         },
@@ -231,6 +233,7 @@ export async function listExpenses(
       total: round2(summary[0]?.total ?? 0),
       tax: round2(summary[0]?.tax ?? 0),
       paid: round2(summary[0]?.paid ?? 0),
+      fromStock: round2(summary[0]?.fromStock ?? 0),
       outstanding: round2(summary[0]?.outstanding ?? 0),
       outstandingCount: summary[0]?.outstandingCount ?? 0,
     },

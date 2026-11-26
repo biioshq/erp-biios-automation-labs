@@ -128,8 +128,10 @@ export type ExpenseSummary = {
   count: number;
   total: number;
   tax: number;
-  /** Of `total`, what is paid and what is still owed (paid + outstanding = total), same rows. */
+  /** Of `total`, what is paid, what came from stock and what is still owed (paid + fromStock + outstanding = total), same rows. */
   paid?: number;
+  /** Stock used from inventory (no money moved). */
+  fromStock?: number;
   outstanding?: number;
   /** Rows with something still owed. */
   outstandingCount?: number;

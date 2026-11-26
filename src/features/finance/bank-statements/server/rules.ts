@@ -4,6 +4,7 @@ import { Types } from "mongoose";
 import { BankPartyRule, Expense, Income } from "@/server/models";
 import { isDuplicateKeyError } from "@/server/errors";
 import { requireIndexes } from "@/server/new-indexes";
+import { hideEarlierAsSalary } from "@/server/audit";
 import { COMPANY } from "@/config/company";
 import type { ProjectStage } from "@/lib/constants";
 import type { StatementLine } from "../types";
@@ -194,6 +195,11 @@ export async function learnFromLine(l: AddLineValues, link: LinkRef | null, user
       // Two adds learned the same new name at the same moment: the other one made the rule, so update it.
       if (!isDuplicateKeyError(error)) throw error;
       await BankPartyRule.updateOne(filter, changes);
+    }
+    // A party that becomes a salary payee: its earlier audit entries are hidden from roles without salaries too.
+    if (lesson.category === "salaries") {
+      const rule = await BankPartyRule.findOne({ side, key: k.key }, { _id: 1 }).lean();
+      if (rule) await hideEarlierAsSalary("bank_party_rule", rule._id);
     }
   } catch (error) {
     console.error("[bank-statements] could not remember the party of a line", error);

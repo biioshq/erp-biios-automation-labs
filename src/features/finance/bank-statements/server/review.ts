@@ -6,6 +6,7 @@ import { notFound } from "@/server/errors";
 import { loadAccountBook, type AccountBook } from "@/server/accounts";
 import { COMPANY } from "@/config/company";
 import { maybeUnpaidFilter, paymentState } from "@/lib/payments";
+import { OUTSTANDING_EXPR } from "@/features/finance/expenses/payment-status";
 import { addDays, fromDateInput, toDateInput } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
 import { invoiceBalances } from "@/server/finance/summaries";
@@ -67,7 +68,10 @@ function placement(book: AccountBook, target: string, method: string | null | un
   return { ok: true, other: book.byCode.get(code)?.name ?? "another account" };
 }
 
-async function loadCandidates(accountId: string, book: AccountBook, from: Date, to: Date): Promise<Candidate[]> {
+/** A payment recorded by hand on another of the company's bank accounts: a line may be that payment. */
+type ElsewherePayment = { label: string; party: string; amount: number; date: string; account: string };
+
+async function loadCandidates(accountId: string, book: AccountBook, from: Date, to: Date, elsewhere: ElsewherePayment[] = []): Promise<Candidate[]> {
   const target = `cash:${accountId}`;
   const range = { $gte: from, $lte: to };
   // `from` and `to` already reach MATCH_DAYS past the lines; payments recorded by hand reach HAND_PAYMENT_DAYS.
@@ -88,7 +92,14 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
       { number: 1, vendor: 1, amount: 1, date: 1, paymentMethod: 1, account: 1, payments: 1, bankTransaction: 1, gst: 1 },
     ).lean(),
     Expense.find(
-      { ...maybeUnpaidFilter(), countedAtPurchase: { $ne: true }, source: { $nin: ["inventory_assignment", "inventory_wastage"] }, date: { $lte: to } },
+      {
+        ...maybeUnpaidFilter(),
+        countedAtPurchase: { $ne: true },
+        source: { $nin: ["inventory_assignment", "inventory_wastage"] },
+        date: { $lte: to },
+        // Only bills still owing money, before the limit: paid ones with a payments list would crowd them out.
+        $expr: { $gt: [OUTSTANDING_EXPR, 0.005] },
+      },
       { number: 1, vendor: 1, amount: 1, date: 1, dueDate: 1, paymentMethod: 1, account: 1, payments: 1, gst: 1 },
     )
       .sort({ date: -1 })
@@ -116,7 +127,15 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
     for (const pay of e.payments) {
       if (pay.bankTransaction || pay.date < payFrom || pay.date > payTo) continue;
       const p = placement(book, target, pay.paymentMethod, pay.account);
-      if (!p.ok) continue;
+      if (!p.ok) {
+        // Booked to another bank account (Mark as paid starts with the default one). Matching would leave
+        // the money on that account, so it is not offered; the line is flagged instead (see suggest).
+        const code = pay.account ? book.resolve(pay.paymentMethod ?? "bank_transfer", pay.account) : null;
+        if (code?.startsWith("cash:") && code !== target) {
+          elsewhere.push({ label: `${e.number} · ${e.vendor}`, party: e.vendor, amount: pay.amount, date: toDateInput(pay.date), account: book.byCode.get(code)?.name ?? "another account" });
+        }
+        continue;
+      }
       add({
         key: `expensePayment:${pay._id}`,
         kind: "expensePayment",
@@ -258,6 +277,8 @@ type Context = {
   projectStage: Map<string, string>;
   /** Customer invoices with money still owed on them. */
   invoices: { id: string; number: string; client: string; project: string | null; total: number; outstanding: number }[];
+  /** Hand payments on the company's other bank accounts, filled with the match candidates. */
+  elsewhere: ElsewherePayment[];
 };
 
 const allowedCategory = (ctx: Context, value: string | null | undefined) =>
@@ -477,6 +498,19 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
     if (category === "equipment" || ASSET_RE.test(line.narration)) {
       notes.push("Could be a fixed asset. Once it is added, you can put it on the asset register from the results.");
     }
+    const recordedElsewhere = ctx.elsewhere.find(
+      (p) =>
+        Math.abs(p.amount - line.withdrawal) < 0.005 &&
+        Math.abs(dayNumber(p.date) - dayNumber(line.date)) <= HAND_PAYMENT_DAYS &&
+        (nameSimilarity(p.party, party ?? "") >= 0.5 || nameSimilarity(p.party, line.narration) >= 0.5),
+    );
+    if (recordedElsewhere) {
+      // First, so it is the note the review table shows on the line.
+      notes.unshift(
+        `Maybe already recorded: ${recordedElsewhere.label} was marked paid from ${recordedElsewhere.account} on ${formatDate(fromDateInput(recordedElsewhere.date))}. If this line is that payment, change that payment's account to this one and review the statement again, instead of adding a new expense.`,
+      );
+      attention = true;
+    }
     return {
       decision: decide("expense", { party: party ?? cleanNarration(line.narration), category, holderId: owner?.id, projectId: project?.projectId, stage: project?.stage }),
       notes,
@@ -583,6 +617,7 @@ async function loadContext(accountId: string): Promise<{ ctx: Context; book: Acc
       invoices: receivables
         .filter((r) => r.outstanding > 0)
         .map((r) => ({ id: r.id, number: r.number, client: r.client, project: r.project, total: r.total, outstanding: r.outstanding })),
+      elsewhere: [],
     },
   };
 }
@@ -674,7 +709,7 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
   const dates = fresh.map((i) => lines[i]!.date).sort();
   let candidates: Candidate[] = [];
   if (dates.length) {
-    candidates = await loadCandidates(accountId, book, addDays(fromDateInput(dates[0]!), -MATCH_DAYS), new Date(addDays(fromDateInput(dates[dates.length - 1]!), MATCH_DAYS + 1).getTime() - 1));
+    candidates = await loadCandidates(accountId, book, addDays(fromDateInput(dates[0]!), -MATCH_DAYS), new Date(addDays(fromDateInput(dates[dates.length - 1]!), MATCH_DAYS + 1).getTime() - 1), ctx.elsewhere);
     // Records already tied to one of this account's lines.
     const linked = await BankTransaction.find(
       { account: new Types.ObjectId(accountId), "link.id": { $in: candidates.map((c) => new Types.ObjectId(c.id)) } },

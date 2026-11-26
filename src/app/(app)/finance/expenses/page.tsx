@@ -79,7 +79,13 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/finance
           value={<Money value={s.total} />}
           hint="Paid and outstanding together, each counted once"
         />
-        <StatCard label="Paid" icon={CircleCheckBig} tone="success" value={<Money value={s.paid ?? 0} />} hint="Paid in full or in part so far" />
+        <StatCard
+          label="Paid"
+          icon={CircleCheckBig}
+          tone="success"
+          value={<Money value={s.paid ?? 0} />}
+          hint={(s.fromStock ?? 0) > 0 ? <>Paid in full or in part so far, plus <Money value={s.fromStock ?? 0} /> used from stock</> : "Paid in full or in part so far"}
+        />
         <StatCard
           label="Outstanding"
           icon={HandCoins}

@@ -25,6 +25,15 @@ export const FINANCE_OPS_RESOURCES: PermissionResource[] = [
     memberDefault: ["view"],
   },
   {
+    key: "finance.daily",
+    module: "finance",
+    group: "Overview",
+    label: "Daily overview",
+    description: "Income, expenses, payments and what is owed for one day or a range of days. Cash flow on it also needs Company financial position; salary rows follow Individual salaries.",
+    actions: ["view"],
+    memberDefault: ["view"],
+  },
+  {
     key: "finance.income",
     module: "finance",
     group: "Income",

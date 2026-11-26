@@ -116,6 +116,7 @@ export const MODULES: NavModule[] = [
     href: "/finance",
     items: [
       { title: "Dashboard", href: "/finance", permission: "finance.dashboard:view", icon: LayoutDashboard, exact: true, keywords: ["overview", "profit", "cash position"] },
+      { title: "Daily overview", href: "/finance/daily", permission: "finance.daily:view", icon: CalendarDays, keywords: ["daily", "today", "day book", "cash flow", "income received", "payments made", "outstanding"] },
       {
         title: "Income",
         href: "/finance/income",

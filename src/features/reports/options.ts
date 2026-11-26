@@ -11,7 +11,7 @@ import type { ReportMeta } from "./meta";
 /** Option lists for the filters a report shows; the others stay empty so nothing extra is fetched. */
 export async function getFilterOptions(meta: ReportMeta | undefined, wantVendors = true): Promise<ReportFilterOptions> {
   const type = meta?.type;
-  const needsVendors = wantVendors && (type === "expense" || type === "gst" || type === "ca" || type === "inventory");
+  const needsVendors = wantVendors && (type === "expense" || type === "gst" || type === "ca" || type === "inventory" || type === "daily");
   const [projects, vendors, inventoryCategories, expenseCategories] = await Promise.all([
     getProjectOptions(),
     needsVendors ? getVendorNames() : Promise.resolve([] as string[]),

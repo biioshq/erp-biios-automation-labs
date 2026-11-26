@@ -3,6 +3,7 @@ import {
   Armchair,
   Banknote,
   Boxes,
+  CalendarDays,
   Calculator,
   ChartLine,
   ChartPie,
@@ -46,6 +47,7 @@ const ICONS: Record<ReportType, LucideIcon> = {
   equity: Vault,
   project_financials: ChartPie,
   cash_budget: Wallet,
+  daily: CalendarDays,
   // Scenario exports are logged in the export history; they are not a card in the picker.
   scenario: FlaskConical,
 };

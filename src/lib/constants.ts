@@ -186,6 +186,7 @@ export const REPORT_TYPES = options([
   { value: "equity", label: "Capital and equity report" },
   { value: "project_financials", label: "Project financials report" },
   { value: "cash_budget", label: "Cash flow and budget report" },
+  { value: "daily", label: "Daily overview report" },
   { value: "scenario", label: "What-if scenario" },
 ] as const);
 export type ReportType = (typeof REPORT_TYPES)[number]["value"];

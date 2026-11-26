@@ -31,13 +31,48 @@ function columnsOf(mapping: (ColumnRole | null)[]): Columns {
 
 const cell = (cells: string[], i: number | undefined) => (i === undefined ? "" : (cells[i] ?? "").replace(/\s+/g, " ").trim());
 
-const OPENING_RE = /opening balance|balance b\/?f|brought forward|balance forward|^b\/f$/i;
+const OPENING_RE = /opening balance|balance b\/?f|brought forward|balance forward|^b\/f$|\bbalance as (on|at|of)\b/i;
 const CLOSING_RE = /closing balance|balance c\/?f|carried forward/i;
+
+/** Lowercase words of a cell, as headerKey makes them ("Balance B/F" is "balance b f"). */
+const words = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+/**
+ * A whole cell that only labels a summary row: "Total", "Total Debits", "Grand Total", "TRANSACTION
+ * TOTAL", "Closing Balance", "Opening Balance", "Balance as on 01-Nov-26", "B/F", "C/F". The label has
+ * to be the whole cell, so a real narration such as "TOTAL MALL" or "TOTALENERGIES" stays a line.
+ */
+const SUMMARY_LABEL =
+  /^((grand|sub|page|transaction|txn|statement|day|net) )?(sub ?)?totals?( (of|for|debits?|credits?|withdrawals?|deposits?|dr|cr|amounts?|transactions?|count|and|in|out|inr|rs))*$|^(opening|closing|op|cl) bal(ance)?( (inr|rs))?( as (on|at|of)( .*)?)?$|^balance as (on|at|of)( .*)?$|^(bal(ance)? )?(b f|c f|brought forward|carried forward)$|^bal(ance)? forward$/;
+const OPENING_LABEL = /^(opening|op) bal|^balance as (on|at|of)|b f$|brought forward$|^balance forward$/;
+/** Text that only appears after the table or in a page footer: it never continues a narration. */
+const TRAILER_RE =
+  /end of (the )?statement|computer generated|system generated|does not require (a |any )?signature|registered office|regd\.? office|^page( no\.?)? ?:? ?\d+( of \d+)?$|^legends?( used\b|\s*:|$)|please (examine|check|note)|statement summary/i;
+
+const isSummaryLabel = (s: string) => {
+  const k = words(s);
+  return k !== "" && SUMMARY_LABEL.test(k);
+};
 
 /** A line read from a row, before the balance check. `side` is null when only the balance can tell. */
 type Draft = Omit<StatementLine, "withdrawal" | "deposit" | "check"> & { amount: number; side: "dr" | "cr" | null; fromSign: boolean };
 
-type RowResult = { draft: Draft } | { continuation: string } | { opening: number } | { skip: string } | null;
+/**
+ * `continuation`: wrapped text of the line above, its narration part and its reference part.
+ * `summary`: a total, opening or closing row; never a line and never reported as one not read.
+ * `labelled`: a dated row labelled like a total that reads as a line; see buildStatement.
+ */
+type RowResult =
+  | { draft: Draft }
+  | { continuation: { narration: string; reference: string } }
+  | { opening: number }
+  | { summary: true }
+  | { labelled: Draft }
+  | { skip: string }
+  | null;
 
 function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
   const cells = row.cells;
@@ -54,21 +89,48 @@ function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
 
   if (!date) {
     const text = [narration, reference].filter(Boolean).join(" ");
-    if (OPENING_RE.test(cells.join(" ")) && cols.balance !== undefined) {
+    const joined = cells
+      .map((c) => c.trim())
+      .filter(Boolean)
+      .join(" ");
+    const closing = CLOSING_RE.test(joined);
+    if (OPENING_RE.test(joined) && !closing && cols.balance !== undefined) {
       const b = readBalance(cell(cells, cols.balance), cell(cells, cols.balanceSide));
       if (typeof b === "number") return { opening: b };
     }
-    // A narration that wrapped onto the next row of the file: no date and no amounts.
-    if (text && !anyAmount && !dateRaw && prevExists && row.near !== false) return { continuation: text };
-    // Summary rows under the table ("Opening Balance, Dr Count..." then the figures) are not lines.
-    const summary = CLOSING_RE.test(cells.join(" ")) || (dateRaw !== "" && readAmount(dateRaw) !== "invalid");
-    if (anyAmount && !summary && (dateRaw || narration)) {
+    const labelled = cells.some(isSummaryLabel);
+    // A narration that wrapped onto the next row of the file: no date, nothing in the amount,
+    // balance or Dr / Cr columns, right under a line or its wrapped text (`prevExists`), and not a
+    // footer ("End of Statement", "Page 2 of 3", a registered office line).
+    const onlyText = [cols.date, cols.valueDate, cols.withdrawal, cols.deposit, cols.amount, cols.drcr, cols.balance, cols.balanceSide].every((i) => cell(cells, i) === "");
+    if (text && onlyText && !anyAmount && !dateRaw && !labelled && prevExists && row.near !== false && !TRAILER_RE.test(text)) {
+      // A reference that wrapped in its own column goes on the reference, not the narration.
+      return { continuation: cols.narration === undefined ? { narration: text, reference: "" } : { narration, reference } };
+    }
+    // Total, opening and closing rows, and the figures under a summary header ("Opening Balance, Dr
+    // Count..." then the numbers), are not lines and not rows that failed to read.
+    if (labelled || closing || (anyAmount && OPENING_RE.test(joined)) || (dateRaw !== "" && readAmount(dateRaw) !== "invalid")) return { summary: true };
+    if (anyAmount && (dateRaw || narration)) {
       return { skip: dateRaw ? `The date "${dateRaw}" could not be read` : "No date on this row" };
     }
     return null;
   }
 
-  if (OPENING_RE.test(narration) && cols.balance !== undefined) {
+  // A dated summary row ("31/05/25, Total Debits, 72,80,507.58") is not a line. The opening one
+  // gives the balance the first line starts from. A row with one amount and a balance may still be a
+  // real line whose narration is only that word ("04-11-2026, TOTAL, 779, 100.00 Dr, 51,900.00"):
+  // buildStatement keeps it when its balance moved by an amount from the line above.
+  if (isSummaryLabel(narration)) {
+    const k = words(narration);
+    if (OPENING_LABEL.test(k) && !CLOSING_RE.test(narration) && cols.balance !== undefined) {
+      const b = readBalance(cell(cells, cols.balance), cell(cells, cols.balanceSide));
+      if (typeof b === "number") return { opening: b };
+    }
+    const r = readLine(row, cols, date, narration, reference, anyAmount);
+    return r && "draft" in r && r.draft.balance !== null ? { labelled: r.draft } : { summary: true };
+  }
+
+  if (OPENING_RE.test(narration) && !CLOSING_RE.test(narration) && cols.balance !== undefined) {
     const w = readAmount(cell(cells, cols.withdrawal));
     const d = readAmount(cell(cells, cols.deposit));
     const a = readAmount(cell(cells, cols.amount));
@@ -77,6 +139,12 @@ function readRow(row: GridRow, cols: Columns, prevExists: boolean): RowResult {
     if (noMoney && typeof b === "number") return { opening: b };
   }
 
+  return readLine(row, cols, date, narration, reference, anyAmount);
+}
+
+/** The amount, side and balance of a dated row. */
+function readLine(row: GridRow, cols: Columns, date: string, narration: string, reference: string, anyAmount: boolean): RowResult {
+  const cells = row.cells;
   let amount = 0;
   let side: "dr" | "cr" | null = null;
   let fromSign = false;
@@ -201,36 +269,160 @@ function reconcile(drafts: Draft[], opening: number | null): { lines: StatementL
   return { lines, ok };
 }
 
+/** A cell that starts with an opening balance label: "Opening Balance (INR ) : 23,45,678.90", "Balance as on 01-Nov-26". */
+const OPENING_START = /^((opening|op) bal(ance)?|balance as (on|at|of)|(balance )?b f|brought forward)\b/;
+/** A cell that is only that label, the column name of a summary block ("Opening Balance, Dr Count, ..."). */
+const OPENING_ONLY = /^(opening|op) bal(ance)?( (inr|rs))?$/;
+
+/**
+ * The opening balance printed outside the table: in the account block above the column names (the
+ * figure after the label's colon, or in the next cell), or as the "Opening Balance" column of a
+ * summary block, with the figure in the row under it, above the table or after its last line. Null
+ * unless exactly one figure is found. A label dated after the first line ("Balance as on 30-Nov-26"
+ * printed with the closing) is not the opening.
+ */
+function openingAround(grid: GridRow[], headerIndex: number, lastDraftIndex: number, firstDate: string): number | null {
+  const found = new Set<number>();
+  const look = (i: number) => {
+    const cells = grid[i]!.cells.map((c) => c.replace(/\s+/g, " ").trim());
+    cells.forEach((t, j) => {
+      const k = words(t);
+      if (!OPENING_START.test(k) || CLOSING_RE.test(t)) return;
+      const colon = t.lastIndexOf(":");
+      const after = colon >= 0 ? t.slice(colon + 1).trim() : "";
+      const dated = /\b(?:on|at|of)\s+(.+)$/i.exec(colon >= 0 ? t.slice(0, colon) : t);
+      const asOn = dated ? readDate(dated[1]!.trim()) : null;
+      if (asOn !== null && asOn > firstDate) return;
+      // A figure with its paise or commas, so the minutes of a time ("10:42") are never read.
+      if (after && /\d[.,]\d/.test(after)) {
+        const b = readBalance(after);
+        if (typeof b === "number") found.add(b);
+        return;
+      }
+      // The figure in the next cell with text, past a date ("Balance as on", "01-Nov-26", "98,765.43").
+      let n = j + 1;
+      while (n < cells.length && (cells[n] === "" || cells[n] === ":" || (readDate(cells[n]) !== null && readAmount(cells[n]) === "invalid"))) {
+        const d = cells[n] === "" || cells[n] === ":" ? null : readDate(cells[n]!);
+        if (d !== null && d > firstDate) return;
+        n++;
+      }
+      if (n < cells.length) {
+        const b = readBalance(cells[n], cells[n + 1]);
+        if (typeof b === "number") {
+          found.add(b);
+          return;
+        }
+      }
+      if (!OPENING_ONLY.test(k)) return;
+      const below = grid[i + 1];
+      if (!below || (i < headerIndex && i + 1 >= headerIndex)) return;
+      const b = readBalance((below.cells[j] ?? "").trim());
+      if (typeof b === "number") found.add(b);
+    });
+  };
+  for (let i = 0; i < headerIndex; i++) look(i);
+  for (let i = lastDraftIndex + 1; i < grid.length; i++) look(i);
+  return found.size === 1 ? [...found][0]! : null;
+}
+
+/** The lines of a raw narration cell, blank ones left out. */
+const rawPieces = (raw: string | undefined) => (raw ?? "").split(/\r?\n/).filter((p) => p.trim() !== "");
+
+/** Fewest wrapped pieces, all exactly as wide, that show a file was cut at a fixed width. */
+const MIN_HARD_CUTS = 5;
+
+/**
+ * Some banks cut the narration at a fixed width, often inside a UPI id, IFSC or UTR
+ * ("...-KKBK000065" then "1-704120964365-..."), and a space that fell at the cut stays as the last
+ * or first character of a piece. When every wrapped piece in the file is exactly as long as the
+ * longest piece, the file was cut that way, and its pieces are joined as written: no space inside a
+ * cut word, the bank's own space where it cut at one. Files wrapped at words keep one space between
+ * pieces, and so does a PDF, whose lines carry no spaces at their ends. Equal widths alone are not
+ * enough: a bank that prints a fixed-length id on the first line ("NEFT-N1234567890123450", then
+ * the party) also gives equal pieces. A cutter at a fixed width sometimes cuts at a space, so at
+ * least one cut has to show that space at the end of a piece or the start of the next one.
+ */
+function joinHardCuts(drafts: Draft[], pieces: Map<Draft, string[]>) {
+  const all = [...pieces.values()];
+  const width = all.reduce((m, ps) => ps.reduce((n, p) => Math.max(n, p.length), m), 0);
+  const wrapped = all.flatMap((ps) => ps.slice(0, -1));
+  if (width < 20 || wrapped.length < MIN_HARD_CUTS || wrapped.some((p) => p.length !== width)) return;
+  const cutAtSpace = all.some((ps) => ps.some((p, i) => i + 1 < ps.length && (/\s$/.test(p) || /^\s/.test(ps[i + 1]!))));
+  if (!cutAtSpace) return;
+  for (const d of drafts) {
+    const ps = pieces.get(d);
+    if (ps && ps.length > 1) d.narration = ps.join("").replace(/\s+/g, " ").trim().slice(0, 1000);
+  }
+}
+
+/**
+ * True when a row labelled like a total is a real line: its balance differs from the line above by
+ * its own amount (oldest first) or by the amount of the line above (newest first), or from the
+ * opening row by its own amount when it is the first line. A total row shows no balance, or the
+ * same balance as the line above, so it never passes.
+ */
+function movedByAnAmount(d: Draft, prev: Draft | undefined, opening: number | null): boolean {
+  if (d.balance === null) return false;
+  const by = (from: number, amount: number) => Math.abs(Math.abs(round2(d.balance! - from)) - amount) < TOLERANCE;
+  if (!prev) return opening !== null && by(opening, d.amount);
+  return prev.balance !== null && (by(prev.balance, d.amount) || by(prev.balance, prev.amount));
+}
+
 /** Reads the transactions under the header row with the given column roles. */
 export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (ColumnRole | null)[]): ParsedStatement {
   const cols = columnsOf(mapping);
   const drafts: Draft[] = [];
   const skipped: ParsedStatement["skipped"] = [];
   let stated: number | null = null;
-  for (const row of grid.slice(headerIndex + 1)) {
+  // True while the row above was a line or its wrapped text. Anything else (a total, an opening or
+  // closing row, a row not read, a footer, a repeated header) ends the run, so text after the table
+  // or under a page's last line is never glued onto a narration. Lines after it are still read.
+  let chain = false;
+  let lastDraftIndex = headerIndex;
+  // Each line's narration as the file wrote it, piece by piece (see joinHardCuts).
+  const pieces = new Map<Draft, string[]>();
+  const narrationAt = cols.narration;
+  for (let i = headerIndex + 1; i < grid.length; i++) {
+    const row = grid[i]!;
     if (drafts.length >= MAX_STATEMENT_LINES) {
       skipped.push({ line: row.line, reason: `Only the first ${MAX_STATEMENT_LINES} lines of a statement are read. Upload the rest as another file` });
       break;
     }
-    const r = readRow(row, cols, drafts.length > 0);
+    let r = readRow(row, cols, drafts.length > 0 && chain);
+    if (r && "labelled" in r) r = movedByAnAmount(r.labelled, drafts[drafts.length - 1], stated) ? { draft: r.labelled } : { summary: true };
+    chain = r !== null && ("draft" in r || "continuation" in r);
     if (!r) continue;
-    if ("draft" in r) drafts.push(r.draft);
-    else if ("continuation" in r) {
+    if ("draft" in r) {
+      drafts.push(r.draft);
+      lastDraftIndex = i;
+      if (narrationAt !== undefined) pieces.set(r.draft, rawPieces(row.cells[narrationAt]));
+    } else if ("continuation" in r) {
       const last = drafts[drafts.length - 1]!;
-      last.narration = `${last.narration} ${r.continuation}`.trim().slice(0, 1000);
+      if (r.continuation.narration) {
+        last.narration = `${last.narration} ${r.continuation.narration}`.trim().slice(0, 1000);
+        if (narrationAt !== undefined) pieces.get(last)?.push(...rawPieces(row.cells[narrationAt]));
+      }
+      // References have no spaces: the second line of a wrapped one is joined straight on.
+      if (r.continuation.reference) last.reference = `${last.reference ?? ""}${r.continuation.reference}`.slice(0, 200);
     } else if ("opening" in r) {
       if (drafts.length === 0) stated = r.opening;
-    } else skipped.push({ line: row.line, reason: r.skip });
+    } else if ("skip" in r) skipped.push({ line: row.line, reason: r.skip });
   }
+  if (!grid.some((r) => r.page !== undefined)) joinHardCuts(drafts, pieces);
+  // No opening row in the table: the one printed in the account block above it, or in the summary
+  // under it, so the first line is checked too. An opening row in the table is only trusted for a
+  // statement listed oldest first; one printed outside the table is the period's opening either way.
+  const around = stated === null && cols.balance !== undefined && drafts.length > 0 ? openingAround(grid, headerIndex, lastDraftIndex, drafts.reduce((m, d) => (d.date < m ? d.date : m), drafts[0]!.date)) : null;
+  const startOf = (newest: boolean) => (newest ? around : (stated ?? around));
 
   // Oldest first. A statement listed newest first is turned round; one day only is tried both ways.
   const first = drafts[0]?.date ?? "";
   const last = drafts[drafts.length - 1]?.date ?? "";
   let newestFirst = first > last;
   let ordered = newestFirst ? [...drafts].reverse() : drafts;
-  let result = reconcile(ordered, newestFirst ? null : stated);
+  let result = reconcile(ordered, startOf(newestFirst));
   if (first === last && drafts.length > 1) {
-    const reversed = reconcile([...drafts].reverse(), null);
+    const reversed = reconcile([...drafts].reverse(), startOf(true));
     if (reversed.ok > result.ok) {
       newestFirst = true;
       ordered = [...drafts].reverse();
@@ -240,9 +432,10 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
   const lines = result.lines;
 
   const firstLine = lines[0];
+  const start = startOf(newestFirst);
   const opening =
-    !newestFirst && stated !== null
-      ? stated
+    start !== null
+      ? start
       : firstLine && firstLine.balance !== null
         ? round2(firstLine.balance + firstLine.withdrawal - firstLine.deposit)
         : null;
@@ -260,7 +453,7 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
     to: lines.length ? lines.reduce((m, l) => (l.date > m ? l.date : m), lines[0]!.date) : null,
     opening,
     closing,
-    openingStated: !newestFirst && stated !== null,
+    openingStated: start !== null,
     totalDeposits: round2(lines.reduce((s, l) => s + l.deposit, 0)),
     totalWithdrawals: round2(lines.reduce((s, l) => s + l.withdrawal, 0)),
     newestFirst,

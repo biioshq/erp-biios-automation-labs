@@ -19,7 +19,28 @@ import { readPdfStatement } from "./pdf";
 const MAX_ROWS = MAX_STATEMENT_LINES + 200;
 const MAX_COLUMNS = 40;
 
-const nonEmpty = (rows: GridRow[]) => rows.filter((r) => r.cells.some((c) => c.trim() !== ""));
+const isBlank = (r: GridRow) => r.cells.every((c) => c.trim() === "");
+
+/**
+ * The rows with text. A row right after a blank row is marked `near: false`, and so is a workbook
+ * row after a gap in the row numbers (`lineGaps`; a CSV record's line jumps after a quoted line
+ * break, so it is not used there): a note under the table is never a narration's wrapped text.
+ */
+function nonEmpty(rows: GridRow[], lineGaps = false): GridRow[] {
+  const out: GridRow[] = [];
+  let gap = false;
+  for (const r of rows) {
+    if (isBlank(r)) {
+      gap = true;
+      continue;
+    }
+    const prev = out[out.length - 1];
+    const apart = gap || (lineGaps && prev !== undefined && r.line > prev.line + 1);
+    out.push(apart && prev !== undefined ? { ...r, near: false } : r);
+    gap = false;
+  }
+  return out;
+}
 
 function decode(bytes: Buffer): string {
   const utf8 = new TextDecoder("utf-8").decode(bytes);
@@ -46,7 +67,9 @@ function pickDelimiter(text: string): CsvDelimiter {
 function readText(text: string): GridRow[] {
   const records = readRecords(text, pickDelimiter(text));
   if (records.length > MAX_ROWS) throw tooLong(records.length);
-  return nonEmpty(records.map((r) => ({ line: r.line, cells: r.cells.slice(0, MAX_COLUMNS).map((c) => c.trim()) })));
+  // Cells keep the spaces the bank wrote around them: a narration cut at a fixed width is joined
+  // back by them (see joinHardCuts in parse/statement.ts). The reader trims every cell it reads.
+  return nonEmpty(records.map((r) => ({ line: r.line, cells: r.cells.slice(0, MAX_COLUMNS) })));
 }
 
 const tooLong = (n: number) =>
@@ -98,12 +121,13 @@ async function readXlsx(bytes: Buffer): Promise<{ grid: GridRow[]; sheet: string
       const cells: string[] = [];
       row.eachCell({ includeEmpty: false }, (c, col) => {
         if (col > MAX_COLUMNS) return;
-        cells[col - 1] = cellText(c.value, c.address).replace(/\s+/g, " ").trim();
+        // As written, line breaks and spaces at the ends included (see readText).
+        cells[col - 1] = cellText(c.value, c.address);
       });
       for (let i = 0; i < cells.length; i++) cells[i] ??= "";
       grid.push({ line: rowNumber, cells });
     });
-    const rows = nonEmpty(grid);
+    const rows = nonEmpty(grid, true);
     if (findHeaderRow(rows) >= 0) return { grid: rows, sheet: ws.name };
     fallback ??= { grid: rows, sheet: ws.name };
   }

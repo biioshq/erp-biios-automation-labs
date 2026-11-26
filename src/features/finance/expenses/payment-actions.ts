@@ -37,17 +37,19 @@ export type BulkPaidResult = {
 };
 
 /**
- * Mark selected as paid: each expense gets one payment for what it still owes when it is read, all
- * on one day from one account. One at a time through the same guarded write, so a bill that changed
- * meanwhile is reported back and the others still go through.
+ * Mark selected as paid: each expense gets one payment for what it still owes, all on one day from
+ * one account. One at a time through the same guarded write. A bill that owes something other than
+ * what the dialog showed (`expected`), or that changed meanwhile, is reported back and the others
+ * still go through.
  */
 export const markExpensesPaid = defineAction(
   markExpensesPaidSchema,
-  async ({ ids, ...rest }, user): Promise<BulkPaidResult> => {
+  async ({ ids, expected, ...rest }, user): Promise<BulkPaidResult> => {
     const result: BulkPaidResult = { paid: [], failed: [] };
+    const owedSeen = new Map((expected ?? []).map((e) => [e.id, e.outstanding]));
     for (const id of [...new Set(ids)]) {
       try {
-        const done = await applyExpensePayment({ ...rest, id, amount: "full" }, user);
+        const done = await applyExpensePayment({ ...rest, id, amount: "full", expectedOutstanding: owedSeen.get(id) }, user);
         result.paid.push({ id, paymentId: done.paymentId, amount: done.amount });
       } catch (error) {
         if (!(error instanceof AppError)) throw error;
@@ -71,7 +73,7 @@ export const undoExpensePayments = defineAction(
     const failed: { id: string; error: string }[] = [];
     for (const p of payments) {
       try {
-        await removeExpensePayment(p, user, { allowOwnRecent: true });
+        await removeExpensePayment(p, user, { allowOwnRecent: true, restoreCredit: true });
         undone.push(p.paymentId);
       } catch (error) {
         if (!(error instanceof AppError)) throw error;

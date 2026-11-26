@@ -165,6 +165,8 @@ export const MAX_BULK_PAYMENTS = 100;
 /** Mark selected as paid: each expense is paid what it still owes, on one day from one account. */
 export const markExpensesPaidSchema = z.object({
   ids: z.array(objectId).min(1, "Pick at least one expense").max(MAX_BULK_PAYMENTS, `At most ${MAX_BULK_PAYMENTS} at a time`),
+  /** What each bill owed as the dialog showed it; a bill that owes something else now is not paid. */
+  expected: z.array(z.object({ id: objectId, outstanding: z.number().nonnegative() })).max(MAX_BULK_PAYMENTS).optional(),
   date: dateInput,
   paymentMethod: payingMethod,
   accountId: optionalObjectId,

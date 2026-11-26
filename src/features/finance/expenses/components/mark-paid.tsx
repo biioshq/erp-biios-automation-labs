@@ -119,10 +119,11 @@ export function MarkPaidButton({
         return;
       }
       setOpen(false);
-      onPaid?.(expense.id);
+      const left = result.data.outstanding;
+      // A part payment leaves the bill owing: the refresh moves it to its new tab instead.
+      if (left <= 0) onPaid?.(expense.id);
       emitDataChanged();
       const ref = { id: expense.id, paymentId: result.data.paymentId };
-      const left = result.data.outstanding;
       toast.success(left > 0 ? `${expense.number}: payment recorded, ${formatCurrency(left, { exact: true })} still owed.` : `${expense.number} marked as paid on ${formatDate(values.date)}.`, {
         duration: UNDO_TOAST_MS,
         action: { label: "Undo", onClick: () => void undo([ref], onUndone) },
@@ -208,6 +209,7 @@ export function BulkMarkPaidButton({
   const [pending, startTransition] = useTransition();
   const initial = (): BulkInput => ({
     ids: selected.map((s) => s.id),
+    expected: selected.map((s) => ({ id: s.id, outstanding: s.outstanding })),
     date: toDateInput(new Date()),
     paymentMethod: defaults.paymentMethod,
     accountId: defaults.accountId ?? undefined,

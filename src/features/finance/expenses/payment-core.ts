@@ -40,6 +40,11 @@ export type ApplyPaymentInput = {
   date: string;
   /** Rupees, or "full" for whatever is still owed when the expense is read. */
   amount: number | "full";
+  /**
+   * What the person saw as owed when they confirmed (Mark selected as paid). When the bill now owes
+   * something else (its amount was edited, or someone paid part of it), nothing is written.
+   */
+  expectedOutstanding?: number;
   paymentMethod: PaymentMethod;
   accountId?: string;
   reference?: string;
@@ -64,6 +69,10 @@ export async function applyExpensePayment(input: ApplyPaymentInput, user: Sessio
   }
   const { outstanding } = paymentState(existing);
   if (outstanding <= 0) throw new AppError("This expense is already paid in full.", "conflict");
+  if (input.expectedOutstanding !== undefined && Math.abs(outstanding - input.expectedOutstanding) > HALF_PAISA) {
+    const owed = formatCurrency(outstanding, { exact: true });
+    throw new AppError(`This bill changed after the page loaded: ${owed} is owed now. Check it and try again.`, "conflict");
+  }
   const amount = input.amount === "full" ? outstanding : round2(input.amount);
   if (!(amount > 0)) throw new AppError("Enter the amount paid.", "invalid", { amount: ["Enter the amount paid"] });
   if (amount > outstanding + HALF_PAISA) {
@@ -104,12 +113,15 @@ export const UNDO_WINDOW_MS = 15 * 60 * 1000;
  * Removes one recorded payment. Never one matched to a bank statement line (that is undone by
  * unmatching the line). The person who recorded it may take it back within UNDO_WINDOW_MS; anyone
  * else, or later, needs the payments delete permission. The list stays even when it becomes empty:
- * an empty list means nothing paid, as deleteExpensePayment leaves it.
+ * an empty list means nothing paid, as deleteExpensePayment leaves it. With `restoreCredit` (Undo),
+ * an "On credit" bill whose only payment this was gets back the shape it had before Mark as paid
+ * (no payments list), so the expense form treats it as it did. Never for another method: there a
+ * missing list would mean paid in full.
  */
 export async function removeExpensePayment(
   { id, paymentId }: { id: string; paymentId: string },
   user: SessionUser,
-  options: { allowOwnRecent: boolean },
+  options: { allowOwnRecent: boolean; restoreCredit?: boolean },
   now: Date = new Date(),
 ): Promise<{ id: string; paymentId: string }> {
   const existing = await Expense.findById(id, { source: 1, countedAtPurchase: 1, payments: 1, category: 1 }).lean();
@@ -136,6 +148,13 @@ export async function removeExpensePayment(
     );
   }
   const pid = new Types.ObjectId(paymentId);
+  if (options.restoreCredit) {
+    const restored = await Expense.updateOne(
+      { _id: existing._id, paymentMethod: "credit", payments: { $size: 1 }, "payments.0._id": pid, "payments.0.bankTransaction": null },
+      { $unset: { payments: 1 } },
+    );
+    if (restored.modifiedCount) return { id, paymentId };
+  }
   const res = await Expense.updateOne(
     { _id: existing._id, payments: { $elemMatch: { _id: pid, bankTransaction: null } } },
     { $pull: { payments: { _id: pid } } },

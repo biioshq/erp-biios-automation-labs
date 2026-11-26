@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { ColumnRole, GridRow } from "../types";
-import { autoMapping, headerScore, roleOf } from "../parse/columns";
+import { autoMapping, headerKey, headerScore, roleOf } from "../parse/columns";
 import { readAmount, readDate } from "../parse/values";
 import { StatementReadError } from "./errors";
 
@@ -680,13 +680,31 @@ export async function readPdfStatement(bytes: Buffer, password?: string): Promis
 
   type BodyLine = { line: PdfLine; seg: number; cells: string[]; pieces: Piece[]; L: Layout; dated: boolean; money: boolean };
   const body: BodyLine[] = [];
+  const first = firstLayout.header;
+  const at = (role: ColumnRole) => firstLayout.mapping.indexOf(role);
   segments.forEach((s, seg) => {
     const L = layouts.get(s.key)!;
-    const at = (role: ColumnRole) => L.mapping.indexOf(role);
+    // The grid has the first header's columns. A page whose names read differently (one more or one
+    // fewer column) puts each of its columns under the first header's column of the same name, else
+    // of the same role, else the one it sits under.
+    const same = L.header.length === first.length && L.header.every((h, c) => headerKey(h.text) === headerKey(first[c]!.text));
+    const into = L.header.map((h, c) => {
+      if (same) return c;
+      const byName = first.findIndex((f) => headerKey(f.text) === headerKey(h.text));
+      if (byName >= 0) return byName;
+      const role = L.mapping[c];
+      const byRole = role ? firstLayout.mapping.indexOf(role) : -1;
+      if (byRole >= 0) return byRole;
+      let best = 0;
+      first.forEach((f, k) => {
+        if (overlap(f, h) > overlap(first[best]!, h)) best = k;
+      });
+      return best;
+    });
     for (const line of lines.slice(s.from, s.to)) {
       const pieces = piecesOf(line, L);
-      const parts = L.header.map(() => [] as string[]);
-      for (const p of pieces) parts[Math.min(p.col, parts.length - 1)]!.push(p.w.text);
+      const parts = first.map(() => [] as string[]);
+      for (const p of pieces) parts[into[Math.min(p.col, into.length - 1)]!]!.push(p.w.text);
       const cells = parts.map(cellText);
       const cell = (role: ColumnRole) => (at(role) >= 0 ? cells[at(role)]! : "");
       const dated = readDate(cell("date")) !== null || readDate(cell("valueDate")) !== null;

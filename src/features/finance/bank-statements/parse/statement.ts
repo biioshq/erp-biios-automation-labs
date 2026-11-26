@@ -278,9 +278,10 @@ const OPENING_ONLY = /^(opening|op) bal(ance)?( (inr|rs))?$/;
  * The opening balance printed outside the table: in the account block above the column names (the
  * figure after the label's colon, or in the next cell), or as the "Opening Balance" column of a
  * summary block, with the figure in the row under it, above the table or after its last line. Null
- * unless exactly one figure is found.
+ * unless exactly one figure is found. A label dated after the first line ("Balance as on 30-Nov-26"
+ * printed with the closing) is not the opening.
  */
-function openingAround(grid: GridRow[], headerIndex: number, lastDraftIndex: number): number | null {
+function openingAround(grid: GridRow[], headerIndex: number, lastDraftIndex: number, firstDate: string): number | null {
   const found = new Set<number>();
   const look = (i: number) => {
     const cells = grid[i]!.cells.map((c) => c.replace(/\s+/g, " ").trim());
@@ -289,6 +290,9 @@ function openingAround(grid: GridRow[], headerIndex: number, lastDraftIndex: num
       if (!OPENING_START.test(k) || CLOSING_RE.test(t)) return;
       const colon = t.lastIndexOf(":");
       const after = colon >= 0 ? t.slice(colon + 1).trim() : "";
+      const dated = /\b(?:on|at|of)\s+(.+)$/i.exec(colon >= 0 ? t.slice(0, colon) : t);
+      const asOn = dated ? readDate(dated[1]!.trim()) : null;
+      if (asOn !== null && asOn > firstDate) return;
       // A figure with its paise or commas, so the minutes of a time ("10:42") are never read.
       if (after && /\d[.,]\d/.test(after)) {
         const b = readBalance(after);
@@ -297,7 +301,11 @@ function openingAround(grid: GridRow[], headerIndex: number, lastDraftIndex: num
       }
       // The figure in the next cell with text, past a date ("Balance as on", "01-Nov-26", "98,765.43").
       let n = j + 1;
-      while (n < cells.length && (cells[n] === "" || cells[n] === ":" || (readDate(cells[n]) !== null && readAmount(cells[n]) === "invalid"))) n++;
+      while (n < cells.length && (cells[n] === "" || cells[n] === ":" || (readDate(cells[n]) !== null && readAmount(cells[n]) === "invalid"))) {
+        const d = cells[n] === "" || cells[n] === ":" ? null : readDate(cells[n]!);
+        if (d !== null && d > firstDate) return;
+        n++;
+      }
       if (n < cells.length) {
         const b = readBalance(cells[n], cells[n + 1]);
         if (typeof b === "number") {
@@ -404,7 +412,7 @@ export function buildStatement(grid: GridRow[], headerIndex: number, mapping: (C
   // No opening row in the table: the one printed in the account block above it, or in the summary
   // under it, so the first line is checked too. An opening row in the table is only trusted for a
   // statement listed oldest first; one printed outside the table is the period's opening either way.
-  const around = stated === null && cols.balance !== undefined && drafts.length > 0 ? openingAround(grid, headerIndex, lastDraftIndex) : null;
+  const around = stated === null && cols.balance !== undefined && drafts.length > 0 ? openingAround(grid, headerIndex, lastDraftIndex, drafts.reduce((m, d) => (d.date < m ? d.date : m), drafts[0]!.date)) : null;
   const startOf = (newest: boolean) => (newest ? around : (stated ?? around));
 
   // Oldest first. A statement listed newest first is turned round; one day only is tried both ways.

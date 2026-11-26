@@ -246,11 +246,8 @@ function bandsOf(amounts: { w: Word; row: number }[]): Omit<Band, "col">[] | nul
 
 const overlap = (a: { x1: number; x2: number }, b: { x1: number; x2: number }) => Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1);
 
-/**
- * Gives the bands, left to right, to the money columns, left to right: as many as can be given,
- * each where it overlaps its name most (or lies nearest). A band left over keeps no column.
- */
-function matchBands(raw: Omit<Band, "col">[], cols: number[], header: Word[]): Band[] {
+/** Bands given to columns in order, each scored by `fit`; leaving a band out costs more than any fit gains. */
+function alignBands(raw: Omit<Band, "col">[], cols: number[], fit: (band: Omit<Band, "col">, col: number) => number): { bands: Band[]; total: number } {
   const m = raw.length;
   const k = cols.length;
   const NONE = -Infinity;
@@ -263,24 +260,57 @@ function matchBands(raw: Omit<Band, "col">[], cols: number[], header: Word[]): B
       let best = NONE;
       let step = 0;
       if (i > 0 && j > 0 && f[i - 1]![j - 1]! > NONE) {
-        const v = f[i - 1]![j - 1]! + overlap(raw[i - 1]!, header[cols[j - 1]!]!);
+        const v = f[i - 1]![j - 1]! + fit(raw[i - 1]!, cols[j - 1]!);
         if (v > best) [best, step] = [v, 2];
       }
       if (j > 0 && f[i]![j - 1]! > NONE && f[i]![j - 1]! > best) [best, step] = [f[i]![j - 1]!, 1];
-      // Leaving a band out costs much more than any distance: every band that can have a column gets one.
-      if (i > 0 && f[i - 1]![j]! > NONE && f[i - 1]![j]! - 1e4 * raw[i - 1]!.n > best) [best, step] = [f[i - 1]![j]! - 1e4 * raw[i - 1]!.n, 0];
+      // Leaving a band out costs much more than any fit: every band that can have a column gets one.
+      if (i > 0 && f[i - 1]![j]! > NONE && f[i - 1]![j]! - 1e6 * raw[i - 1]!.n > best) [best, step] = [f[i - 1]![j]! - 1e6 * raw[i - 1]!.n, 0];
       f[i]![j] = best;
       how[i]![j] = step;
     }
   }
-  const out: Band[] = [];
+  const bands: Band[] = [];
+  let total = 0;
   for (let i = m, j = k; i > 0 || j > 0; ) {
     const step = how[i]![j]!;
-    if (step === 2) out.push({ ...raw[i - 1]!, col: cols[j - 1]! });
+    if (step === 2) {
+      bands.push({ ...raw[i - 1]!, col: cols[j - 1]! });
+      total += fit(raw[i - 1]!, cols[j - 1]!);
+    }
     if (step !== 1) i--;
     if (step !== 0) j--;
   }
-  return out.reverse();
+  return { bands: bands.reverse(), total };
+}
+
+/**
+ * Gives the bands, left to right, to the money columns, left to right. When a column has no
+ * amounts at all (a statement of withdrawals only), which name a band belongs to depends on how
+ * the names are set: each way (names at the left of their columns, at the right, or centred) gives
+ * every name a stretch of the line, and the way that holds the most of the bands wins. Names over
+ * their amounts settle a tie.
+ */
+function matchBands(raw: Omit<Band, "col">[], cols: number[], header: Word[]): Band[] {
+  const n = header.length;
+  const centre = (k: number) => (header[k]!.x1 + header[k]!.x2) / 2;
+  const stretches: ((k: number) => { x1: number; x2: number })[] = [
+    (k) => ({ x1: k > 0 ? (centre(k - 1) + centre(k)) / 2 : -Infinity, x2: k < n - 1 ? (centre(k) + centre(k + 1)) / 2 : Infinity }),
+    (k) => ({ x1: header[k]!.x1, x2: k < n - 1 ? header[k + 1]!.x1 : Infinity }),
+    (k) => ({ x1: k > 0 ? header[k - 1]!.x2 : -Infinity, x2: header[k]!.x2 }),
+  ];
+  const byText = (band: Omit<Band, "col">, col: number) => overlap(band, header[col]!);
+  let best: { bands: Band[]; held: number; text: number } | null = null;
+  for (const stretch of stretches) {
+    const { bands, total } = alignBands(raw, cols, (band, col) => {
+      const width = Math.max(band.x2 - band.x1, 0.1);
+      // Mostly the share of the band in the name's stretch; how near the name itself is breaks ties.
+      return Math.max(0, overlap(band, stretch(col))) / width + 1e-3 * Math.max(-1, Math.min(1, byText(band, col) / width));
+    });
+    const text = bands.reduce((s, b) => s + byText(b, b.col), 0);
+    if (!best || total > best.held + 1e-6 || (Math.abs(total - best.held) <= 1e-6 && text > best.text)) best = { bands, held: total, text };
+  }
+  return best!.bands;
 }
 
 /** Where between lo and hi the fewest pieces of text are cut (rows of transactions count most): the middle of the widest such stretch. */

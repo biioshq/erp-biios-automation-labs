@@ -15,7 +15,17 @@ export async function ExpensesTabLoader({ project }: { project: ProjectDetail })
     getVendorNames(),
     getExpenseCategories(),
   ]);
-  return <ProjectExpensesTab projectId={project.id} projectName={project.name} rows={rows} projects={projects} vendors={vendors} categories={categories} />;
+  return (
+    <ProjectExpensesTab
+      projectId={project.id}
+      projectName={project.name}
+      rows={rows}
+      projects={projects}
+      vendors={vendors}
+      categories={categories}
+      payables={project.finance.payables}
+    />
+  );
 }
 
 /** `showReceipts`: the receipts of the project's expenses are listed only with the expenses view permission. */

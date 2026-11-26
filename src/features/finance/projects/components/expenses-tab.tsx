@@ -16,7 +16,9 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { ExpenseForm } from "@/features/finance/expenses/components/expense-form";
 import { ExpenseMobileCard, ExpenseSourceBadge } from "@/features/finance/expenses/components/expense-badges";
 import type { ExpenseRow } from "@/features/finance/expenses/types";
-import { PROJECT_STAGES, labelOf } from "@/lib/constants";
+import { PROJECT_STAGES, labelOf, type ProjectStage } from "@/lib/constants";
+import { cn } from "@/lib/utils";
+import type { ProjectPayables } from "../finance";
 import type { ExpenseCategoryOption } from "@/lib/expense-categories";
 import { formatDate, formatNumber } from "@/lib/format";
 import type { ProjectOption } from "@/server/lookups";
@@ -30,10 +32,13 @@ export function ProjectExpensesTab({
   projects,
   vendors,
   categories,
+  payables,
 }: {
   projectId: string;
   projectName: string;
   rows: ExpenseRow[];
+  /** Paid and outstanding for the project and each stage (projectPaymentSplit), for the header. */
+  payables?: ProjectPayables;
   projects: ProjectOption[];
   vendors: string[];
   /** Built-in and custom categories for the form (getExpenseCategories). Without them the form offers the built-ins. */
@@ -56,6 +61,8 @@ export function ProjectExpensesTab({
   const visible = useMemo(() => (stage === "all" ? rows : rows.filter((r) => r.stage === stage)), [rows, stage]);
   const total = visible.reduce((s, r) => s + r.amount, 0);
   const fromStock = visible.filter((r) => r.source === "inventory_assignment").reduce((s, r) => s + r.amount, 0);
+  // From the shared split, not summed again here: the same figures as the Budget tab.
+  const split = payables ? (stage === "all" ? payables : (payables.byStage[stage as ProjectStage] ?? null)) : null;
 
   const columns = useMemo<ColumnDef<ExpenseRow>[]>(
     () => [
@@ -156,15 +163,32 @@ export function ProjectExpensesTab({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 rounded-xl border bg-card px-4 py-4 shadow-card sm:grid-cols-3 sm:px-5">
+      <div className={cn("grid grid-cols-2 gap-3 rounded-xl border bg-card px-4 py-4 shadow-card sm:px-5", split ? "sm:grid-cols-3 lg:grid-cols-5" : "sm:grid-cols-3")}>
         <div className="min-w-0">
           <p className="eyebrow text-[10px]">{stage === "all" ? "All expenses" : labelOf(PROJECT_STAGES, stage as never)}</p>
           <p className="tabular mt-1 text-xl font-semibold">{formatNumber(visible.length)}</p>
         </div>
         <div className="min-w-0">
-          <p className="eyebrow text-[10px]">Total</p>
-          <Money value={total} className="mt-1 block text-xl font-semibold" />
+          <p className="eyebrow text-[10px]">{split ? "Incurred" : "Total"}</p>
+          <Money value={split ? split.incurred : total} className="mt-1 block text-xl font-semibold" />
         </div>
+        {split ? (
+          <>
+            <div className="min-w-0">
+              <p className="eyebrow text-[10px]">Paid</p>
+              <Money value={split.paid} className="mt-1 block text-xl font-semibold" />
+            </div>
+            <div className="min-w-0">
+              <p className="eyebrow text-[10px]">Outstanding</p>
+              <Money value={split.outstanding} className={cn("mt-1 block text-xl font-semibold", split.overdue > 0 && "text-danger")} />
+              {split.overdue > 0 ? (
+                <p className="text-xs text-danger">
+                  <Money value={split.overdue} /> overdue
+                </p>
+              ) : null}
+            </div>
+          </>
+        ) : null}
         <div className="col-span-2 min-w-0 sm:col-span-1">
           <p className="eyebrow text-[10px]">From inventory</p>
           <Money value={fromStock} className="mt-1 block text-xl font-semibold" />

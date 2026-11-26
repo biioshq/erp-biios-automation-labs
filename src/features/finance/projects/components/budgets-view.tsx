@@ -12,6 +12,7 @@ import { formatPercent } from "@/lib/format";
 import { BUDGET_TEXT_CLASS, budgetTone } from "../utils";
 import type { ProjectFinanceRow } from "../types";
 import { BudgetBar } from "./project-budget-bar";
+import { EditBudgetButton } from "./edit-budget-dialog";
 
 /** One stage of one project that has a stage budget set. */
 export type StageBudgetRow = {
@@ -23,6 +24,10 @@ export type StageBudgetRow = {
   stageLabel: string;
   planned: number;
   spent: number;
+  /** Paid to vendors out of `spent`. */
+  paid: number;
+  /** Still owed to vendors out of `spent`. */
+  outstanding: number;
   /** planned - spent: negative when the stage is over its budget. */
   variance: number;
 };
@@ -47,7 +52,7 @@ const moneyCol = (id: string, title: string, pick: (r: ProjectFinanceRow) => num
   cell: ({ row }) => <Money value={pick(row.original)} className={className?.(row.original)} />,
 });
 
-/** Original and revised budget against actual spend, per project. */
+/** Original and revised budget against actual spend (paid and outstanding), per project. */
 export function BudgetTrackingTable({ rows }: { rows: ProjectFinanceRow[] }) {
   const router = useRouter();
   // Columns that would only repeat another one are left out, so the table fits its card: the
@@ -73,8 +78,21 @@ export function BudgetTrackingTable({ rows }: { rows: ProjectFinanceRow[] }) {
         cell: ({ row }) => <ProjectStatusBadge status={row.original.status} />,
       },
       ...(revised ? [moneyCol("originalBudget", "Original budget", (r) => r.originalBudget, () => "text-muted-foreground")] : []),
-      moneyCol("budget", revised ? "Revised budget" : "Budget", (r) => r.budget),
-      moneyCol("spent", "Spent", (r) => r.finance.spent, () => "font-medium"),
+      {
+        id: "budget",
+        accessorFn: (r) => r.budget,
+        meta: { label: revised ? "Revised budget" : "Budget", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title={revised ? "Revised budget" : "Budget"} align="right" />,
+        cell: ({ row }) => (
+          <span className="inline-flex items-center justify-end gap-1">
+            <Money value={row.original.budget} />
+            <EditBudgetButton project={{ id: row.original.id, name: row.original.name, budget: row.original.budget, spent: row.original.finance.spent }} className="-my-1" />
+          </span>
+        ),
+      },
+      moneyCol("spent", "Incurred", (r) => r.finance.spent, () => "font-medium"),
+      moneyCol("paid", "Paid", (r) => r.finance.payables.paid),
+      moneyCol("payables", "Outstanding", (r) => r.finance.payables.outstanding, (r) => (r.finance.payables.overdue > 0 ? "text-danger" : undefined)),
       moneyCol("remaining", "Remaining", (r) => r.outlook.remainingBudget, (r) => (r.outlook.remainingBudget < 0 ? "text-danger" : undefined)),
       {
         id: "usage",
@@ -86,7 +104,7 @@ export function BudgetTrackingTable({ rows }: { rows: ProjectFinanceRow[] }) {
           const tone = budgetTone(r.usage, r.budget);
           return (
             <div className="flex min-w-28 items-center gap-2">
-              <BudgetBar spent={r.finance.spent} budget={r.budget} />
+              <BudgetBar spent={r.finance.spent} budget={r.budget} paid={r.finance.payables.paid} />
               <span className={cn("tabular w-12 shrink-0 text-right text-xs", BUDGET_TEXT_CLASS[tone])}>{r.outlook.utilisation === null ? "-" : formatPercent(r.outlook.utilisation)}</span>
             </div>
           );
@@ -145,16 +163,25 @@ export function BudgetTrackingTable({ rows }: { rows: ProjectFinanceRow[] }) {
               {p.outlook.utilisation === null ? "No budget" : formatPercent(p.outlook.utilisation)}
             </span>
           </div>
-          <BudgetBar spent={p.finance.spent} budget={p.budget} />
+          <BudgetBar spent={p.finance.spent} budget={p.budget} paid={p.finance.payables.paid} />
           <p className="text-xs text-muted-foreground">
-            Original <Money value={p.originalBudget} compact />
-            {p.outlook.overrun > 0 ? (
-              <span className="text-danger">
-                {" "}
-                · <Money value={p.outlook.overrun} compact /> over
-              </span>
-            ) : null}
+            Paid <Money value={p.finance.payables.paid} compact /> ·{" "}
+            <span className={p.finance.payables.overdue > 0 ? "text-danger" : undefined}>
+              <Money value={p.finance.payables.outstanding} compact /> outstanding
+            </span>
           </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Original <Money value={p.originalBudget} compact />
+              {p.outlook.overrun > 0 ? (
+                <span className="text-danger">
+                  {" "}
+                  · <Money value={p.outlook.overrun} compact /> over
+                </span>
+              ) : null}
+            </p>
+            <EditBudgetButton project={{ id: p.id, name: p.name, budget: p.budget, spent: p.finance.spent }} variant="button" className="h-7" />
+          </div>
         </div>
       )}
     />
@@ -190,6 +217,20 @@ export function StageBudgetTable({ rows }: { rows: StageBudgetRow[] }) {
         cell: ({ row }) => <Money value={row.original.spent} className="font-medium" />,
       },
       {
+        id: "paid",
+        accessorKey: "paid",
+        meta: { label: "Paid", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Paid" align="right" />,
+        cell: ({ row }) => <Money value={row.original.paid} />,
+      },
+      {
+        id: "outstanding",
+        accessorKey: "outstanding",
+        meta: { label: "Outstanding", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Outstanding" align="right" />,
+        cell: ({ row }) => <Money value={row.original.outstanding} />,
+      },
+      {
         id: "variance",
         accessorKey: "variance",
         meta: { label: "Variance", align: "right" },
@@ -221,6 +262,9 @@ export function StageBudgetTable({ rows }: { rows: StageBudgetRow[] }) {
             </p>
             <Money value={r.spent} className="shrink-0 font-semibold" />
           </div>
+          <p className="text-xs text-muted-foreground">
+            Paid <Money value={r.paid} /> · <Money value={r.outstanding} /> outstanding
+          </p>
           <p className="text-xs text-muted-foreground">
             Stage budget <Money value={r.planned} />
             <span className={r.variance < 0 ? "text-danger" : "text-success"}>

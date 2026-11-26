@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CircleCheck, FolderKanban, History, OctagonAlert, Search, TriangleAlert, Wallet } from "lucide-react";
+import { CircleCheck, Clock, FolderKanban, History, OctagonAlert, Search, TriangleAlert, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
@@ -36,20 +36,27 @@ export default async function BudgetVsActualPage({ searchParams }: { searchParam
   const original = sumOf(rows, (r) => r.originalBudget);
   const revised = sumOf(rows, (r) => r.budget);
   const spent = sumOf(rows, (r) => r.spent);
+  const paid = sumOf(rows, (r) => r.paid);
+  const outstanding = sumOf(rows, (r) => r.outstanding);
+  const overdue = sumOf(rows, (r) => r.overdue);
   const variance = sumOf(budgeted, (r) => r.remainingBudget);
   // The same measure as the dashboard's Budget used card: projects with a budget only.
   const use = budgetUse(rows);
-  const chart = rows.map((r) => ({ label: r.code || r.name, original: r.originalBudget, revised: r.budget, actual: r.spent }));
-  const summary = `Budget and actual spend per project. ${rows
-    .map((r) => `${r.name}: original ${formatCompactCurrency(r.originalBudget)}, revised ${formatCompactCurrency(r.budget)}, actual ${formatCompactCurrency(r.spent)}`)
+  const chart = rows.map((r) => ({ label: r.code || r.name, original: r.originalBudget, revised: r.budget, paid: r.paid, outstanding: r.outstanding }));
+  const summary = `Budget and actual spend per project, actual split into paid and outstanding. ${rows
+    .map(
+      (r) =>
+        `${r.name}: original ${formatCompactCurrency(r.originalBudget)}, revised ${formatCompactCurrency(r.budget)}, actual ${formatCompactCurrency(r.spent)} (paid ${formatCompactCurrency(r.paid)}, outstanding ${formatCompactCurrency(r.outstanding)})`,
+    )
     .join("; ")}.`;
+  const canEditBudget = can(user, "finance.projects:edit");
 
   return (
     <Page>
       <PageHeader
         eyebrow="Analytics & Planning"
         title="Budget vs actual"
-        description="Original and revised budgets of each project against its actual spend, with what is left, how much is used and which projects are over."
+        description="Original and revised budgets of each project against its actual spend, how much of it is paid and still owed, what is left, how much is used and which projects are over."
         actions={
           <>
             <ProjectStatusSelect statuses={statuses} />
@@ -70,7 +77,7 @@ export default async function BudgetVsActualPage({ searchParams }: { searchParam
         <EmptyState icon={Search} title="No projects with this status" description="Pick another status to see those budgets." />
       ) : (
         <>
-          <StatGrid>
+          <StatGrid className="xl:grid-cols-3">
             <StatCard
               label="Original budget"
               icon={History}
@@ -84,6 +91,14 @@ export default async function BudgetVsActualPage({ searchParams }: { searchParam
               tone="brand"
               value={<Money value={spent} />}
               hint={use.usage !== null ? `Budget used: ${formatPercent(use.usage)}, ${plural(use.projects, "project", "projects")} with a budget` : "No budgets set"}
+            />
+            <StatCard label="Paid" icon={CircleCheck} tone="success" value={<Money value={paid} />} hint="Paid to vendors, part of the actual" />
+            <StatCard
+              label="Outstanding payables"
+              icon={Clock}
+              tone={overdue > 0 ? "danger" : outstanding > 0 ? "warning" : "success"}
+              value={<Money value={outstanding} />}
+              hint={overdue > 0 ? <><Money value={overdue} /> overdue</> : outstanding > 0 ? "Still to pay vendors, counted in the actual" : "Nothing owed to vendors"}
             />
             <StatCard
               label="Variance"
@@ -102,21 +117,22 @@ export default async function BudgetVsActualPage({ searchParams }: { searchParam
           </StatGrid>
           {salariesHidden ? <SalariesHiddenNote className="-mt-2" /> : null}
 
-          <Section title="Budget against actual" description="Original budget, revised budget and actual spend of each project.">
+          <Section title="Budget against actual" description="Original and revised budget of each project next to its actual spend, stacked as paid and outstanding.">
             <MoneyBars
               data={chart}
               labelKey="label"
               series={[
                 { key: "original", label: "Original budget", color: "var(--chart-4)" },
                 { key: "revised", label: "Revised budget", color: "var(--chart-2)" },
-                { key: "actual", label: "Actual", color: "var(--chart-1)" },
+                { key: "paid", label: "Actual: paid", color: "var(--chart-1)", stack: "actual" },
+                { key: "outstanding", label: "Actual: outstanding", color: "var(--chart-3)", stack: "actual" },
               ]}
               summary={summary}
             />
           </Section>
 
-          <Section title="By project" description="Variance is the revised budget minus actual; negative means over budget." contentClassName="p-0 sm:p-0">
-            <BudgetTable rows={rows} />
+          <Section title="By project" description="Actual counts every expense once, paid or not. Variance is the revised budget minus actual; negative means over budget." contentClassName="p-0 sm:p-0">
+            <BudgetTable rows={rows} canEdit={canEditBudget} />
           </Section>
 
           <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">

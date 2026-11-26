@@ -1,6 +1,7 @@
 import { round2 } from "@/lib/format";
 import type { ProjectStage, ProjectStatus } from "@/lib/constants";
 import type { SpendByType } from "@/lib/project-cost-types";
+import type { PaymentSplit } from "@/server/services/metrics";
 
 /**
  * Project money, derived one way for the projects list, profitability, budget tracking and the
@@ -53,8 +54,30 @@ export type ProjectFinance = {
   byStage: Record<ProjectStage, number>;
   expenseCount: number;
   revenue: ProjectRevenue;
+  /**
+   * What was paid to vendors and what is still owed, out of `spent` (projectPaymentSplit in
+   * src/server/services/metrics.ts). incurred is the spend, so paid + outstanding = spent.
+   */
+  payables: ProjectPayables;
   salariesHidden: boolean;
 };
+
+export type { PaymentSplit };
+
+/** Spend split into paid and outstanding, for the project and per stage. */
+export type ProjectPayables = PaymentSplit & {
+  byStage: Record<ProjectStage, PaymentSplit>;
+  /** Expenses without a stage. */
+  noStage: PaymentSplit;
+};
+
+const zeroSplit = (): PaymentSplit => ({ incurred: 0, paid: 0, outstanding: 0, overdue: 0 });
+
+export const emptyPayables = (stages: readonly ProjectStage[]): ProjectPayables => ({
+  ...zeroSplit(),
+  byStage: Object.fromEntries(stages.map((s) => [s, zeroSplit()])) as Record<ProjectStage, PaymentSplit>,
+  noStage: zeroSplit(),
+});
 
 export type OutlookInput = {
   status: ProjectStatus;

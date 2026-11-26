@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FolderKanban, History, OctagonAlert, PiggyBank, Receipt, Search, Wallet } from "lucide-react";
+import { CircleCheck, Clock, FolderKanban, History, OctagonAlert, PiggyBank, Receipt, Search, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Page, PageHeader, Section } from "@/components/shared/page";
 import { StatCard, StatGrid } from "@/components/shared/stat-card";
@@ -28,6 +28,7 @@ function stageBudgetRows(rows: ProjectFinanceRow[]): StageBudgetRow[] {
     PROJECT_STAGES.filter((s) => (p.stageBudgets[s.value] ?? 0) > 0).map((s) => {
       const planned = p.stageBudgets[s.value];
       const spent = p.finance.byStage[s.value] ?? 0;
+      const paid = p.finance.payables.byStage[s.value]?.paid ?? spent;
       return {
         key: `${p.id}:${s.value}`,
         projectId: p.id,
@@ -37,6 +38,8 @@ function stageBudgetRows(rows: ProjectFinanceRow[]): StageBudgetRow[] {
         stageLabel: s.label,
         planned,
         spent,
+        paid,
+        outstanding: round2(spent - paid),
         variance: round2(planned - spent),
       };
     }),
@@ -53,6 +56,9 @@ export default async function BudgetTrackingPage({ searchParams }: Props) {
   const original = sumBy(rows, (r) => r.originalBudget);
   const revised = sumBy(rows, (r) => r.budget);
   const spent = sumBy(rows, (r) => r.finance.spent);
+  const paid = sumBy(rows, (r) => r.finance.payables.paid);
+  const payables = round2(spent - paid);
+  const overdue = sumBy(rows, (r) => r.finance.payables.overdue);
   const overrunRows = rows.filter((r) => r.outlook.overrun > 0);
   const overrun = sumBy(overrunRows, (r) => r.outlook.overrun);
   const closed = rows.filter((r) => r.outlook.potentialSavings !== null);
@@ -65,7 +71,7 @@ export default async function BudgetTrackingPage({ searchParams }: Props) {
       <PageHeader
         eyebrow="Finance"
         title="Budget tracking"
-        description="Original and revised budgets against what each project has actually spent, with overruns and the budget left unspent on closed projects."
+        description="Original and revised budgets against what each project has incurred, how much of that is paid and still owed, with overruns and the budget left unspent on closed projects."
         actions={<ProjectStatusFilter />}
       />
 
@@ -93,7 +99,7 @@ export default async function BudgetTrackingPage({ searchParams }: Props) {
         />
       ) : (
         <>
-          <StatGrid className="xl:grid-cols-3">
+          <StatGrid>
             <StatCard
               label="Original budget"
               value={<Money value={original} compact />}
@@ -118,18 +124,26 @@ export default async function BudgetTrackingPage({ searchParams }: Props) {
               }
             />
             <StatCard
-              label="Actual expenditure"
+              label="Total incurred"
               value={<Money value={spent} compact />}
               icon={Receipt}
               tone="brand"
               hint={revised > 0 ? `${formatPercent(spent / revised)} of the revised budget used` : "No budget set"}
+            />
+            <StatCard label="Paid" value={<Money value={paid} compact />} icon={CircleCheck} tone="success" hint="Paid to vendors, part of the incurred total" />
+            <StatCard
+              label="Outstanding payables"
+              value={<Money value={payables} compact />}
+              icon={Clock}
+              tone={overdue > 0 ? "danger" : payables > 0 ? "warning" : "success"}
+              hint={overdue > 0 ? <><Money value={overdue} compact /> overdue</> : payables > 0 ? "Still to pay vendors" : "Nothing owed to vendors"}
             />
             <StatCard
               label="Remaining budget"
               value={<Money value={round2(revised - spent)} compact tone={revised - spent < 0 ? "negative" : undefined} />}
               icon={PiggyBank}
               tone={revised - spent < 0 ? "danger" : "success"}
-              hint="Revised budget minus actual expenditure"
+              hint="Revised budget minus incurred"
             />
             <StatCard
               label="Overrun"
@@ -150,7 +164,7 @@ export default async function BudgetTrackingPage({ searchParams }: Props) {
 
           <Section
             title="Budget against actual"
-            description="Utilisation is actual expenditure divided by the revised budget. Savings show once a project is completed or cancelled."
+            description="Incurred counts every expense once, paid or not; paid and outstanding split it. Utilisation is incurred divided by the revised budget. Savings show once a project is completed or cancelled."
             contentClassName="p-0"
           >
             <BudgetTrackingTable rows={rows} />

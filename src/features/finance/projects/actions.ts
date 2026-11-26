@@ -11,8 +11,10 @@ import { removeFile } from "@/features/files/server";
 import { fromDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import { PROJECT_STAGES } from "@/lib/constants";
+import { budgetHistoryEntry, guardedProjectUpdate, writeProjectBudget } from "./budget-write";
 import {
   documentRefSchema,
+  projectBudgetSchema,
   documentTypeSchema,
   projectFormSchema,
   projectIdSchema,
@@ -65,11 +67,10 @@ function projectUpdate(doc: ReturnType<typeof toDocument>, previousBudget: numbe
   // Cleared fields are unset, never written as undefined.
   const set = Object.fromEntries(Object.entries(doc).filter(([, v]) => v !== undefined));
   const changed = round2(previousBudget) !== doc.budget;
-  const entry = { budget: previousBudget, changedAt: new Date(), changedBy: new Types.ObjectId(user.id), ...(note ? { note } : {}) };
   return {
     $set: set,
     ...(Object.keys(unset).length ? { $unset: unset } : {}),
-    ...(changed ? { $push: { budgetHistory: entry } } : {}),
+    ...(changed ? { $push: { budgetHistory: budgetHistoryEntry(previousBudget, note, user) } } : {}),
   };
 }
 
@@ -83,15 +84,24 @@ export const updateProject = defineAction(
     // someone else changed it since, saving would quietly put the old figure back and push theirs
     // into the history, so this save stops and asks to reload instead.
     const expected = input.expectedBudget ?? current.budget;
-    const result = await Project.updateOne({ _id: input.id, budget: expected }, projectUpdate(doc, expected, input.budgetNote, user));
-    if (!result.matchedCount) {
-      const exists = await Project.exists({ _id: input.id });
-      if (!exists) throw notFound("The project");
-      throw new AppError("Someone changed this project's budget while you were editing. Close the form, open it again and save once more.", "conflict");
-    }
+    await guardedProjectUpdate(input.id, expected, projectUpdate(doc, expected, input.budgetNote, user));
     return { id: input.id };
   },
   { revalidate: REVALIDATE, message: "Project updated", permission: "finance.projects:edit" },
+);
+
+/**
+ * Changes only the allocated budget (the Edit budget dialog on Budget tracking and Budget vs
+ * actual). Same guard and budget history as the project form; nothing else on the project changes.
+ * Analytics pages show budgets too, so they are refreshed as well.
+ */
+export const setProjectBudget = defineAction(
+  projectBudgetSchema,
+  async (input, user) => {
+    const result = await writeProjectBudget(input, user);
+    return { id: input.id, ...result };
+  },
+  { revalidate: [...REVALIDATE, ["/analytics", "layout"]], message: "Budget updated", permission: "finance.projects:edit" },
 );
 
 export const setProjectStatus = defineAction(

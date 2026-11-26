@@ -94,7 +94,7 @@ export function ProjectCard({
               {project.budget > 0 ? formatPercent(project.usage) : "No budget"}
             </span>
           </div>
-          <BudgetBar spent={project.spent} budget={project.budget} />
+          <BudgetBar spent={project.spent} budget={project.budget} paid={project.finance.payables.paid} />
           <p className="text-xs text-muted-foreground">
             {project.remaining < 0 ? (
               <span className="text-danger">
@@ -115,6 +115,19 @@ export function ProjectCard({
 
         <dl className="grid grid-cols-2 gap-3 text-xs">
           <div className="min-w-0">
+            <dt className="text-muted-foreground">Paid to vendors</dt>
+            <dd className="mt-0.5 font-medium">
+              <Money value={project.finance.payables.paid} compact />
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-muted-foreground">Outstanding payables</dt>
+            <dd className={cn("mt-0.5 font-medium", project.finance.payables.overdue > 0 && "text-danger")}>
+              <Money value={project.finance.payables.outstanding} compact />
+              {project.finance.payables.overdue > 0 ? <span className="font-normal"> · overdue</span> : null}
+            </dd>
+          </div>
+          <div className="min-w-0">
             <dt className="text-muted-foreground">Project value</dt>
             <dd className="mt-0.5 font-medium">{project.contractValue === null ? <span className="font-normal text-muted-foreground">Not set</span> : <Money value={project.contractValue} compact />}</dd>
           </div>
@@ -125,7 +138,7 @@ export function ProjectCard({
               {project.finance.revenue.outstanding > 0 ? (
                 <span className="font-normal text-muted-foreground">
                   {" "}
-                  · <Money value={project.finance.revenue.outstanding} compact /> due
+                  · <Money value={project.finance.revenue.outstanding} compact /> to receive
                 </span>
               ) : null}
             </dd>

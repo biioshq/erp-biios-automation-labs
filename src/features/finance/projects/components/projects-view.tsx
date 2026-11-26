@@ -205,16 +205,33 @@ export function ProjectsView({
       {
         id: "outstanding",
         accessorFn: (r) => r.finance.revenue.outstanding,
-        meta: { label: "Outstanding", align: "right" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Outstanding" align="right" />,
+        // The id stays "outstanding" so saved column choices keep working; it is what customers still owe.
+        meta: { label: "Receivable", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Receivable" align="right" />,
         cell: ({ row }) => <Money value={row.original.finance.revenue.outstanding} className={row.original.finance.revenue.overdue > 0 ? "text-danger" : undefined} />,
       },
       {
         id: "spent",
         accessorKey: "spent",
-        meta: { label: "Spent", align: "right" },
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Spent" align="right" />,
+        meta: { label: "Incurred", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Incurred" align="right" />,
         cell: ({ row }) => <Money value={row.original.spent} className="font-medium" />,
+      },
+      {
+        id: "paid",
+        accessorFn: (r) => r.finance.payables.paid,
+        meta: { label: "Paid", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Paid" align="right" />,
+        cell: ({ row }) => <Money value={row.original.finance.payables.paid} />,
+      },
+      {
+        id: "payables",
+        accessorFn: (r) => r.finance.payables.outstanding,
+        meta: { label: "Outstanding payables", align: "right" },
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Outstanding payables" align="right" />,
+        cell: ({ row }) => (
+          <Money value={row.original.finance.payables.outstanding} className={row.original.finance.payables.overdue > 0 ? "text-danger" : undefined} />
+        ),
       },
       {
         id: "remaining",
@@ -232,7 +249,7 @@ export function ProjectsView({
           const tone = budgetTone(row.original.usage, row.original.budget);
           return (
             <div className="flex min-w-28 items-center gap-2">
-              <BudgetBar spent={row.original.spent} budget={row.original.budget} />
+              <BudgetBar spent={row.original.spent} budget={row.original.budget} paid={row.original.finance.payables.paid} />
               <span className={cn("tabular w-12 shrink-0 text-right text-xs", BUDGET_TEXT_CLASS[tone])}>
                 {row.original.budget > 0 ? formatPercent(row.original.usage) : "-"}
               </span>
@@ -406,8 +423,15 @@ export function ProjectsView({
                 </span>
               </div>
               <div className="pl-4">
-                <BudgetBar spent={p.spent} budget={p.budget} />
+                <BudgetBar spent={p.spent} budget={p.budget} paid={p.finance.payables.paid} />
               </div>
+              <p className="pl-4 text-xs text-muted-foreground">
+                Paid <Money value={p.finance.payables.paid} compact />
+                {" · "}
+                <span className={p.finance.payables.overdue > 0 ? "text-danger" : undefined}>
+                  <Money value={p.finance.payables.outstanding} compact /> outstanding
+                </span>
+              </p>
             </div>
           )}
           initialHidden={["received", "remaining"]}

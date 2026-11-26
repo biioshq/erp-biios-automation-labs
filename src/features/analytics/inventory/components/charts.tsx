@@ -30,7 +30,13 @@ function MoneyTip({ active, payload, config, labelKey }: { active?: boolean; pay
   );
 }
 
-export type BarSeries = { key: string; label: string; color: string };
+export type BarSeries = {
+  key: string;
+  label: string;
+  color: string;
+  /** Series with the same stack are drawn on top of each other; others stand beside them. Overrides `stacked`. */
+  stack?: string;
+};
 
 /**
  * Rupee bars per row of `data`: grouped, or stacked when `stacked`. `labelKey` names the field
@@ -77,22 +83,27 @@ export function MoneyBars({
         <YAxis tickFormatter={formatCompactCurrency} tickLine={false} axisLine={false} width={phone ? 44 : 56} tickCount={phone ? 4 : 5} tick={{ fontSize: phone ? 11 : 12 }} />
         <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.5 }} content={<MoneyTip config={config} labelKey={labelKey} />} />
         {series.length > 1 ? <ChartLegend content={<ChartLegendContent />} /> : null}
-        {series.map((s, i) => (
-          <Bar
-            key={s.key}
-            dataKey={s.key}
-            stackId={stacked ? "s" : undefined}
-            fill={`var(--color-${s.key})`}
-            stroke={stacked ? "var(--card)" : undefined}
-            strokeWidth={stacked ? 1 : 0}
-            radius={!stacked || i === series.length - 1 ? [4, 4, 0, 0] : 0}
-            maxBarSize={stacked ? 32 : 22}
-          >
-            {highlightKey && series.length === 1
-              ? data.map((row, j) => <Cell key={j} fill={row[highlightKey] ? "var(--warning)" : `var(--color-${s.key})`} />)
-              : null}
-          </Bar>
-        ))}
+        {series.map((s, i) => {
+          const stackId = s.stack ?? (stacked ? "s" : undefined);
+          // Rounded top only on the last series of its stack (or on a bar that stands alone).
+          const top = !stackId || !series.slice(i + 1).some((n) => (n.stack ?? (stacked ? "s" : undefined)) === stackId);
+          return (
+            <Bar
+              key={s.key}
+              dataKey={s.key}
+              stackId={stackId}
+              fill={`var(--color-${s.key})`}
+              stroke={stackId ? "var(--card)" : undefined}
+              strokeWidth={stackId ? 1 : 0}
+              radius={top ? [4, 4, 0, 0] : 0}
+              maxBarSize={stacked ? 32 : 22}
+            >
+              {highlightKey && series.length === 1
+                ? data.map((row, j) => <Cell key={j} fill={row[highlightKey] ? "var(--warning)" : `var(--color-${s.key})`} />)
+                : null}
+            </Bar>
+          );
+        })}
       </BarChart>
     </ChartContainer>
   );

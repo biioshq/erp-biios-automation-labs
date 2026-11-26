@@ -69,6 +69,8 @@ export type DailyInput = {
   filters?: Partial<DailyFilters>;
   /** Rows of the transactions list (the page shows the latest 200; a file takes them all). */
   transactionLimit?: number;
+  /** Rows of the vendor-wise and customer-wise tables (the page shows the largest 100; a file takes them all). */
+  partyLimit?: number;
 };
 
 export async function getDailyOverview(input: DailyInput, now: Date = new Date()): Promise<DailyOverview> {
@@ -83,6 +85,8 @@ export async function getDailyOverview(input: DailyInput, now: Date = new Date()
   const end = endOfDayIST(fromDateInput(to));
   const range = dateRangeFilter(from, to)!;
   const limit = input.transactionLimit ?? TRANSACTION_LIMIT;
+  const vendorLimit = input.partyLimit ?? VENDOR_LIMIT;
+  const customerLimit = input.partyLimit ?? CUSTOMER_LIMIT;
 
   const user = await getCurrentUser();
   const seesPosition = Boolean(user && can(user, "data.financial_position"));
@@ -269,7 +273,7 @@ export async function getDailyOverview(input: DailyInput, now: Date = new Date()
   }
   const vendorsAll = [...vendorMap.values()]
     .map((v) => ({ ...v, incurred: round2(v.incurred), paid: round2(v.paid), owed: round2(v.owed) }))
-    .sort((a, b) => b.incurred + b.paid - (a.incurred + a.paid) || a.vendor.localeCompare(b.vendor));
+    .sort((a, b) => b.incurred + b.paid + b.owed - (a.incurred + a.paid + a.owed) || a.vendor.localeCompare(b.vendor));
 
   /* Customer-wise receipts. */
   const customerMap = new Map<string, CustomerRow>();
@@ -361,9 +365,9 @@ export async function getDailyOverview(input: DailyInput, now: Date = new Date()
     days: rows,
     totals,
     net,
-    vendors: vendorsAll.slice(0, VENDOR_LIMIT),
+    vendors: vendorsAll.slice(0, vendorLimit),
     vendorCount: vendorsAll.length,
-    customers: customersAll.slice(0, CUSTOMER_LIMIT),
+    customers: customersAll.slice(0, customerLimit),
     customerCount: customersAll.length,
     transactions: transactions.slice(0, limit),
     transactionTotal,

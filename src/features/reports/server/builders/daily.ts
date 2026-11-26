@@ -31,6 +31,8 @@ export async function buildDailyReport(f: ReportFilters): Promise<ReportData> {
     to,
     filters: { project: f.project, vendor: f.vendor, category: f.category },
     transactionLimit: TRANSACTION_ROWS,
+    // The file is the full record: every vendor and customer, so its section totals match the summary.
+    partyLimit: Number.POSITIVE_INFINITY,
   });
 
   const ledger = data.net?.basis === "ledger";
@@ -118,7 +120,12 @@ export async function buildDailyReport(f: ReportFilters): Promise<ReportData> {
         rows: customerRows,
         totals: sumTotals(customerColumns, customerRows, "Total", ["money", "number"]),
       },
-      { title: "Transactions", columns: txColumns, rows: txRows, totals: null },
+      {
+        title: data.transactionTotal > data.transactions.length ? `Transactions (latest ${data.transactions.length} of ${data.transactionTotal})` : "Transactions",
+        columns: txColumns,
+        rows: txRows,
+        totals: null,
+      },
     ],
   };
 }

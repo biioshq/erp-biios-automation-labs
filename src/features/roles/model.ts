@@ -1,7 +1,7 @@
 /**
  * Role helpers shared by the roles pages (client) and the role actions (server). Client-safe.
  */
-import { ACTION_LABELS, DATA_PERMISSIONS, MODULE_LABELS, hasPermission, parsePermission, resourceOf } from "@/lib/permissions";
+import { ACTION_LABELS, DATA_PERMISSIONS, DEFAULT_ON_PERMISSIONS, MODULE_LABELS, hasPermission, parsePermission, resourceOf } from "@/lib/permissions";
 import { SETTINGS_PAGES, canOpen, visibleModules } from "@/config/navigation";
 
 /** A role as the roles pages show it. */
@@ -19,10 +19,17 @@ export type RoleSummary = {
   people: { id: string; name: string }[];
 };
 
-/** Permissions in `list` that `holder` does not have. */
+const SELF_SERVICE = new Set(DEFAULT_ON_PERMISSIONS);
+
+/**
+ * Permissions in `list` that `holder` does not have. Default-on permissions (such as changing your
+ * own password) are left out: they only act on the person's own account, so holding or giving one
+ * never goes beyond someone's role, and unticking one on a role must not stop that role managing
+ * people or roles.
+ */
 export function missingFrom(holder: readonly string[], list: readonly string[]): string[] {
   const held = new Set(holder);
-  return list.filter((p) => !held.has(p));
+  return list.filter((p) => !held.has(p) && !SELF_SERVICE.has(p));
 }
 
 /** "finance.equity:view" as people read it: "Capital and equity: View". */

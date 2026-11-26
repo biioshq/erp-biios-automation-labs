@@ -46,9 +46,9 @@ export const createRole = defineAction(
   createRoleSchema,
   async (input, user) => {
     await assertNameFree(input.name);
-    // An empty role still starts with the default-on permissions (such as "Change own password")
-    // that the creator may give; a copy takes the source role's state, ticked or not.
-    let permissions: string[] = DEFAULT_ON_PERMISSIONS.filter((p) => user.isAdmin || user.permissions.includes(p));
+    // An empty role starts with the default-on permissions (such as "Change own password"): they only
+    // act on the person's own account. A copy takes the source role's state, ticked or not.
+    let permissions: string[] = [...DEFAULT_ON_PERMISSIONS];
     if (input.copyFrom) {
       const source = await resolveRole(input.copyFrom);
       if (!source.exists) throw new AppError("The role to start from no longer exists.", "not_found");

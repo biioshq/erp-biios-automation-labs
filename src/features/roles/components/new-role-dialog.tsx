@@ -12,8 +12,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { SelectField, TextField, TextareaField, type Option } from "@/components/forms/fields";
 import { formValidation } from "@/components/forms/form-options";
 import { applyFieldErrors } from "@/lib/action-result";
-import { OWN_PASSWORD_PERMISSION } from "@/lib/permissions";
-import { useCan } from "@/components/current-user";
 import { createRole } from "../actions";
 import { createRoleSchema, type CreateRoleInput, type CreateRoleValues } from "../schemas";
 
@@ -24,8 +22,6 @@ export function NewRoleDialog({ roles }: { roles: Option[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  // An empty role starts with Change own password only when the creator may give it (as on the server).
-  const startsWithPassword = useCan(OWN_PASSWORD_PERMISSION);
   const empty: CreateRoleInput = { name: "", description: "", copyFrom: NONE };
   const form = useForm<CreateRoleInput, unknown, CreateRoleValues>({
     resolver: zodResolver(createRoleSchema),
@@ -74,10 +70,10 @@ export function NewRoleDialog({ roles }: { roles: Option[] }) {
               name="copyFrom"
               label="Start from"
               options={[
-                { value: NONE, label: startsWithPassword ? "No pages (only Change own password)" : "No permissions" },
+                { value: NONE, label: "No pages (only Change own password)" },
                 ...roles.map((r) => ({ ...r, label: `Same as ${r.label}` })),
               ]}
-              description={`Copies that role's permissions as a starting point. Roles beyond your own cannot be copied.${startsWithPassword ? " You can untick Change own password on the next page." : ""}`}
+              description="Copies that role's permissions as a starting point. Roles beyond your own cannot be copied. You can untick Change own password on the next page."
             />
           </div>
           <DialogFooter className="max-sm:flex-col-reverse">

@@ -1,6 +1,8 @@
 import "server-only";
 
 import ExcelJS from "exceljs";
+// The zip reader ExcelJS itself opens workbooks with (it is ExcelJS's dependency).
+import JSZip from "jszip";
 import { cellText } from "@/features/imports/csv/excel";
 import { readRecords, readRecordsUpTo, type CsvDelimiter } from "@/features/imports/csv/parse";
 import type { GridRow, ReadStatementResult, StatementFormat } from "../types";
@@ -174,12 +176,85 @@ function readHtmlTable(html: string): GridRow[] {
   return nonEmpty(rows);
 }
 
+const cannotOpenWorkbook = () =>
+  new StatementReadError("This Excel file could not be opened. Save it again as an Excel workbook (.xlsx) or as CSV and upload that file.");
+
+/*
+ * What a workbook may unpack to. ExcelJS unzips every part into memory and builds the whole sheet
+ * before the row limit can be checked, so a 60 KB zip of a million tiny rows took 1.2 GB. A year
+ * of statement lines (3,150 rows) written by ExcelJS unpacks to 1.2 MB and 54,000 tags with 7
+ * columns, and to 5.3 MB and 268,000 tags with 40 columns, the most this reader keeps.
+ */
+const MAX_XLSX_PARTS = 1000;
+const MAX_XLSX_BYTES = 32 * 1024 * 1024;
+/** XML elements in all parts together (a cell is two or three: <c>, <v>, and <is><t> for inline text). */
+const MAX_XLSX_TAGS = 500_000;
+
+/**
+ * Unzips the workbook once, counting bytes and XML start tags as they come out and stopping at the
+ * limits, before ExcelJS reads it. The sizes the zip declares are not trusted.
+ */
+async function checkWorkbookSize(bytes: Buffer): Promise<void> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(bytes);
+  } catch {
+    throw cannotOpenWorkbook();
+  }
+  const tooBig = () =>
+    new StatementReadError("This Excel file holds far more than a bank statement does, so it was not read. Download a shorter period, or save the sheet as CSV, and upload that.");
+  const parts = Object.values(zip.files).filter((f) => !f.dir);
+  if (parts.length > MAX_XLSX_PARTS) throw tooBig();
+  let bytesLeft = MAX_XLSX_BYTES;
+  let tagsLeft = MAX_XLSX_TAGS;
+  for (const part of parts) {
+    const xml = /\.(xml|rels)$/i.test(part.name);
+    let afterLt = false;
+    try {
+      await unzipPart(part, (chunk) => {
+        bytesLeft -= chunk.length;
+        if (bytesLeft < 0) throw tooBig();
+        if (!xml) return;
+        for (let i = 0; i < chunk.length; i++) {
+          const b = chunk[i]!;
+          // "<" and a letter starts an element; "</", "<?" and "<!" do not.
+          if (afterLt && ((b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a))) tagsLeft--;
+          afterLt = b === 0x3c;
+        }
+        if (tagsLeft < 0) throw tooBig();
+      });
+    } catch (error) {
+      if (error instanceof StatementReadError) throw error;
+      throw cannotOpenWorkbook();
+    }
+  }
+}
+
+/** Unzips one part chunk by chunk. When `onChunk` throws, unzipping stops and the promise rejects with that error. */
+function unzipPart(part: JSZip.JSZipObject, onChunk: (chunk: Buffer) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const stream = part.nodeStream("nodebuffer");
+    stream.on("data", (chunk: Buffer) => {
+      try {
+        onChunk(chunk);
+      } catch (error) {
+        stream.pause();
+        stream.removeAllListeners("data");
+        reject(error);
+      }
+    });
+    stream.on("error", reject);
+    stream.on("end", () => resolve());
+  });
+}
+
 async function readXlsx(bytes: Buffer): Promise<{ grid: GridRow[]; sheet: string }> {
+  await checkWorkbookSize(bytes);
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(bytes as unknown as ArrayBuffer);
   } catch {
-    throw new StatementReadError("This Excel file could not be opened. Save it again as an Excel workbook (.xlsx) or as CSV and upload that file.");
+    throw cannotOpenWorkbook();
   }
   const sheets = workbook.worksheets.filter((ws) => ws.state === "visible" && ws.actualRowCount > 0);
   let fallback: { grid: GridRow[]; sheet: string } | null = null;

@@ -1011,7 +1011,9 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
       // or put it in the wrong place.
       holdBack: billNote.length
         ? "An unpaid bill has the same amount."
-        : (s.holdBack ?? sideHold ?? againHold ?? (early.length ? "It is dated before this account's opening balance date." : null)),
+        : (s.holdBack ?? sideHold ?? againHold),
+      // Not held back: the record is real income or expense. The page explains the balance side once for the statement.
+      beforeOpening: early.length ? opening : null,
       group: s.group ?? null,
     };
   });

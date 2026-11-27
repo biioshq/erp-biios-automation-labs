@@ -168,6 +168,11 @@ export type ReviewLine = StatementLine & {
   holdBack?: string | null;
   /** The group company the line is paid to or received from: related money, called out before adding. */
   group?: string | null;
+  /**
+   * The account's opening balance date, when the line is dated before it: its money is already in the
+   * opening balance, so its record counts in income and expenses but does not move the account's balance.
+   */
+  beforeOpening?: string | null;
   /** What the narration says the line is (charges, interest, ATM...), for the line's type in the review. */
   narrationKind?: LineKind;
   /** A deposit that pays an open customer invoice: the invoice, so the review can link the receipt to it or not. */

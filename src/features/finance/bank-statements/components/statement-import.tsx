@@ -2,7 +2,8 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, FileText, Landmark, Lock, RefreshCw, Upload } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ArrowDownLeft, ArrowRight, ArrowUpRight, FileText, Landmark, Lock, RefreshCw, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +15,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Money } from "@/components/shared/money";
 import { EmptyState } from "@/components/shared/empty-state";
-import { formatFileSize, formatNumber } from "@/lib/format";
+import { formatDate, formatFileSize, formatNumber } from "@/lib/format";
+import { fromDateInput } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import type { BankAccountOption } from "@/server/lookups";
 import { INCOME_CATEGORIES, labelOf, type BankLineAction } from "@/lib/constants";
@@ -461,10 +463,22 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   const held = rows.filter((r) => !r.selected && !r.line.imported && r.line.holdBack);
   const leftOut = rows.filter((r) => !r.selected && !r.line.imported && !r.line.holdBack).length;
   // Ticked lines no earlier record or rule recognised: added with the default shown, to check afterwards.
+  // Only lines that go under Other because nothing recognised them: other notes are not defaults.
   const defaulted = checkGroups(
-    ready.filter((r) => r.line.attention && !r.line.group && !r.line.holdBack && r.decision.action !== "ignore"),
+    ready.filter(
+      (r) =>
+        r.line.attention &&
+        !r.line.group &&
+        !r.line.holdBack &&
+        ((r.decision.action === "expense" && r.decision.category === "other") || (r.decision.action === "income" && r.decision.incomeCategory === "other")),
+    ),
     review?.pickers ?? null,
   );
+  // Lines dated before the account's opening balance date: added to income and expenses, not to the balance.
+  const early = rows.filter((r) => !r.line.imported && r.line.beforeOpening);
+  const earlyReady = ready.filter((r) => r.line.beforeOpening).length;
+  const openingDate = early[0]?.line.beforeOpening ?? null;
+  const accountName = accounts.find((a) => a.value === review?.accountId)?.label ?? "this account";
   const groupRows = ready.filter((r) => r.line.group);
   // Unticked lines that need a choice, apart from the ones held back above.
   const waitingTotal = rows.filter((r) => !r.selected && !r.line.imported && !r.line.holdBack && (r.line.attention || r.problem !== null)).length;
@@ -686,6 +700,26 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
             </ToggleGroup>
           </div>
 
+          {early.length && openingDate && review ? (
+            <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" role="status">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+              <div className="min-w-0 space-y-1">
+                <p className="font-medium">
+                  {plural(early.length, "line is", "lines are")} dated before {accountName}&apos;s opening balance date, {formatDate(fromDateInput(openingDate))}.
+                </p>
+                <p className="text-muted-foreground">
+                  {early.length === 1 ? "It is" : "They are"} still added to expenses and income, but the account&apos;s balance starts from its opening balance, so{" "}
+                  {early.length === 1 ? "it does" : "they do"} not change it. To follow the balance from this statement, set the account&apos;s opening balance on{" "}
+                  <Link href="/finance/assets/cash" className="font-medium text-brand-ink underline-offset-2 hover:underline">
+                    Cash &amp; bank
+                  </Link>{" "}
+                  to {review.statement.opening !== null ? <Money value={review.statement.opening} exact /> : "the statement's opening balance"} on{" "}
+                  {review.statement.from ? formatDate(fromDateInput(review.statement.from)) : "the statement's first day"}, then upload the statement again.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
           {ticked.length ? (
             <BulkBar count={ticked.length} pickers={review.pickers} onApply={applyBulk} onClear={() => toggle(rows.map((r) => r.index), false)} />
           ) : null}
@@ -835,6 +869,12 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
                 {plural(held.length, "line is", "lines are")} left unticked for you to check first and {held.length === 1 ? "is" : "are"} not added (row {held[0]!.line.line}:{" "}
                 {held[0]!.line.holdBack?.replace(/\.$/, "").replace(/^./, (c) => c.toLowerCase())}
                 {held.length > 1 ? ", and others" : ""}). Tick {held.length === 1 ? "it" : "them"} to add.
+              </span>
+            ) : null}
+            {earlyReady ? (
+              <span className="mt-2 block text-sm text-muted-foreground">
+                {plural(earlyReady, "line is", "lines are")} dated before the account&apos;s opening balance date: {earlyReady === 1 ? "it counts" : "they count"} in expenses and
+                income, not in the account&apos;s balance.
               </span>
             ) : null}
             {leftOut ? <span className="mt-2 block text-sm text-muted-foreground">{plural(leftOut, "unticked line is", "unticked lines are")} left out.</span> : null}

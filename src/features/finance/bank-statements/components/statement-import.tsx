@@ -229,8 +229,9 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
       const ds = lines.map((l) => l.suggestion);
       setReview(next);
       setDecisions(ds);
-      // Every line that can be added starts ticked, so one Add books the whole statement as shown. Lines
-      // that may already be in the books (holdBack) or still miss details start unticked.
+      // Every line that can be added starts ticked, so one Add books the statement as shown. Lines held
+      // back for a check (possible duplicates, loans, tax, refunds, capital, uncertain matches: holdBack)
+      // and lines that still miss details start unticked.
       setSelected(lines.map((l, i) => !l.imported && !l.holdBack && decisionProblem(l, ds[i]!, { accountId: forAccount, pickers }) === null));
     } catch {
       setReviewError("The lines could not be checked against the books. Check your connection and try again.");
@@ -316,7 +317,8 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
       const line = review.lines[i]!;
       if (!selected[i] || line.imported) return d;
       if (change.kind === "action") {
-        if (!actionFits(line, change.action)) {
+        // A line tied to a record already in the books is not turned into a new record in bulk: that would record it twice.
+        if (!actionFits(line, change.action) || d.action === "match") {
           skipped++;
           return d;
         }
@@ -339,7 +341,7 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
       return { ...d, projectId: change.projectId, stage: d.action === "expense" ? change.stage : undefined };
     });
     setDecisions(next);
-    const what = change.kind === "category" ? "they are not new expenses" : change.kind === "project" ? "they are not new expenses or income" : "it does not fit their side or they have no match";
+    const what = change.kind === "category" ? "they are not new expenses" : change.kind === "project" ? "they are not new expenses or income" : "it does not fit their side, they have no match, or they are already in the books";
     if (skipped) toast.info(`Changed ${plural(changed, "line", "lines")}. ${plural(skipped, "line was", "lines were")} left as ${skipped === 1 ? "it was" : "they were"}: ${what}.`);
     else toast.success(`Changed ${plural(changed, "line", "lines")}.`);
   }
@@ -455,11 +457,14 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   const busy = reading || reviewing || Boolean(run?.busy);
   // What Add sends: the ticked lines that have every detail they need.
   const readySides = ready.reduce((s, r) => (isWithdrawal(r.line) ? { ...s, out: s.out + amountOf(r.line) } : { ...s, in: s.in + amountOf(r.line) }), { out: 0, in: 0 });
-  // Lines that may already be in the books stay unticked until a person ticks them.
+  // Lines held back for a check stay unticked until a person ticks them.
   const held = rows.filter((r) => !r.selected && !r.line.imported && r.line.holdBack);
   const leftOut = rows.filter((r) => !r.selected && !r.line.imported && !r.line.holdBack).length;
   // Ticked lines no earlier record or rule recognised: added with the default shown, to check afterwards.
-  const defaulted = checkGroups(ready.filter((r) => r.line.attention && !r.line.group), review?.pickers ?? null);
+  const defaulted = checkGroups(
+    ready.filter((r) => r.line.attention && !r.line.group && !r.line.holdBack && r.decision.action !== "ignore"),
+    review?.pickers ?? null,
+  );
   const groupRows = ready.filter((r) => r.line.group);
   // Unticked lines that need a choice, apart from the ones held back above.
   const waitingTotal = rows.filter((r) => !r.selected && !r.line.imported && !r.line.holdBack && (r.line.attention || r.problem !== null)).length;
@@ -827,8 +832,8 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
             ) : null}
             {held.length ? (
               <span className="mt-2 block text-sm text-muted-foreground">
-                {plural(held.length, "line that may already be in the books stays", "lines that may already be in the books stay")} unticked and{" "}
-                {held.length === 1 ? "is" : "are"} not added ({held[0]!.line.holdBack?.replace(/\.$/, "").toLowerCase()}
+                {plural(held.length, "line is", "lines are")} left unticked for you to check first and {held.length === 1 ? "is" : "are"} not added (row {held[0]!.line.line}:{" "}
+                {held[0]!.line.holdBack?.replace(/\.$/, "").replace(/^./, (c) => c.toLowerCase())}
                 {held.length > 1 ? ", and others" : ""}). Tick {held.length === 1 ? "it" : "them"} to add.
               </span>
             ) : null}
@@ -930,7 +935,7 @@ function AddBar({
         ) : (
           "Tick the lines to add."
         )}
-        {held ? <span> {plural(held, "line that may already be in the books is", "lines that may already be in the books are")} left unticked.</span> : null}
+        {held ? <span> {plural(held, "line is", "lines are")} left unticked for you to check first.</span> : null}
         {waiting ? <span> {plural(waiting, "unticked line waits", "unticked lines wait")} for your choice.</span> : null}
         {blocked ? <span className="text-warning"> {plural(blocked, "ticked line needs", "ticked lines need")} details first.</span> : null}
       </p>

@@ -160,8 +160,10 @@ export type ReviewLine = StatementLine & {
   notes: string[];
   attention: boolean;
   /**
-   * Why this line starts unticked, for a person to check (it may already be in the books, or its
-   * amount does not agree with the balance). Ticking it by hand still adds it.
+   * Why this line starts unticked, for a person to check: it may already be in the books, its amount
+   * or side is in doubt, or it looks like something other than a plain expense or income (a loan,
+   * tax, capital, a refund, an uncertain match). Lines whose only doubt is a default (category Other,
+   * a payer that is not a known customer, no name) have none and start ticked. Ticking still adds it.
    */
   holdBack?: string | null;
   /** The group company the line is paid to or received from: related money, called out before adding. */

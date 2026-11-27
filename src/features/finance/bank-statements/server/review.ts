@@ -434,6 +434,13 @@ function suggest(
   const info = analyseNarration(line.narration, side, { exclude: [COMPANY.name] });
   const notes: string[] = [];
   let attention = false;
+  // Why the line starts unticked: set for every check that is more than a default (category Other,
+  // a payer that is not a known customer, no name). Those defaults are added as shown; these wait.
+  let hold: string | undefined;
+  const holdFor = (why: string) => {
+    hold ??= why;
+    attention = true;
+  };
   const method = (STATEMENT_METHODS as readonly string[]).includes(info.method) ? info.method : "bank_transfer";
   const base = { paymentMethod: method === "cash" ? "bank_transfer" : method } as LineDecision;
   const decide = (action: BankLineAction, extra: Partial<LineDecision> = {}): LineDecision => ({ ...base, action, ...extra });
@@ -461,12 +468,17 @@ function suggest(
         ctx.loans.find((l) => nameSimilarity(l.lender, line.narration) >= 0.5 || nameSimilarity(l.name, line.narration) >= 0.5);
       if (loan) {
         notes.push("Looks like a loan instalment. Split it into principal and interest from the lender's schedule; the interest is booked as an expense.");
-        return { decision: decide("loan_payment", { loanId: loan.id, principal: amount, interest: 0 }), notes, attention: true };
+        return {
+          decision: decide("loan_payment", { loanId: loan.id, principal: amount, interest: 0 }),
+          notes,
+          attention: true,
+          holdBack: "A loan instalment: split it into principal and interest first.",
+        };
       }
     }
     if (info.kind === "loan") {
       notes.push("Looks like a loan instalment, but no loan in Liabilities matches it. Add the loan there, then choose Loan repayment here.");
-      attention = true;
+      holdFor("It looks like a loan instalment, and no loan matches it.");
     }
     if (info.kind === "charges") {
       return {
@@ -477,7 +489,7 @@ function suggest(
     }
     if (info.kind === "tax") {
       notes.push("Looks like a tax payment (GST, TDS, PF or similar). Tax that settles an amount already owed is not an expense; check before adding it.");
-      attention = true;
+      holdFor("It looks like a tax payment, which may settle an amount already owed.");
     }
     // Who it was paid to: the file's vendor column, else a remembered party, else a vendor in the books, else the narration's payee.
     const rule = ruleFor(ctx, line, info);
@@ -539,7 +551,7 @@ function suggest(
       decision: decide("expense", { party: party ?? info.handle ?? cleanNarration(line.narration), category, holderId: owner?.id, projectId: project?.projectId, stage: project?.stage }),
       notes,
       attention,
-      holdBack: recordedElsewhere ? "It may already be recorded as a payment from another account." : undefined,
+      holdBack: recordedElsewhere ? "It may already be recorded as a payment from another account." : hold,
       group,
     };
   }
@@ -551,16 +563,21 @@ function suggest(
   const holder = ctx.holders.find((h) => containsName(h.name, line.narration));
   if (holder) {
     notes.push(`From ${holder.name}, ${holder.kind === "investor" ? "an investor" : "an owner"}: read as capital introduced. Change it if it was something else.`);
-    return { decision: decide("capital", { holderId: holder.id, party: holder.name }), notes, attention: true };
+    return { decision: decide("capital", { holderId: holder.id, party: holder.name }), notes, attention: true, holdBack: "It is from an owner or investor: check it is capital." };
   }
   if (info.kind === "loan" && /disb|sanction/i.test(line.narration)) {
     const lender = info.payee ?? info.handle ?? cleanNarration(line.narration);
     notes.push("Looks like a loan paid out to you. Pick the group it belongs to.");
-    return { decision: decide("loan_received", { party: lender, loanName: `Loan from ${lender}`.slice(0, 160) }), notes, attention: true };
+    return {
+      decision: decide("loan_received", { party: lender, loanName: `Loan from ${lender}`.slice(0, 160) }),
+      notes,
+      attention: true,
+      holdBack: "It looks like a loan paid out to you.",
+    };
   }
   if (info.kind === "refund") {
     notes.push("Looks like a refund or reversal. If it reverses a withdrawal, choose Ignore, or match it, instead of income.");
-    attention = true;
+    holdFor("It looks like a refund or reversal, not income.");
   }
   // Income is pre-ticked only when the payer is a known customer, a remembered party, or the line pays an open invoice.
   const rule = ruleFor(ctx, line, info);
@@ -604,13 +621,14 @@ function suggest(
         ? `${about} The new income is linked to that invoice, so the invoice shows as paid. Untick the link in the line's details if it pays something else.`
         : `${about} The payer here is ${party}, so the receipt is not linked to it. Link it from the income record if it pays that invoice.`,
     );
-    if (!linkable) attention = true;
+    if (!linkable) holdFor("It looks like a payment of an open invoice from another payer.");
   }
   return {
     decision: decide("income", { party: party ?? info.handle ?? cleanNarration(line.narration), incomeCategory, projectId, invoiceId: linkable ? invoice!.id : undefined }),
     notes,
     attention,
     invoice: invoice ? { id: invoice.id, number: invoice.number, client: invoice.client, outstanding: invoice.outstanding } : null,
+    holdBack: hold,
     group,
   };
 }
@@ -827,6 +845,16 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
       };
     }
     const lineIssues = line.check === "mismatch" || line.check === "fixed" || line.issues.length > 0;
+    // Lines whose side the reader had to decide: their money could be on the wrong side.
+    const sideHold =
+      line.check === "mismatch"
+        ? "Its amount does not agree with the running balance."
+        : line.check === "fixed"
+          ? "Its side was corrected from the running balance."
+          : line.issues.some((t) => /does not say whether this is a withdrawal or a deposit/.test(t))
+            ? "The statement does not say whether it is a withdrawal or a deposit."
+            : null;
+    const againHold = reopened.has(hash) ? "It was added before and is not tied to a record now." : null;
     const again = reopened.has(hash) ? [reopened.get(hash)!] : [];
     const twin = lookalikes.get(i);
     if (twin) {
@@ -848,6 +876,7 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
         imported: null,
         candidates: [],
         suggestion: { ...suggest(line, ctx).decision, action: "ignore" },
+        holdBack: "A line with the same date and amount was imported before.",
         notes: [
           `A line with the same date, amount${line.balance !== null ? " and balance" : ""} was imported on ${on}${became}. Its narration reads differently, so this is probably the same line from another download of the statement. It is set to Ignore; change it only if it is a separate payment.`,
           ...(untied
@@ -892,7 +921,17 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
         suggestion: { ...s.decision, action: "match", matchKey: match.key },
         notes: [...again, ...notes],
         attention: lineIssues || Boolean(match.otherAccount) || partBill || farPayment || again.length > 0,
-        holdBack: line.check === "mismatch" ? "Its amount does not agree with the running balance." : null,
+        // A match that is not certain waits: tied to the wrong record, the right one stays unpaid.
+        holdBack:
+          sideHold ??
+          againHold ??
+          (partBill
+            ? "It pays part of a bill: check it is this bill."
+            : farPayment
+              ? "The payment it ties to was recorded far from this date."
+              : match.otherAccount
+                ? "The record it ties to is counted in another account."
+                : null),
         group: s.group ?? null,
       };
     }
@@ -908,10 +947,11 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
       suggestion: s.decision,
       notes: [...again, ...early, ...billNote, ...s.notes],
       attention: lineIssues || s.attention || again.length > 0 || early.length > 0 || billNote.length > 0,
-      // These start unticked, for a person to check: adding them as new could record the same money twice.
+      // These start unticked, for a person to check: adding them as new could record the same money twice,
+      // or put it in the wrong place.
       holdBack: billNote.length
         ? "An unpaid bill has the same amount."
-        : (s.holdBack ?? (line.check === "mismatch" ? "Its amount does not agree with the running balance." : null)),
+        : (s.holdBack ?? sideHold ?? againHold ?? (early.length ? "It is dated before this account's opening balance date." : null)),
       group: s.group ?? null,
     };
   });

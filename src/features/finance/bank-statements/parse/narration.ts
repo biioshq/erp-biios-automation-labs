@@ -144,10 +144,17 @@ export function analyseNarration(narration: string, side: "dr" | "cr", options: 
     .split(/[\/|:*]+|\s-\s?|-(?=[A-Za-z0-9])|(?<=[A-Za-z0-9])-|\s{2,}|,/)
     .map((p) => p.trim())
     .filter(Boolean);
-  // Kotak and others print the payee's bank right before the 12-digit UPI reference
+  // Kotak and others print the payee's bank right before the 12-digit UPI reference, after the payee
   // ("UPI/Siddh Sagar Bh/PPIW/632516679288/enjoy"): four capitals there are a bank code, not a name.
-  // (After the reference comes the payee in SBI's order, "UPI/DR/412345678901/AMIT/SBIN", so only before.)
-  const bankSlot = (i: number) => channel === "upi" && /^[A-Z]{4}$/.test(parts[i]!) && /^\d{12}$/.test(parts[i + 1] ?? "");
+  // Only between a payee and the reference: "UPI/NEHA/632516679288" names Neha, and in SBI's order
+  // ("UPI/DR/412345678901/AMIT/SBIN") the payee comes after the reference.
+  const handleLike = (p: string) => /^[a-z0-9][a-z0-9._-]{3,39}$/i.test(p) && /[a-z]/i.test(p) && /\d/.test(p) && !NOISE.has(p.toLowerCase());
+  const bankSlot = (i: number) =>
+    channel === "upi" &&
+    /^[A-Z]{4}$/.test(parts[i]!) &&
+    /^\d{12}$/.test(parts[i + 1] ?? "") &&
+    i > 0 &&
+    (nameLike(parts[i - 1]!) !== null || handleLike(parts[i - 1]!));
   const names = parts.map((p, i) => (bankSlot(i) ? null : nameLike(p))).filter((p): p is string => Boolean(p));
 
   let payee: string | null = null;
@@ -172,21 +179,18 @@ export function analyseNarration(narration: string, side: "dr" | "cr", options: 
   }
   if (payee && payee.length > 120) payee = payee.slice(0, 120);
 
-  // No name: a UPI line still shows who was paid, as a handle ("ombk.aahh47175", "MH12VW5243").
+  // No name: a UPI line still shows who was paid, as a handle ("ombk.aahh47175", "MH12VW5243"). Only
+  // the payee's place counts, before the bank code and the reference: what follows is the payer's
+  // remark or a transaction id ("Inv2411", "T2411271234567890123"), never the payee.
   let handle: string | null = null;
   if (!payee && channel === "upi" && kind !== "atm" && kind !== "charges" && kind !== "interest") {
+    const end = parts.findIndex((p, i) => /^\d{12}$/.test(p) || bankSlot(i));
+    const digitShare = (p: string) => (p.match(/\d/g) ?? []).length / p.length;
     handle =
       vpa ??
-      parts.find(
-        (p, i) =>
-          !bankSlot(i) &&
-          /^[a-z0-9][a-z0-9._-]{3,39}$/i.test(p) &&
-          /[a-z]/i.test(p) &&
-          /\d/.test(p) &&
-          !/^[a-z]{4}0[a-z0-9]{6}$/i.test(p) &&
-          !/x{3,}|\*{3,}/i.test(p) &&
-          !NOISE.has(p.toLowerCase()),
-      ) ??
+      parts
+        .slice(0, end >= 0 ? end : parts.length)
+        .find((p) => handleLike(p) && p.length <= 24 && digitShare(p) <= 0.7 && !/^[a-z]{4}0[a-z0-9]{6}$/i.test(p) && !/x{3,}|\*{3,}/i.test(p)) ??
       null;
   }
 

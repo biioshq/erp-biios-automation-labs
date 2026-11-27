@@ -2,9 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { can, getCurrentUser } from "@/server/auth/session";
 import { rateLimit } from "@/server/rate-limit";
 import { StatementReadError } from "@/features/finance/bank-statements/server/errors";
-import { MAX_PDF_PASSWORD, PdfPasswordError } from "@/features/finance/bank-statements/server/pdf";
-import { formatOf, readStatementFile } from "@/features/finance/bank-statements/server/read-file";
-import { ExcelReadError } from "@/features/imports/csv/excel";
+import { readStatementFile } from "@/features/finance/bank-statements/server/read-file";
 
 export const maxDuration = 60;
 
@@ -13,8 +11,30 @@ const MAX_BYTES = 4 * 1024 * 1024;
 /** The whole request: the file plus room for the multipart boundaries, part headers and the password field. */
 const MAX_BODY = MAX_BYTES + 64 * 1024;
 
-const tooLarge = () =>
-  NextResponse.json({ error: "Statements up to 4 MB can be uploaded. Download a shorter period, or the CSV version, and upload that." }, { status: 413 });
+const tooLarge = () => NextResponse.json({ error: "Statements up to 4 MB can be uploaded. Download a shorter period and upload that." }, { status: 413 });
+
+const CSV_ONLY = "Only CSV statements can be uploaded. Download the statement from net banking as CSV (comma-separated) and upload that file.";
+
+/**
+ * Why the file is not a CSV, judged from its first bytes (a name can be changed, the content cannot):
+ * a PDF, an Excel workbook (.xlsx is a zip, old .xls is an OLE file or an HTML table), or binary data.
+ * Null for text.
+ */
+function notCsv(head: Uint8Array): string | null {
+  const starts = (sig: number[]) => sig.every((b, i) => head[i] === b);
+  if (starts([0x25, 0x50, 0x44, 0x46])) return "This file is a PDF renamed to .csv. Download the statement from net banking as CSV and upload that file.";
+  if (starts([0x50, 0x4b, 0x03, 0x04]) || starts([0xd0, 0xcf, 0x11, 0xe0])) {
+    return "This file is an Excel workbook renamed to .csv. Open it in Excel and save it as CSV (comma-separated), or download the CSV from net banking.";
+  }
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(head).replace(/^\uFEFF/, "").trimStart().slice(0, 200).toLowerCase();
+  if (text.startsWith("<html") || text.startsWith("<!doctype") || text.startsWith("<table") || text.startsWith("<?xml")) {
+    return "This file is a web page or Excel export renamed to .csv, not a CSV. Download the statement from net banking as CSV and upload that file.";
+  }
+  // Text files have no NUL bytes; UTF-16 text does, and is read as text by the reader's own check.
+  const utf16 = starts([0xff, 0xfe]) || starts([0xfe, 0xff]);
+  if (!utf16 && head.includes(0)) return "This file is not a text CSV. Download the statement from net banking as CSV and upload that file.";
+  return null;
+}
 
 /**
  * The request body, read until `max` bytes and no further ("too-large" past that), so an oversized
@@ -45,10 +65,10 @@ async function readBody(request: NextRequest, max: number): Promise<Uint8Array<A
 }
 
 /**
- * POST multipart "file" (CSV, .xlsx, .xls or PDF), and "password" for a locked PDF: the statement's
- * rows, the row with its column names and what each column holds, for the bank statement page. A
- * locked PDF without the right password answers 400 with `needsPassword` ("missing" or "wrong"). Nothing is saved. Needs the bank
- * statements create permission: what it leads to creates money records across Finance.
+ * POST multipart "file", a CSV statement only: the statement's rows, the row with its column names
+ * and what each column holds, for the bank statement page. Anything that is not a CSV, by its name
+ * or its content, is refused. Nothing is saved. Needs the bank statements create permission: what
+ * it leads to creates money records across Finance.
  */
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser();
@@ -71,27 +91,19 @@ export async function POST(request: NextRequest) {
     : null;
   const file = form?.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "No file was sent." }, { status: 400 });
-  if (!formatOf(file.name)) return NextResponse.json({ error: "Upload the statement as CSV, Excel (.xlsx or .xls) or PDF." }, { status: 400 });
+  // CSV only: the name first, then the content, so a PDF or a workbook renamed to .csv is refused too.
+  if (!/\.csv$/i.test(file.name.trim())) return NextResponse.json({ error: CSV_ONLY }, { status: 400 });
   if (file.size === 0) return NextResponse.json({ error: "This file is empty." }, { status: 400 });
   if (file.size > MAX_BYTES) return tooLarge();
-  // A locked PDF's password, typed by the admin. Only handed to the PDF reader: never logged, stored or sent back.
-  const rawPassword = form?.get("password");
-  const password = typeof rawPassword === "string" && rawPassword !== "" ? rawPassword : undefined;
-  if (password && password.length > MAX_PDF_PASSWORD) {
-    return NextResponse.json({ error: `A PDF password has at most ${MAX_PDF_PASSWORD} characters.`, needsPassword: "wrong" }, { status: 400 });
-  }
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const wrongKind = notCsv(bytes.subarray(0, 4096));
+  if (wrongKind) return NextResponse.json({ error: wrongKind }, { status: 400 });
   try {
-    const parsed = await readStatementFile(Buffer.from(await file.arrayBuffer()), file.name, { password });
+    const parsed = await readStatementFile(bytes, file.name);
     return NextResponse.json(parsed, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    if (error instanceof PdfPasswordError) {
-      return NextResponse.json({ error: error.message, needsPassword: error.reason }, { status: 400, headers: { "Cache-Control": "no-store" } });
-    }
     if (error instanceof StatementReadError) return NextResponse.json({ error: error.message }, { status: 400 });
-    // The reader turns these into StatementReadError; kept here too, as its message is written for the admin.
-    if (error instanceof ExcelReadError) return NextResponse.json({ error: error.message }, { status: 400 });
-    // Only the error goes to the log: the request, and with it any password, does not.
     console.error("[bank-statements] read failed", error);
-    return NextResponse.json({ error: "This statement could not be read. Try the CSV or Excel download from your bank." }, { status: 500 });
+    return NextResponse.json({ error: "This statement could not be read. Check it is the CSV download from your bank." }, { status: 500 });
   }
 }

@@ -45,6 +45,9 @@ function nonEmpty(rows: GridRow[], lineGaps = false): GridRow[] {
 }
 
 function decode(bytes: Buffer): string {
+  // Excel's "Unicode" CSV is UTF-16 with a byte order mark.
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
   const utf8 = new TextDecoder("utf-8").decode(bytes);
   // Some banks still export Windows-1252; a run of replacement characters means it was not UTF-8.
   if ((utf8.match(/�/g)?.length ?? 0) > 3) return new TextDecoder("windows-1252").decode(bytes);

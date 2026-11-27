@@ -132,7 +132,7 @@ export const MODULES: NavModule[] = [
         permission: "finance.bank_statements:view",
         icon: Landmark,
         notLanding: true,
-        keywords: ["bank statement", "upload statement", "import statement", "csv", "excel", "pdf", "deposit", "withdrawal", "reconcile", "bank import"],
+        keywords: ["bank statement", "upload statement", "import statement", "csv", "deposit", "withdrawal", "reconcile", "bank import"],
       },
       { title: "Dashboard", href: "/finance", permission: "finance.dashboard:view", icon: LayoutDashboard, exact: true, keywords: ["overview", "profit", "cash position"] },
       { title: "Daily overview", href: "/finance/daily", permission: "finance.daily:view", icon: CalendarDays, keywords: ["daily", "today", "day book", "cash flow", "income received", "payments made", "outstanding"] },

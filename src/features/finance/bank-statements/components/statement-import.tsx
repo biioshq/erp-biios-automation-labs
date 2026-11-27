@@ -3,10 +3,9 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, ArrowDownLeft, ArrowRight, ArrowUpRight, FileText, Landmark, Lock, RefreshCw, Upload } from "lucide-react";
+import { AlertTriangle, ArrowDownLeft, ArrowRight, ArrowUpRight, FileText, Landmark, RefreshCw, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -54,7 +53,10 @@ const MAX_BYTES = 4 * 1024 * 1024;
 const PAGE_SIZE = 50;
 /** Lines shown under the columns before the review, to check they are read right. */
 const PREVIEW_ROWS = 10;
-const ACCEPT = ".csv,.txt,.xlsx,.xls,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
+/** Statements are taken as CSV only: the server refuses anything else too. */
+const ACCEPT = ".csv,text/csv";
+const isCsvName = (name: string) => /\.csv$/i.test(name.trim());
+const CSV_ONLY = "Only CSV statements can be uploaded. Download the statement from net banking as CSV (comma-separated) and upload that file.";
 
 type Review = { accountId: string; statement: ParsedStatement; lines: ReviewLine[]; pickers: StatementPickers };
 type Run = { pending: number[]; total: number; results: AddLineResult[]; statementId: string | null; busy: boolean; error: string | null };
@@ -98,34 +100,16 @@ function download(name: string, csv: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** The longest password the server takes (MAX_PDF_PASSWORD in server/pdf.ts). */
-const MAX_PASSWORD = 128;
-
-/** A locked PDF: the server needs its password ("missing") or the one typed did not open it ("wrong"). */
-class PasswordNeeded extends Error {
-  constructor(
-    message: string,
-    readonly reason: "missing" | "wrong",
-  ) {
-    super(message);
-  }
-}
-
-/** The password goes in the POST body only, never in the address or anywhere it is kept. */
-async function readOnServer(file: File, password?: string): Promise<ReadStatementResult> {
+async function readOnServer(file: File): Promise<ReadStatementResult> {
   const form = new FormData();
   form.append("file", file);
-  if (password) form.append("password", password);
   let res: Response;
   try {
     res = await fetch("/api/bank-statements", { method: "POST", body: form });
   } catch {
     throw new Error("Network error while reading the statement. Check your connection and try again.");
   }
-  const body = (await res.json().catch(() => null)) as (Partial<ReadStatementResult> & { error?: string; needsPassword?: "missing" | "wrong" }) | null;
-  if (body?.needsPassword === "missing" || body?.needsPassword === "wrong") {
-    throw new PasswordNeeded(body.error ?? "This PDF is password protected.", body.needsPassword);
-  }
+  const body = (await res.json().catch(() => null)) as (Partial<ReadStatementResult> & { error?: string }) | null;
   if (!res.ok || !body?.grid) throw new Error(body?.error ?? `The statement could not be read (error ${res.status}).`);
   return body as ReadStatementResult;
 }
@@ -156,9 +140,6 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [dragging, setDragging] = useState(false);
-  // A locked PDF waiting for its password. The password lives only here, until the file is read or changed.
-  const [locked, setLocked] = useState<File | null>(null);
-  const [password, setPassword] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const problemsOfMapping = headerIndex >= 0 ? mappingProblems(mapping) : ["no header"];
@@ -206,8 +187,6 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
     setHeaderIndex(-1);
     setMapping([]);
     setShowMapping(false);
-    setLocked(null);
-    setPassword("");
     if (inputRef.current) inputRef.current.value = "";
   }
 
@@ -245,30 +224,29 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
   async function pickFile(f: File | null | undefined) {
     if (!f) return;
     resetAll();
+    // The picker offers CSV only, but a dropped file can be anything.
+    if (!isCsvName(f.name)) {
+      setFileError(CSV_ONLY);
+      return;
+    }
     if (f.size > MAX_BYTES) {
-      setFileError(`This file is ${formatFileSize(f.size)}. Statements up to 4 MB can be uploaded: download a shorter period, or the CSV version.`);
+      setFileError(`This file is ${formatFileSize(f.size)}. Statements up to 4 MB can be uploaded: download a shorter period.`);
       return;
     }
     await readFile(f);
   }
 
-  async function readFile(f: File, pdfPassword?: string) {
+  async function readFile(f: File) {
     setReading(true);
     setFileError(null);
     try {
-      const read = await readOnServer(f, pdfPassword);
-      setLocked(null);
-      setPassword("");
+      const read = await readOnServer(f);
       setFile({ ...read, size: f.size });
       setHeaderIndex(read.headerIndex);
       setMapping(read.mapping);
       // The columns are always shown for a check first; the review starts with Continue to review.
       setShowMapping(true);
     } catch (error) {
-      if (error instanceof PasswordNeeded) {
-        setLocked(f);
-        if (error.reason === "wrong") setPassword("");
-      }
       setFileError(error instanceof Error ? error.message : "This statement could not be read.");
     } finally {
       setReading(false);
@@ -556,9 +534,9 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
             <span className="flex size-10 items-center justify-center rounded-full border bg-card shadow-card transition-transform group-hover:-translate-y-0.5">
               {reading ? <Spinner /> : <Upload className="size-4.5 text-muted-foreground group-hover:text-brand-ink" />}
             </span>
-            <span className="text-sm font-medium">{reading ? "Reading the statement…" : "Choose the statement file, or drop it here"}</span>
+            <span className="text-sm font-medium">{reading ? "Reading the statement…" : "Choose the CSV statement, or drop it here"}</span>
             <span className="max-w-md text-xs text-muted-foreground">
-              CSV, Excel (.xlsx or .xls) or PDF with text, up to 4 MB, as downloaded from net banking. HDFC, ICICI, SBI, Axis, Kotak, Yes, IDFC and most other banks are read.
+              CSV only, up to 4 MB: in net banking, download the statement as CSV. HDFC, ICICI, SBI, Axis, Kotak, Yes, IDFC and most other banks are read.
             </span>
           </button>
           <input ref={inputRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => void pickFile(e.target.files?.[0])} />
@@ -566,37 +544,6 @@ export function StatementImport({ accounts }: { accounts: BankAccountOption[] })
             <p className="text-sm text-danger" role="alert">
               {fileError}
             </p>
-          ) : null}
-          {locked ? (
-            <form
-              className="flex flex-wrap items-end gap-2 rounded-xl border p-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (password && !reading) void readFile(locked, password);
-              }}
-            >
-              <div className="min-w-0 flex-1 space-y-1.5">
-                <Label htmlFor="statement-pdf-password" className="flex min-w-0 items-center gap-1.5">
-                  <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="truncate">Password for {locked.name}</span>
-                </Label>
-                <Input
-                  id="statement-pdf-password"
-                  type="password"
-                  autoComplete="off"
-                  maxLength={MAX_PASSWORD}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={reading}
-                  autoFocus
-                />
-              </div>
-              <Button type="submit" size="sm" disabled={!password || reading}>
-                {reading ? <Spinner /> : null}
-                Read with password
-              </Button>
-              <p className="w-full text-xs text-muted-foreground">The password is used only to open this file. It is not saved.</p>
-            </form>
           ) : null}
         </div>
       ) : null}

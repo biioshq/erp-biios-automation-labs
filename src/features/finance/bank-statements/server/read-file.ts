@@ -231,21 +231,37 @@ async function checkWorkbookSize(bytes: Buffer): Promise<void> {
   }
 }
 
-/** Unzips one part chunk by chunk. When `onChunk` throws, unzipping stops and the promise rejects with that error. */
-function unzipPart(part: JSZip.JSZipObject, onChunk: (chunk: Buffer) => void): Promise<void> {
+/** JSZip's own chunk stream (documented as ZipObject#internalStream; its type file leaves it out). */
+type ZipChunks = {
+  on(event: "data", fn: (chunk: Uint8Array) => void): ZipChunks;
+  on(event: "error", fn: (error: unknown) => void): ZipChunks;
+  on(event: "end", fn: () => void): ZipChunks;
+  resume(): ZipChunks;
+  pause(): ZipChunks;
+};
+
+/**
+ * Unzips one part chunk by chunk, with JSZip's own stream so no Node stream support is needed.
+ * When `onChunk` throws, unzipping stops and the promise rejects with that error.
+ */
+function unzipPart(part: JSZip.JSZipObject, onChunk: (chunk: Uint8Array) => void): Promise<void> {
   return new Promise((resolve, reject) => {
-    const stream = part.nodeStream("nodebuffer");
-    stream.on("data", (chunk: Buffer) => {
-      try {
-        onChunk(chunk);
-      } catch (error) {
-        stream.pause();
-        stream.removeAllListeners("data");
-        reject(error);
-      }
-    });
-    stream.on("error", reject);
-    stream.on("end", () => resolve());
+    let stopped = false;
+    const stream = (part as unknown as { internalStream(type: "uint8array"): ZipChunks }).internalStream("uint8array");
+    stream
+      .on("data", (chunk) => {
+        if (stopped) return;
+        try {
+          onChunk(chunk);
+        } catch (error) {
+          stopped = true;
+          stream.pause();
+          reject(error);
+        }
+      })
+      .on("error", reject)
+      .on("end", () => resolve())
+      .resume();
   });
 }
 

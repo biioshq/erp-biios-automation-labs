@@ -10,6 +10,39 @@ export const maxDuration = 60;
 
 /** Below Vercel's 4.5 MB request limit, like the Excel import. A year of statement lines is a few hundred KB. */
 const MAX_BYTES = 4 * 1024 * 1024;
+/** The whole request: the file plus room for the multipart boundaries, part headers and the password field. */
+const MAX_BODY = MAX_BYTES + 64 * 1024;
+
+const tooLarge = () =>
+  NextResponse.json({ error: "Statements up to 4 MB can be uploaded. Download a shorter period, or the CSV version, and upload that." }, { status: 413 });
+
+/**
+ * The request body, read until `max` bytes and no further ("too-large" past that), so an oversized
+ * upload is refused before it is held in memory and parsed. Null without a body.
+ */
+async function readBody(request: NextRequest, max: number): Promise<Uint8Array<ArrayBuffer> | null | "too-large"> {
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return "too-large";
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
+}
 
 /**
  * POST multipart "file" (CSV, .xlsx, .xls or PDF), and "password" for a locked PDF: the statement's
@@ -28,14 +61,19 @@ export async function POST(request: NextRequest) {
       { status: 429, headers: { "Retry-After": String(limited.retryAfter) } },
     );
   }
-  const form = await request.formData().catch(() => null);
+  // The size is checked before the body is read: first the declared length, then while reading.
+  const declared = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > MAX_BODY) return tooLarge();
+  const body = await readBody(request, MAX_BODY).catch(() => null);
+  if (body === "too-large") return tooLarge();
+  const form = body
+    ? await new Response(body, { headers: { "content-type": request.headers.get("content-type") ?? "" } }).formData().catch(() => null)
+    : null;
   const file = form?.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "No file was sent." }, { status: 400 });
   if (!formatOf(file.name)) return NextResponse.json({ error: "Upload the statement as CSV, Excel (.xlsx or .xls) or PDF." }, { status: 400 });
   if (file.size === 0) return NextResponse.json({ error: "This file is empty." }, { status: 400 });
-  if (file.size > MAX_BYTES) {
-    return NextResponse.json({ error: "Statements up to 4 MB can be uploaded. Download a shorter period, or the CSV version, and upload that." }, { status: 413 });
-  }
+  if (file.size > MAX_BYTES) return tooLarge();
   // A locked PDF's password, typed by the admin. Only handed to the PDF reader: never logged, stored or sent back.
   const rawPassword = form?.get("password");
   const password = typeof rawPassword === "string" && rawPassword !== "" ? rawPassword : undefined;

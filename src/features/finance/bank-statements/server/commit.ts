@@ -322,6 +322,10 @@ async function createRecord(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
   const amount = amountOf(l);
   const user = Types.ObjectId.isValid(ctx.userId) ? oid(ctx.userId) : undefined;
   const out = isOut(l);
+  // The add schema already refuses such a line; this keeps a zero-amount record out of the books whoever calls this.
+  if (d.action !== "ignore" && (!(amount > 0) || (l.withdrawal > 0 && l.deposit > 0))) {
+    throw new AppError("This line needs one amount: a withdrawal or a deposit above zero, not both.", "invalid");
+  }
   switch (d.action) {
     case "ignore":
       return null;

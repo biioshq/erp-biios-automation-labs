@@ -92,7 +92,8 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
         ...maybeUnpaidFilter(),
         ...salaryScope,
         countedAtPurchase: { $ne: true },
-        source: { $nin: ["inventory_assignment", "inventory_wastage"] },
+        // The expenses Record payment refuses (assertTakesPayments), which paying from a line refuses too.
+        source: { $nin: UNMATCHED_EXPENSE_SOURCES },
         date: { $lte: to },
         // Only bills still owing money, before the limit: paid ones with a payments list would crowd them out.
         $expr: { $gt: [OUTSTANDING_EXPR, 0.005] },

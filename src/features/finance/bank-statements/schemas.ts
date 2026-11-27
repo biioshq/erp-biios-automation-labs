@@ -77,7 +77,18 @@ export const addLinesSchema = z.object({
     .array(statementLineSchema.extend({ occurrence: z.number().int().min(0).max(MAX_STATEMENT_LINES), decision: lineDecisionSchema }))
     .min(1)
     .max(ADD_BATCH),
-});
+})
+  // A bank line moves money one way: the reader never produces a row with both amounts or with none.
+  // Checked on the whole batch so the message reaches the page (a nested issue shows only as "Some fields need attention").
+  .superRefine((v, ctx) => {
+    const bad = v.lines.find((l) => (l.withdrawal > 0) === (l.deposit > 0));
+    if (bad) {
+      ctx.addIssue({
+        code: "custom",
+        message: `${bad.line > 0 ? `Row ${bad.line}` : "A line"} needs one amount: a withdrawal or a deposit above zero, not both and not neither.`,
+      });
+    }
+  });
 
 export type ReviewStatementInput = z.input<typeof reviewStatementSchema>;
 export type AddLinesInput = z.input<typeof addLinesSchema>;

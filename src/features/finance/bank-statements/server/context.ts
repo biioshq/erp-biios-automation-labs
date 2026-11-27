@@ -60,10 +60,16 @@ export async function loadOwnAccounts(): Promise<OwnAccount[]> {
   }));
 }
 
-/** Each vendor's most used category in the last two years, keyed by the vendor's name in lower case. */
-export async function loadVendorHistory(): Promise<Map<string, VendorHistory>> {
+/** Mongo condition that leaves salary expenses out for people who may not see salaries. */
+const salaryScope = (salaries: boolean) => (salaries ? {} : { category: { $ne: "salaries" } });
+
+/**
+ * Each vendor's most used category in the last two years, keyed by the vendor's name in lower case.
+ * Without `salaries`, salary expenses are left out: their vendors are the people paid.
+ */
+export async function loadVendorHistory(salaries: boolean): Promise<Map<string, VendorHistory>> {
   const rows = await Expense.aggregate<{ _id: { v: string; c: string }; n: number; name: string }>([
-    { $match: { date: { $gte: addDays(new Date(), -HISTORY_DAYS) }, source: { $in: ["manual", "recurring", "inventory_purchase"] } } },
+    { $match: { date: { $gte: addDays(new Date(), -HISTORY_DAYS) }, source: { $in: ["manual", "recurring", "inventory_purchase"] }, ...salaryScope(salaries) } },
     { $group: { _id: { v: { $toLower: "$vendor" }, c: "$category" }, n: { $sum: 1 }, name: { $last: "$vendor" } } },
   ]);
   const out = new Map<string, VendorHistory>();
@@ -100,12 +106,12 @@ export type VendorProjects = {
   projects: Map<string, { count: number; stages: Map<string, number> }>;
 };
 
-/** Projects, and which projects and stages each vendor's recent expenses went to, for suggesting a line's project. */
-export async function loadProjectHistory(): Promise<{ projects: ProjectRef[]; byVendor: Map<string, VendorProjects>; stageOf: Map<string, string> }> {
+/** Projects, and which projects and stages each vendor's recent expenses went to, for suggesting a line's project. Salaries as in loadVendorHistory. */
+export async function loadProjectHistory(salaries: boolean): Promise<{ projects: ProjectRef[]; byVendor: Map<string, VendorProjects>; stageOf: Map<string, string> }> {
   const [projects, rows] = await Promise.all([
     Project.find({}, { code: 1, name: 1, status: 1 }).lean(),
     Expense.aggregate<{ _id: { v: string | null; p: unknown; s: string | null }; n: number }>([
-      { $match: { date: { $gte: addDays(new Date(), -PROJECT_HISTORY_DAYS) }, source: { $in: ["manual", "recurring", "inventory_purchase"] } } },
+      { $match: { date: { $gte: addDays(new Date(), -PROJECT_HISTORY_DAYS) }, source: { $in: ["manual", "recurring", "inventory_purchase"] }, ...salaryScope(salaries) } },
       { $group: { _id: { v: { $toLower: "$vendor" }, p: "$project", s: "$stage" }, n: { $sum: 1 } } },
     ]),
   ]);

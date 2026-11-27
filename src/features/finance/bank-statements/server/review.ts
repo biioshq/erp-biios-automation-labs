@@ -29,6 +29,8 @@ import {
   type VendorProjects,
 } from "./context";
 import { findRuleHit, loadRules, type PartyRule, type RuleBook } from "./rules";
+import { UNMATCHED_EXPENSE_SOURCES, placement } from "./placement";
+import { MATCH_PERMISSIONS } from "../match-access";
 
 /**
  * The review of a statement before anything is saved: which lines were imported before, which
@@ -53,26 +55,26 @@ const MATCH_DAYS = 3;
 const HAND_PAYMENT_DAYS = 30;
 
 type Side = "dr" | "cr";
-type Candidate = Omit<MatchOption, "score"> & { side: Side; party: string; refs: string[] };
+/**
+ * `blocked`: a record the person may not tie lines to ("kind", see match-access.ts) or may not see
+ * ("salary", without data.salaries). It still takes part in pairing, so a line it most likely is
+ * starts held back on Ignore instead of being suggested as a new record (the same money twice),
+ * but it is never shown as an option and its name is never put in a note.
+ */
+type Candidate = Omit<MatchOption, "score"> & { side: Side; party: string; refs: string[]; blocked?: "kind" | "salary" };
 
 const dayNumber = (ymd: string) => Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)) - 1, Number(ymd.slice(8, 10))) / DAY;
 const sideOf = (l: StatementLine): Side => (l.withdrawal > 0 ? "dr" : "cr");
 const amountOf = (l: StatementLine) => (l.withdrawal > 0 ? l.withdrawal : l.deposit);
 const alnum = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-/** Where a record's money is in the books: this account, another one (when it named none), or nowhere near. */
-function placement(book: AccountBook, target: string, method: string | null | undefined, account: unknown): { ok: boolean; other?: string } {
-  const code = book.resolve(method ?? "bank_transfer", account);
-  if (code === target) return { ok: true };
-  if (account || !code?.startsWith("cash:") || method === "cash" || method === "credit" || method === "stock" || method === "biios_startup_llp") return { ok: false };
-  return { ok: true, other: book.byCode.get(code)?.name ?? "another account" };
-}
-
 /** A payment recorded by hand on another of the company's bank accounts: a line may be that payment. */
 type ElsewherePayment = { label: string; party: string; amount: number; date: string; account: string };
 
-async function loadCandidates(accountId: string, book: AccountBook, from: Date, to: Date, elsewhere: ElsewherePayment[] = []): Promise<Candidate[]> {
+/** `salaries`: the person may see salaries; without it salary expenses are blocked (their vendors are the people paid). */
+async function loadCandidates(accountId: string, book: AccountBook, from: Date, to: Date, elsewhere: ElsewherePayment[], salaries: boolean): Promise<Candidate[]> {
   const target = `cash:${accountId}`;
+  const salaryBlock = (category: string | null | undefined) => (!salaries && category === "salaries" ? { blocked: "salary" as const } : {});
   const range = { $gte: from, $lte: to };
   // `from` and `to` already reach MATCH_DAYS past the lines; payments recorded by hand reach HAND_PAYMENT_DAYS.
   const payFrom = addDays(from, MATCH_DAYS - HAND_PAYMENT_DAYS);
@@ -86,21 +88,22 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
       {
         countedAtPurchase: { $ne: true },
         // Loan interest is part of its repayment, which is offered as one line.
-        source: { $nin: ["inventory_assignment", "inventory_wastage", "liability_interest"] },
+        source: { $nin: UNMATCHED_EXPENSE_SOURCES },
         $or: [{ date: range, payments: { $exists: false } }, { "payments.date": payRange }],
       },
-      { number: 1, vendor: 1, amount: 1, date: 1, paymentMethod: 1, account: 1, payments: 1, bankTransaction: 1, gst: 1 },
+      { number: 1, vendor: 1, amount: 1, date: 1, paymentMethod: 1, account: 1, payments: 1, bankTransaction: 1, gst: 1, category: 1 },
     ).lean(),
     Expense.find(
       {
         ...maybeUnpaidFilter(),
         countedAtPurchase: { $ne: true },
-        source: { $nin: ["inventory_assignment", "inventory_wastage"] },
+        // The expenses Record payment refuses (assertTakesPayments), which paying from a line refuses too.
+        source: { $nin: UNMATCHED_EXPENSE_SOURCES },
         date: { $lte: to },
         // Only bills still owing money, before the limit: paid ones with a payments list would crowd them out.
         $expr: { $gt: [OUTSTANDING_EXPR, 0.005] },
       },
-      { number: 1, vendor: 1, amount: 1, date: 1, dueDate: 1, paymentMethod: 1, account: 1, payments: 1, gst: 1 },
+      { number: 1, vendor: 1, amount: 1, date: 1, dueDate: 1, paymentMethod: 1, account: 1, payments: 1, gst: 1, category: 1 },
     )
       .sort({ date: -1 })
       .limit(3000)
@@ -121,7 +124,7 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
       if (e.paymentMethod === "credit" || e.bankTransaction) continue;
       const p = placement(book, target, e.paymentMethod, e.account);
       if (!p.ok) continue;
-      add({ key: `expense:${e._id}`, kind: "expense", id: String(e._id), label: `${e.number} · ${e.vendor}`, detail: "Expense paid on its date", href: `/finance/expenses?view=${e._id}`, amount: e.amount, date: toDateInput(e.date), side: "dr", party: e.vendor, refs, otherAccount: p.other });
+      add({ key: `expense:${e._id}`, kind: "expense", id: String(e._id), label: `${e.number} · ${e.vendor}`, detail: "Expense paid on its date", href: `/finance/expenses?view=${e._id}`, amount: e.amount, date: toDateInput(e.date), side: "dr", party: e.vendor, refs, otherAccount: p.other, ...salaryBlock(e.category) });
       continue;
     }
     for (const pay of e.payments) {
@@ -131,7 +134,8 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
         // Booked to another bank account (Mark as paid starts with the default one). Matching would leave
         // the money on that account, so it is not offered; the line is flagged instead (see suggest).
         const code = pay.account ? book.resolve(pay.paymentMethod ?? "bank_transfer", pay.account) : null;
-        if (code?.startsWith("cash:") && code !== target) {
+        // Its note names the vendor, so a salary payment is left out for people who may not see salaries.
+        if (code?.startsWith("cash:") && code !== target && !salaryBlock(e.category).blocked) {
           elsewhere.push({ label: `${e.number} · ${e.vendor}`, party: e.vendor, amount: pay.amount, date: toDateInput(pay.date), account: book.byCode.get(code)?.name ?? "another account" });
         }
         continue;
@@ -150,6 +154,7 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
         party: e.vendor,
         refs: [...refs, pay.reference ?? ""].filter(Boolean),
         otherAccount: p.other,
+        ...salaryBlock(e.category),
       });
     }
   }
@@ -169,6 +174,7 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
       side: "dr",
       party: e.vendor,
       refs: [e.number, e.gst?.invoiceNumber ?? ""].filter(Boolean),
+      ...salaryBlock(e.category),
     });
   }
 
@@ -285,10 +291,13 @@ type Context = {
   invoices: { id: string; number: string; client: string; project: string | null; total: number; outstanding: number }[];
   /** Hand payments on the company's other bank accounts, filled with the match candidates. */
   elsewhere: ElsewherePayment[];
+  /** The person may see and add salaries (data.salaries). */
+  salaries: boolean;
 };
 
+/** A category the line may be suggested: one of the pickers, and Salaries only for people who may add salary expenses. */
 const allowedCategory = (ctx: Context, value: string | null | undefined) =>
-  value && ctx.pickers.categories.some((c) => c.value === value) ? value : null;
+  value && (ctx.salaries || value !== "salaries") && ctx.pickers.categories.some((c) => c.value === value) ? value : null;
 
 /**
  * The remembered party of a line, looked up once per line. A rule found only by its name inside
@@ -498,6 +507,16 @@ function suggest(
     const history = party ? ctx.vendorByKey.get(vendorKey(party)) : undefined;
     const column = columnCategory(ctx, line);
     if (column && "unknown" in column) notes.push(`The file's category "${column.unknown}" is not one of your expense categories, so the suggestion is kept. Change it if needed.`);
+    // Pay that this person may not add as Salaries is held back rather than booked under another category.
+    let salaryHold = false;
+    if (column && "value" in column && column.value === "salaries" && !ctx.salaries) {
+      notes.push("The file's category is Salaries, which your role cannot add, so another category is shown. Ask someone who may record salaries to add this line if it is pay.");
+      salaryHold = true;
+    } else if (info.kind === "salary" && !ctx.salaries) {
+      notes.push("Looks like a salary payment, which your role cannot add, so another category is shown. Ask someone who may record salaries to add this line if it is pay.");
+      salaryHold = true;
+    }
+    if (salaryHold) attention = true;
     // Remembered parties first, then the vendor's earlier expenses, then the narration's words.
     const fromColumn = column && "value" in column ? allowedCategory(ctx, column.value) : null;
     // Other is where a line nothing recognised goes: a remembered or earlier Other is not a category anyone picked.
@@ -506,7 +525,7 @@ function suggest(
     const fromSalary = info.kind === "salary" ? allowedCategory(ctx, "salaries") : null;
     const fromHistory = allowedCategory(ctx, picked(history?.category));
     const fromWords = allowedCategory(ctx, categoryFromWords(line.narration));
-    const category = fromColumn ?? fromRule ?? fromSalary ?? fromHistory ?? fromWords ?? allowedCategory(ctx, "other") ?? ctx.pickers.categories[0]?.value;
+    const category = fromColumn ?? fromRule ?? fromSalary ?? fromHistory ?? fromWords ?? allowedCategory(ctx, "other") ?? ctx.pickers.categories.find((c) => allowedCategory(ctx, c.value))?.value;
     if (rule) notes.push(`Remembered from your earlier choice: ${rule.party}${fromRule && !fromColumn ? `, ${ctx.pickers.categories.find((c) => c.value === fromRule)?.label ?? fromRule}` : ""}.`);
     if (fromColumn) notes.push("Category from the file's category column.");
     else if (!fromRule && !fromSalary && fromHistory && history) notes.push(`Category from ${history.count === 1 ? "an earlier expense" : `${history.count} earlier expenses`} with ${history.name}.`);
@@ -551,7 +570,11 @@ function suggest(
       decision: decide("expense", { party: party ?? info.handle ?? cleanNarration(line.narration), category, holderId: owner?.id, projectId: project?.projectId, stage: project?.stage }),
       notes,
       attention,
-      holdBack: recordedElsewhere ? "It may already be recorded as a payment from another account." : hold,
+      holdBack: recordedElsewhere
+        ? "It may already be recorded as a payment from another account."
+        : salaryHold
+          ? "It looks like a salary payment, which your role cannot add."
+          : hold,
       group,
     };
   }
@@ -633,19 +656,19 @@ function suggest(
   };
 }
 
-async function loadContext(accountId: string): Promise<{ ctx: Context; book: AccountBook }> {
+async function loadContext(accountId: string, salaries: boolean): Promise<{ ctx: Context; book: AccountBook }> {
   const account = await BankAccount.findById(accountId, { name: 1, bankName: 1, openingDate: 1 }).lean();
   if (!account) throw notFound("The bank account");
   const [book, own, history, clients, pickers, holders, loans, rules, projectHistory, receivables] = await Promise.all([
     loadAccountBook(),
     loadOwnAccounts(),
-    loadVendorHistory(),
+    loadVendorHistory(salaries),
     loadClientNames(),
     loadPickers(),
     EquityHolder.find({ archivedAt: null }, { name: 1, kind: 1 }).lean(),
     Liability.find({ archivedAt: null }, { name: 1, lender: 1, installment: 1 }).lean(),
-    loadRules(),
-    loadProjectHistory(),
+    loadRules(salaries),
+    loadProjectHistory(salaries),
     invoiceBalances(),
   ]);
   return {
@@ -670,6 +693,7 @@ async function loadContext(accountId: string): Promise<{ ctx: Context; book: Acc
         .filter((r) => r.outstanding > 0)
         .map((r) => ({ id: r.id, number: r.number, client: r.client, project: r.project, total: r.total, outstanding: r.outstanding })),
       elsewhere: [],
+      salaries,
     },
   };
 }
@@ -731,11 +755,18 @@ async function importedLookalikes(accountId: string, lines: StatementLine[], fre
  * How a stored line is reviewed again from its statement's page: with the occurrence its hash was
  * made with, and without looking for look-alike lines of other downloads (the line is its own).
  */
-export type ReviewOptions = { occurrences?: number[]; stored?: boolean };
+/**
+ * `matchKinds`: the kinds of "Already recorded" the person may add (match-access.ts); other records
+ * are not offered. `salaries`: the person may see salaries (data.salaries); without it, salary expenses,
+ * remembered salary payees and the salary category are left out of the suggestions, as the
+ * Remembered parties and Expenses pages leave them out. The review actions always pass both; an
+ * internal caller that leaves them out gets everything.
+ */
+export type ReviewOptions = { occurrences?: number[]; stored?: boolean; matchKinds?: ReadonlySet<MatchKind>; salaries?: boolean };
 
 /** The review of every line of a statement for one account. Reads only. */
 export async function reviewLines(accountId: string, lines: StatementLine[], options: ReviewOptions = {}): Promise<{ lines: ReviewLine[]; pickers: StatementPickers }> {
-  const { ctx, book } = await loadContext(accountId);
+  const { ctx, book } = await loadContext(accountId, options.salaries ?? true);
   const occ = options.occurrences && options.occurrences.length === lines.length ? options.occurrences : occurrences(accountId, lines);
   const hashes = lines.map((l, i) => lineHash(accountId, l, occ[i]));
 
@@ -761,14 +792,17 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
   const dates = fresh.map((i) => lines[i]!.date).sort();
   let candidates: Candidate[] = [];
   if (dates.length) {
-    candidates = await loadCandidates(accountId, book, addDays(fromDateInput(dates[0]!), -MATCH_DAYS), new Date(addDays(fromDateInput(dates[dates.length - 1]!), MATCH_DAYS + 1).getTime() - 1), ctx.elsewhere);
+    candidates = await loadCandidates(accountId, book, addDays(fromDateInput(dates[0]!), -MATCH_DAYS), new Date(addDays(fromDateInput(dates[dates.length - 1]!), MATCH_DAYS + 1).getTime() - 1), ctx.elsewhere, ctx.salaries);
     // Records already tied to one of this account's lines.
     const linked = await BankTransaction.find(
       { account: new Types.ObjectId(accountId), "link.id": { $in: candidates.map((c) => new Types.ObjectId(c.id)) } },
       { link: 1 },
     ).lean();
     const taken = new Set(linked.map((t) => `${t.link!.kind}:${t.link!.id}`));
-    candidates = candidates.filter((c) => !taken.has(c.kind === "bill" ? `expense:${c.id}` : c.key));
+    const allowed = options.matchKinds;
+    candidates = candidates
+      .filter((c) => !taken.has(c.kind === "bill" ? `expense:${c.id}` : c.key))
+      .map((c) => (!c.blocked && allowed && !allowed.has(c.kind) ? { ...c, blocked: "kind" as const } : c));
   }
 
   // What each line's narration says, and who else is known to be its party (the file's vendor column, a remembered party).
@@ -782,11 +816,15 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
 
   // Every possible pair, best first; each line and each record is used once.
   const pairs: { i: number; c: Candidate; score: number }[] = [];
+  /** Lines with an unpaid bill of the same amount that the person may not pay or see: held back like an offered one. */
+  const blockedBill = new Set<number>();
   for (const i of fresh) {
     const alias = aliasOf(i);
     for (const c of candidates) {
       const score = pairScore(lines[i]!, c, alias);
-      if (score !== null) pairs.push({ i, c, score });
+      if (score === null) continue;
+      pairs.push({ i, c, score });
+      if (c.blocked && c.kind === "bill" && Math.abs(c.amount - amountOf(lines[i]!)) < 0.005) blockedBill.add(i);
     }
   }
   pairs.sort((a, b) => b.score - a.score || a.i - b.i);
@@ -814,7 +852,7 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
   const optionsOf = new Map<number, MatchOption[]>();
   for (const p of pairs) {
     const list = optionsOf.get(p.i) ?? [];
-    if (list.length >= 5) continue;
+    if (list.length >= 5 || p.c.blocked) continue;
     if (used.has(p.c.key) && chosen.get(p.i)?.key !== p.c.key) continue;
     list.push(toOption(p.c, p.score));
     optionsOf.set(p.i, list);
@@ -891,6 +929,24 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
     const options = (optionsOf.get(i) ?? []).sort((a, b) => b.score - a.score);
     const match = chosen.get(i);
     const s = suggest(line, ctx);
+    if (match?.blocked) {
+      // Most likely a record already in the books that this person may not tie the line to: held back, so the money is not recorded twice.
+      const why =
+        match.blocked === "salary"
+          ? "This line looks already recorded, in a record your role cannot see."
+          : `This line looks already recorded, but your role cannot add ${MATCH_PERMISSIONS[match.kind].what}.`;
+      return {
+        ...base,
+        imported: null,
+        candidates: options,
+        invoice: s.invoice ?? null,
+        suggestion: { ...s.decision, action: "ignore" },
+        notes: [...again, `${why} It is set to Ignore and left unticked so the money is not recorded twice. Ask someone who may tie it to add this line.`],
+        attention: true,
+        holdBack: "It may already be recorded in a record your role cannot tie this line to.",
+        group: s.group ?? null,
+      };
+    }
     if (match) {
       const partBill = match.kind === "bill" && Math.abs(match.amount - amountOf(line)) >= 0.005;
       const gap = Math.abs(dayNumber(line.date) - dayNumber(match.date));
@@ -938,7 +994,11 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
     // An unpaid bill for the same amount whose vendor the narration does not name: offered, not picked.
     const bill = options.find((o) => o.kind === "bill" && Math.abs(o.amount - amountOf(line)) < 0.005);
     const early = beforeOpening(line);
-    const billNote = bill ? [`${bill.label.replace(/^Pays /, "")} is an unpaid bill for the same amount. If this line pays it, choose Already recorded; otherwise it is a new expense.`] : [];
+    const billNote = bill
+      ? [`${bill.label.replace(/^Pays /, "")} is an unpaid bill for the same amount. If this line pays it, choose Already recorded; otherwise it is a new expense.`]
+      : blockedBill.has(i)
+        ? ["An unpaid bill your role cannot pay from here has the same amount. If this line pays it, ask someone who may pay it to add this line; otherwise it is a new expense."]
+        : [];
     return {
       ...base,
       imported: null,

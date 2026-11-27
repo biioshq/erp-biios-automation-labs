@@ -93,7 +93,7 @@ export const FINANCE_OPS_RESOURCES: PermissionResource[] = [
     group: "Expenses",
     label: "Bank statements",
     description:
-      "Statement uploads and their lines, which show the bank balance and every payment, salaries included. Create uploads a statement and adds its lines; each new record also needs its own create permission (expenses, income, capital, loans, transfers). Edit unmatches a line from its record.",
+      "Statement uploads and their lines, which show the bank balance and every payment, salaries included. Create uploads a statement and adds its lines; each new record also needs its own create permission (expenses, income, capital, loans, transfers). Tying a line to a record already in the books needs edit on that record's page (paying a bill needs Payment tracking create, joining a transfer needs Cash & bank create). Edit unmatches a line from its record.",
     actions: ["view", "create", "edit"],
     memberDefault: [],
   },

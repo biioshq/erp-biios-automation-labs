@@ -58,8 +58,9 @@ export function statementKeyOf(line: Pick<StatementLine, "vendor">, info: Pick<N
   return null;
 }
 
-export async function loadRules(): Promise<RuleBook> {
-  const docs = await BankPartyRule.find({}, { side: 1, key: 1, token: 1, party: 1, category: 1, project: 1, stage: 1, hits: 1 })
+/** `salaries`: the person may see salaries. Without it, rules remembered as salary payments are left out, as on the Remembered parties page. */
+export async function loadRules(salaries: boolean): Promise<RuleBook> {
+  const docs = await BankPartyRule.find(salaries ? {} : { category: { $ne: "salaries" } }, { side: 1, key: 1, token: 1, party: 1, category: 1, project: 1, stage: 1, hits: 1 })
     .sort({ lastUsedAt: -1 })
     .limit(MAX_RULES)
     .lean();

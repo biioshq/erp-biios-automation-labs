@@ -8,7 +8,8 @@ import { BankPartyRule, Project } from "@/server/models";
 import { assertExpenseCategoryAllowed } from "@/server/expense-categories";
 import { INCOME_CATEGORIES, type BankLineAction } from "@/lib/constants";
 import { addLinesSchema, partyRuleIdSchema, partyRuleSchema, reviewStatementSchema, statementLineIdSchema, type AddLineValues } from "./schemas";
-import type { StoredLineReview } from "./types";
+import type { MatchKind, StoredLineReview } from "./types";
+import { MATCH_PERMISSIONS, matchKindOf } from "./match-access";
 import { reviewLines } from "./server/review";
 import { addStatementLines } from "./server/commit";
 import { storedStatementLine, unmatchLine } from "./server/unmatch";
@@ -43,15 +44,23 @@ function assertMayAddLines(user: SessionUser, lines: AddLineValues[]) {
     const need = LINE_PERMISSIONS[d.action];
     if (need && !can(user, need.permission)) missing.add(need.what);
     if (d.action === "expense" && d.category === "salaries" && !can(user, "data.salaries")) missing.add("salary expenses");
-    // "Already recorded" against an unpaid bill records a payment on it.
-    if (d.action === "match" && d.matchKey?.startsWith("bill:") && !can(user, "finance.payments:create")) missing.add("bill payments");
+    // "Already recorded" changes the record it ties to (and paying a bill records a payment on it).
+    // A key naming no known kind adds nothing: the line fails on its own when it is added.
+    const kind = d.action === "match" ? matchKindOf(d.matchKey) : null;
+    if (kind && !can(user, MATCH_PERMISSIONS[kind].permission)) missing.add(MATCH_PERMISSIONS[kind].what);
   }
   if (missing.size) {
     throw new AppError(`Your role cannot add ${[...missing].join(", ")}. Choose Ignore for those lines, or ask an admin to add them.`, "forbidden");
   }
 }
 
-export const reviewStatement = defineAction(reviewStatementSchema, async ({ accountId, lines }) => reviewLines(accountId, lines), {
+/** What the review may offer this person: only matches they could add (see assertMayAddLines), and salaries only with data.salaries. */
+function reviewAccess(user: SessionUser): { matchKinds: Set<MatchKind>; salaries: boolean } {
+  const kinds = Object.keys(MATCH_PERMISSIONS) as MatchKind[];
+  return { matchKinds: new Set(kinds.filter((k) => can(user, MATCH_PERMISSIONS[k].permission))), salaries: can(user, "data.salaries") };
+}
+
+export const reviewStatement = defineAction(reviewStatementSchema, async ({ accountId, lines }, user) => reviewLines(accountId, lines, reviewAccess(user)), {
   permission: "finance.bank_statements:create",
   readOnly: true,
 });
@@ -60,7 +69,8 @@ export const addStatementBatch = defineAction(
   addLinesSchema,
   async (input, user) => {
     assertMayAddLines(user, input.lines);
-    return addStatementLines(input, user.id, { salaries: can(user, "data.salaries") });
+    const salaries = can(user, "data.salaries");
+    return addStatementLines(input, user.id, { salaries, salaryRecords: salaries });
   },
   { permission: "finance.bank_statements:create", revalidate: [["/finance", "layout"], ["/analytics", "layout"]] },
 );
@@ -130,10 +140,10 @@ export const deletePartyRule = defineAction(
 /** Reviews one stored line again on its statement's page, as an upload would. Reads only. */
 export const reviewStoredLine = defineAction(
   statementLineIdSchema,
-  async ({ id }): Promise<StoredLineReview> => {
+  async ({ id }, user): Promise<StoredLineReview> => {
     const stored = await storedStatementLine(id);
     if (!stored) throw new AppError("This line cannot be reviewed here. Upload the statement again to review it.", "invalid");
-    const { lines, pickers } = await reviewLines(stored.accountId, [stored.line], { occurrences: [stored.occurrence], stored: true });
+    const { lines, pickers } = await reviewLines(stored.accountId, [stored.line], { occurrences: [stored.occurrence], stored: true, ...reviewAccess(user) });
     const line = lines[0];
     if (!line) throw notFound("The statement line");
     if (line.imported) throw new AppError("This line is tied to a record already. Unmatch it first to review it again.", "conflict");

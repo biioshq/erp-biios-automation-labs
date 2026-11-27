@@ -10,7 +10,7 @@ import { createCapitalEntry } from "@/features/finance/equity/server";
 import { addLiabilityPayment, createLiability } from "@/features/finance/liabilities/server";
 import { createAccountTransfer } from "@/features/finance/assets/accounts/server";
 import { paymentState } from "@/lib/payments";
-import { addDays, fromDateInput } from "@/lib/dates";
+import { addDays, endOfDayIST, fromDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import type { AddLineResult, AddBatchResult } from "../types";
 import type { AddLineValues, AddLinesValues } from "../schemas";
@@ -23,6 +23,10 @@ import { analyseNarration } from "../parse/narration";
 import { lineKindOf, type BankLineKind } from "../kinds";
 import { COMPANY } from "@/config/company";
 import { auditStatementLines } from "@/features/finance/audit/bank";
+import { assertTakesPayments } from "@/features/finance/expenses/payment-core";
+import { salaryRefused } from "@/features/finance/expenses/server";
+import { loadAccountBook, type AccountBook } from "@/server/accounts";
+import { UNMATCHED_EXPENSE_SOURCES, placement } from "./placement";
 
 /**
  * Adds reviewed statement lines to the books, one line at a time so one bad line never stops the
@@ -48,8 +52,20 @@ type Prior = {
   unmatchedBy?: Types.ObjectId | null;
 };
 type Claim = { id: Types.ObjectId; fresh: true } | { id: Types.ObjectId; fresh: false; prior: Prior };
-/** `notes`: a follow-up for the results screen per claimed line (such as the invoice a receipt was linked to). */
-type Ctx = { accountId: string; statementId: () => Promise<Types.ObjectId>; userId: string; salaries: boolean; notes: Map<string, string> };
+/**
+ * `notes`: a follow-up for the results screen per claimed line (such as the invoice a receipt was linked to).
+ * `salaryRecords`: the person may pay salary bills and tie lines to salary expenses (data.salaries).
+ * `book`: where records keep their money, read once per batch when a line is tied to a record.
+ */
+type Ctx = {
+  accountId: string;
+  statementId: () => Promise<Types.ObjectId>;
+  userId: string;
+  salaries: boolean;
+  salaryRecords: boolean;
+  notes: Map<string, string>;
+  book: () => Promise<AccountBook>;
+};
 
 const amountOf = (l: AddLineValues) => (l.withdrawal > 0 ? l.withdrawal : l.deposit);
 const isOut = (l: AddLineValues) => l.withdrawal > 0;
@@ -189,7 +205,58 @@ function assertSameAmount(recordAmount: number, l: AddLineValues) {
 
 const alreadyLinked = () => new AppError("That record is already tied to another statement line. Pick another match or add the line as new.", "conflict");
 
-/** "Already recorded": ties the line to the record, and the record to the line when it has no line yet. */
+/**
+ * The guarded link write matched nothing: another line tied the record between the read and the
+ * write (two tabs, two uploads). Only a retry of this same line may go on; otherwise the line fails
+ * before its own link is set, so its claim is released and it is never stored as matched.
+ */
+async function assertWon(res: { matchedCount: number }, holder: () => Promise<unknown>, txn: Types.ObjectId) {
+  if (res.matchedCount > 0) return;
+  const held = await holder();
+  if (!held || String(held) !== String(txn)) throw alreadyLinked();
+}
+
+/**
+ * Adds the line to a transfer, unless another line of this account joined it at the same moment:
+ * then this line is taken back out (before the error, so its claim is released) and fails.
+ */
+async function joinTransfer(transferId: Types.ObjectId, txn: Types.ObjectId, accountId: string): Promise<boolean> {
+  await AccountTransfer.updateOne({ _id: transferId }, { $addToSet: { bankTransactions: txn } });
+  const t = await AccountTransfer.findById(transferId, { bankTransactions: 1 }).lean();
+  const others = (t?.bankTransactions ?? []).filter((x) => String(x) !== String(txn));
+  if (!others.length || !(await BankTransaction.exists({ _id: { $in: others }, account: oid(accountId) }))) return true;
+  await AccountTransfer.updateOne({ _id: transferId }, { $pull: { bankTransactions: txn } });
+  return false;
+}
+
+/** The record moves money the other way than the line. */
+function assertSide(l: AddLineValues, recordOut: boolean) {
+  if (isOut(l) === recordOut) return;
+  throw new AppError(
+    recordOut ? "That record is money paid out, and this line is a deposit. Pick another match." : "That record is money received, and this line is a withdrawal. Pick another match.",
+    "invalid",
+  );
+}
+
+/** The record's money is in this account, as the review requires before it offers the record (placement). */
+async function assertInAccount(ctx: Ctx, method: string | null | undefined, account: unknown) {
+  if (placement(await ctx.book(), `cash:${ctx.accountId}`, method, account).ok) return;
+  throw new AppError("That record's money is booked to another account, not this one. Pick another match, or set the record's account to this one first.", "invalid");
+}
+
+const notOffered = (why: string) => new AppError(`That record cannot be tied to a statement line: ${why}. Pick another match or add the line as new.`, "invalid");
+
+/** An expense whose money is moved by another record, or that is not a company cost of its own. */
+function assertMovesMoney(e: { source?: string | null; countedAtPurchase?: boolean | null }) {
+  if (e.countedAtPurchase === true || (UNMATCHED_EXPENSE_SOURCES as string[]).includes(e.source ?? "manual")) throw notOffered("it moves no money of its own");
+}
+
+/**
+ * "Already recorded": ties the line to the record, and the record to the line when it has no line yet.
+ * The browser names the record, so the record is checked again here the way the review chose it
+ * (review.ts loadCandidates): the same side as the line, its money in this account, a kind of record
+ * the review offers, and a salary record only for people who may see salaries.
+ */
 async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Promise<LinkRef> {
   const [kind, id] = (l.decision.matchKey ?? "").split(":");
   if (!kind || !id || !Types.ObjectId.isValid(id)) throw new AppError("Pick the record this line matches.", "invalid");
@@ -198,56 +265,83 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
   if (kind !== "bill" && (await BankTransaction.exists({ account: oid(ctx.accountId), "link.kind": kind, "link.id": _id, _id: { $ne: txn } }))) throw alreadyLinked();
   switch (kind) {
     case "expense": {
-      const e = await Expense.findById(_id, { amount: 1, bankTransaction: 1 }).lean();
+      const e = await Expense.findById(_id, { amount: 1, bankTransaction: 1, paymentMethod: 1, account: 1, payments: 1, source: 1, countedAtPurchase: 1, category: 1 }).lean();
       if (!e) throw notFound("The expense");
+      assertSide(l, true);
+      if (e.category === "salaries" && !ctx.salaryRecords) throw salaryRefused();
+      assertMovesMoney(e);
+      if (Array.isArray(e.payments)) throw notOffered("its payments are recorded on it, so pick the payment, or the bill when it is still owed");
+      if (e.paymentMethod === "credit") throw notOffered("it is on credit and not paid yet, so pick the bill to record this line as its payment");
+      await assertInAccount(ctx, e.paymentMethod, e.account);
       assertSameAmount(e.amount, l);
       if (e.bankTransaction && String(e.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Expense.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      const res = await Expense.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      await assertWon(res, async () => (await Expense.findById(_id, { bankTransaction: 1 }).lean())?.bankTransaction, txn);
       return { kind, id };
     }
     case "expensePayment": {
-      const e = await Expense.findOne({ "payments._id": _id }, { payments: 1 }).lean();
+      const e = await Expense.findOne({ "payments._id": _id }, { payments: 1, source: 1, countedAtPurchase: 1, category: 1 }).lean();
       const p = e?.payments?.find((x) => String(x._id) === id);
       if (!e || !p) throw notFound("The payment");
+      assertSide(l, true);
+      if (e.category === "salaries" && !ctx.salaryRecords) throw salaryRefused();
+      assertMovesMoney(e);
+      await assertInAccount(ctx, p.paymentMethod, p.account);
       assertSameAmount(p.amount, l);
       if (p.bankTransaction && String(p.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Expense.updateOne({ _id: e._id, payments: { $elemMatch: { _id, bankTransaction: { $exists: false } } } }, { $set: { "payments.$.bankTransaction": txn } });
+      const res = await Expense.updateOne({ _id: e._id, payments: { $elemMatch: { _id, bankTransaction: { $exists: false } } } }, { $set: { "payments.$.bankTransaction": txn } });
+      await assertWon(res, async () => (await Expense.findById(e._id, { payments: 1 }).lean())?.payments?.find((x) => String(x._id) === id)?.bankTransaction, txn);
       return { kind, id };
     }
     case "bill":
       return payBill(l, _id, txn, ctx);
     case "income": {
-      const i = await Income.findById(_id, { amount: 1, bankTransaction: 1 }).lean();
+      const i = await Income.findById(_id, { amount: 1, bankTransaction: 1, paymentMethod: 1, account: 1 }).lean();
       if (!i) throw notFound("The income record");
+      assertSide(l, false);
+      await assertInAccount(ctx, i.paymentMethod, i.account);
       assertSameAmount(i.amount, l);
       if (i.bankTransaction && String(i.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Income.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      const res = await Income.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      await assertWon(res, async () => (await Income.findById(_id, { bankTransaction: 1 }).lean())?.bankTransaction, txn);
       return { kind, id };
     }
     case "capitalEntry": {
-      const c = await CapitalEntry.findById(_id, { amount: 1, bankTransaction: 1 }).lean();
+      const c = await CapitalEntry.findById(_id, { amount: 1, bankTransaction: 1, type: 1, paymentMethod: 1, account: 1 }).lean();
       if (!c) throw notFound("The equity entry");
+      // Capital comes in; drawings and dividends go out. Reserves and retained earnings move no money.
+      if (c.type !== "capital" && c.type !== "drawing" && c.type !== "dividend") throw notOffered("it moves no money in or out of an account");
+      assertSide(l, c.type !== "capital");
+      await assertInAccount(ctx, c.paymentMethod ?? "bank_transfer", c.account);
       assertSameAmount(c.amount, l);
       if (c.bankTransaction && String(c.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await CapitalEntry.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      const res = await CapitalEntry.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      await assertWon(res, async () => (await CapitalEntry.findById(_id, { bankTransaction: 1 }).lean())?.bankTransaction, txn);
       return { kind, id };
     }
     case "liability": {
-      const loan = await Liability.findById(_id, { originalAmount: 1, bankTransaction: 1 }).lean();
+      const loan = await Liability.findById(_id, { originalAmount: 1, bankTransaction: 1, source: 1 }).lean();
       if (!loan) throw notFound("The loan");
+      assertSide(l, false);
+      if (loan.source?.mode !== "account") throw notOffered("the loan was not paid into an account");
+      await assertInAccount(ctx, loan.source.paymentMethod ?? "bank_transfer", loan.source.account);
       assertSameAmount(loan.originalAmount, l);
       if (loan.bankTransaction && String(loan.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Liability.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      const res = await Liability.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      await assertWon(res, async () => (await Liability.findById(_id, { bankTransaction: 1 }).lean())?.bankTransaction, txn);
       return { kind, id };
     }
     case "liabilityPayment": {
       const loan = await Liability.findOne({ "payments._id": _id }, { payments: 1 }).lean();
       const p = loan?.payments?.find((x) => String(x._id) === id);
       if (!loan || !p) throw notFound("The repayment");
+      assertSide(l, true);
+      await assertInAccount(ctx, p.paymentMethod ?? "bank_transfer", p.account);
       assertSameAmount((p.principal ?? 0) + (p.interest ?? 0), l);
       if (p.bankTransaction && String(p.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Liability.updateOne({ _id: loan._id, payments: { $elemMatch: { _id, bankTransaction: { $exists: false } } } }, { $set: { "payments.$.bankTransaction": txn } });
-      // The repayment's interest expense points at the line too, as when the line itself made the repayment.
+      const res = await Liability.updateOne({ _id: loan._id, payments: { $elemMatch: { _id, bankTransaction: { $exists: false } } } }, { $set: { "payments.$.bankTransaction": txn } });
+      await assertWon(res, async () => (await Liability.findById(loan._id, { payments: 1 }).lean())?.payments?.find((x) => String(x._id) === id)?.bankTransaction, txn);
+      // Only once the repayment is this line's: its interest expense points at the line too, as when the line itself made the repayment.
       if (p.expense) await Expense.updateOne({ _id: p.expense, source: "liability_interest", bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
       return { kind, id };
     }
@@ -256,7 +350,7 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       if (!t) throw notFound("The transfer");
       assertSameAmount(t.amount, l);
       if (String(isOut(l) ? t.from : t.to) !== ctx.accountId) throw new AppError("That transfer does not move money this way for this account. Pick another match.", "invalid");
-      await AccountTransfer.updateOne({ _id }, { $addToSet: { bankTransactions: txn } });
+      if (!(await joinTransfer(_id, txn, ctx.accountId))) throw alreadyLinked();
       return { kind, id };
     }
     default:
@@ -264,11 +358,18 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
   }
 }
 
-/** Pays an unpaid bill from this line: a payment on the expense, dated and paid like the line. */
+/**
+ * Pays an unpaid bill from this line: a payment on the expense, dated and paid like the line. It
+ * refuses what Record payment refuses (applyExpensePayment in expenses/payment-core.ts): an expense
+ * that takes no payments, a salary bill without the salaries permission, and a date after today.
+ */
 async function payBill(l: AddLineValues, _id: Types.ObjectId, txn: Types.ObjectId, ctx: Ctx): Promise<LinkRef> {
-  const e = await Expense.findById(_id, { amount: 1, date: 1, paymentMethod: 1, account: 1, dueDate: 1, payments: 1, source: 1 }).lean();
+  const e = await Expense.findById(_id, { amount: 1, date: 1, paymentMethod: 1, account: 1, dueDate: 1, payments: 1, source: 1, category: 1, countedAtPurchase: 1 }).lean();
   if (!e) throw notFound("The bill");
   if (!isOut(l)) throw new AppError("A deposit cannot pay a bill.", "invalid");
+  assertTakesPayments(e);
+  if (e.category === "salaries" && !ctx.salaryRecords) throw salaryRefused();
+  if (fromDateInput(l.date).getTime() > endOfDayIST().getTime()) throw new AppError("A payment can't be dated in the future.", "invalid");
   const state = paymentState(e);
   if (l.withdrawal > state.outstanding + 0.005) throw new AppError(`Only ${state.outstanding.toFixed(2)} is still owed on that bill.`, "invalid");
   const paymentId = new Types.ObjectId();
@@ -322,6 +423,10 @@ async function createRecord(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
   const amount = amountOf(l);
   const user = Types.ObjectId.isValid(ctx.userId) ? oid(ctx.userId) : undefined;
   const out = isOut(l);
+  // The add schema already refuses such a line; this keeps a zero-amount record out of the books whoever calls this.
+  if (d.action !== "ignore" && (!(amount > 0) || (l.withdrawal > 0 && l.deposit > 0))) {
+    throw new AppError("This line needs one amount: a withdrawal or a deposit above zero, not both.", "invalid");
+  }
   switch (d.action) {
     case "ignore":
       return null;
@@ -443,7 +548,9 @@ async function createRecord(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       // The other account's statement may have recorded this transfer already: this line is its other side.
       const existing = await otherSideTransfer(l, fromId, toId);
       if (existing) {
-        await AccountTransfer.updateOne({ _id: existing }, { $addToSet: { bankTransactions: txn } });
+        if (!(await joinTransfer(existing, txn, ctx.accountId))) {
+          throw new AppError("Another line of this account joined that transfer at the same moment. Upload the statement again to check this line.", "conflict");
+        }
         return { kind: "accountTransfer", id: String(existing) };
       }
       const created = await createAccountTransfer({ fromAccountId: fromId, toAccountId: toId, amount, date, reference: l.reference, notes: statementNote(l).slice(0, 1000), bankTransactionIds: [String(txn)] }, ctx.userId);
@@ -527,9 +634,17 @@ async function addOne(l: AddLineValues, ctx: Ctx): Promise<{ result: Omit<AddLin
   }
 }
 
-/** Adds a batch of reviewed lines for one account. Safe to repeat: lines already added are reported, not added again. */
-/** `options.salaries`: the person may see salaries, so a salary payee's remembered party may change. */
-export async function addStatementLines(input: AddLinesValues, userId: string, options: { salaries?: boolean } = {}): Promise<AddBatchResult> {
+/**
+ * Adds a batch of reviewed lines for one account. Safe to repeat: lines already added are reported, not added again.
+ * `options.salaries`: the person may see salaries, so a salary payee's remembered party may change.
+ * `options.salaryRecords`: the person may pay salary bills and tie lines to salary expenses. The add
+ * action always sets it from data.salaries; an internal caller that leaves it out is not limited.
+ */
+export async function addStatementLines(
+  input: AddLinesValues,
+  userId: string,
+  options: { salaries?: boolean; salaryRecords?: boolean } = {},
+): Promise<AddBatchResult> {
   await requireIndexes(BankTransaction);
   const account = await BankAccount.findById(input.accountId, { kind: 1, archivedAt: 1, name: 1 }).lean();
   if (!account) throw notFound("The bank account");
@@ -537,12 +652,15 @@ export async function addStatementLines(input: AddLinesValues, userId: string, o
 
   let statementId: Types.ObjectId | null = input.statementId ? oid(input.statementId) : null;
   if (statementId && !(await BankStatement.exists({ _id: statementId, account: account._id }))) throw notFound("The statement");
+  let book: Promise<AccountBook> | null = null;
   // The statement record is made with the first line that is really new, so an upload that adds nothing leaves no trace.
   const ctx: Ctx = {
     accountId: input.accountId,
     userId,
     salaries: options.salaries ?? false,
+    salaryRecords: options.salaryRecords ?? true,
     notes: new Map(),
+    book: () => (book ??= loadAccountBook()),
     statementId: async () => {
       if (!statementId) {
         const s = input.statement;

@@ -4,6 +4,7 @@ import { rateLimit } from "@/server/rate-limit";
 import { StatementReadError } from "@/features/finance/bank-statements/server/errors";
 import { MAX_PDF_PASSWORD, PdfPasswordError } from "@/features/finance/bank-statements/server/pdf";
 import { formatOf, readStatementFile } from "@/features/finance/bank-statements/server/read-file";
+import { ExcelReadError } from "@/features/imports/csv/excel";
 
 export const maxDuration = 60;
 
@@ -49,6 +50,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message, needsPassword: error.reason }, { status: 400, headers: { "Cache-Control": "no-store" } });
     }
     if (error instanceof StatementReadError) return NextResponse.json({ error: error.message }, { status: 400 });
+    // The reader turns these into StatementReadError; kept here too, as its message is written for the admin.
+    if (error instanceof ExcelReadError) return NextResponse.json({ error: error.message }, { status: 400 });
     // Only the error goes to the log: the request, and with it any password, does not.
     console.error("[bank-statements] read failed", error);
     return NextResponse.json({ error: "This statement could not be read. Try the CSV or Excel download from your bank." }, { status: 500 });

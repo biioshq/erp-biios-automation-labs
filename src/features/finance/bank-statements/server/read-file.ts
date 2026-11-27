@@ -3,7 +3,7 @@ import "server-only";
 import ExcelJS from "exceljs";
 // The zip reader ExcelJS itself opens workbooks with (it is ExcelJS's dependency).
 import JSZip from "jszip";
-import { cellText } from "@/features/imports/csv/excel";
+import { cellText, ExcelReadError } from "@/features/imports/csv/excel";
 import { readRecords, readRecordsUpTo, type CsvDelimiter } from "@/features/imports/csv/parse";
 import type { GridRow, ReadStatementResult, StatementFormat } from "../types";
 import { autoMapping, detectBank, findHeaderRow } from "../parse/columns";
@@ -107,7 +107,8 @@ function htmlText(s: string): string {
     .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
       if (e[0] === "#") {
         const code = e[1]?.toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
-        return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+        // Past U+10FFFF is no character (String.fromCodePoint throws): the entity is kept as written.
+        return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : m;
       }
       return ENTITIES[e.toLowerCase()] ?? m;
     })
@@ -248,6 +249,16 @@ function unzipPart(part: JSZip.JSZipObject, onChunk: (chunk: Buffer) => void): P
   });
 }
 
+/** cellText, with its error for a formula that has no saved value turned into a StatementReadError the admin sees. */
+function statementCellText(value: ExcelJS.CellValue, address: string): string {
+  try {
+    return cellText(value, address);
+  } catch (error) {
+    if (error instanceof ExcelReadError) throw new StatementReadError(error.message);
+    throw error;
+  }
+}
+
 async function readXlsx(bytes: Buffer): Promise<{ grid: GridRow[]; sheet: string }> {
   await checkWorkbookSize(bytes);
   const workbook = new ExcelJS.Workbook();
@@ -266,7 +277,7 @@ async function readXlsx(bytes: Buffer): Promise<{ grid: GridRow[]; sheet: string
       row.eachCell({ includeEmpty: false }, (c, col) => {
         if (col > MAX_COLUMNS) return;
         // As written, line breaks and spaces at the ends included (see readText).
-        cells[col - 1] = cellText(c.value, c.address);
+        cells[col - 1] = statementCellText(c.value, c.address);
       });
       for (let i = 0; i < cells.length; i++) cells[i] ??= "";
       grid.push({ line: rowNumber, cells });

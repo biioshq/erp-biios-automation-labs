@@ -2,7 +2,7 @@ import "server-only";
 
 import ExcelJS from "exceljs";
 import { cellText } from "@/features/imports/csv/excel";
-import { readRecords, type CsvDelimiter } from "@/features/imports/csv/parse";
+import { readRecords, readRecordsUpTo, type CsvDelimiter } from "@/features/imports/csv/parse";
 import type { GridRow, ReadStatementResult, StatementFormat } from "../types";
 import { autoMapping, detectBank, findHeaderRow } from "../parse/columns";
 import { MAX_STATEMENT_LINES } from "../parse/statement";
@@ -51,7 +51,14 @@ function decode(bytes: Buffer): string {
 
 /** The separator that splits most of the first lines into four or more cells (bank CSVs start with a few account lines). */
 function pickDelimiter(text: string): CsvDelimiter {
-  const sample = text.split(/\r?\n/).slice(0, 60).join("\n");
+  // The first 60 lines, found without splitting the whole file into lines.
+  let end = -1;
+  for (let n = 0; n < 60; n++) {
+    end = text.indexOf("\n", end + 1);
+    if (end < 0) break;
+  }
+  const head = end < 0 ? text : text.slice(0, end > 0 && text[end - 1] === "\r" ? end - 1 : end);
+  const sample = head.replace(/\r\n/g, "\n");
   let best: CsvDelimiter = ",";
   let bestScore = -1;
   for (const d of [",", ";", "\t"] as CsvDelimiter[]) {
@@ -65,8 +72,8 @@ function pickDelimiter(text: string): CsvDelimiter {
 }
 
 function readText(text: string): GridRow[] {
-  const records = readRecords(text, pickDelimiter(text));
-  if (records.length > MAX_ROWS) throw tooLong(records.length);
+  const { records, total } = readRecordsUpTo(text, pickDelimiter(text), MAX_ROWS);
+  if (total > MAX_ROWS) throw tooLong(total);
   // Cells keep the spaces the bank wrote around them: a narration cut at a fixed width is joined
   // back by them (see joinHardCuts in parse/statement.ts). The reader trims every cell it reads.
   return nonEmpty(records.map((r) => ({ line: r.line, cells: r.cells.slice(0, MAX_COLUMNS) })));

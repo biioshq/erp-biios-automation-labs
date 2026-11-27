@@ -33,39 +33,64 @@ export function detectDelimiter(text: string): CsvDelimiter {
 
 /** Splits CSV text into records of fields. Each record keeps the line it started on. */
 export function readRecords(input: string, delimiter: CsvDelimiter): { line: number; cells: string[] }[] {
+  return readRecordsUpTo(input, delimiter, Infinity).records;
+}
+
+/**
+ * readRecords that keeps the first `max` records and only counts the rest (`total` counts them
+ * all), so a file with far too many lines is refused without holding every line in memory.
+ */
+export function readRecordsUpTo(input: string, delimiter: CsvDelimiter, max: number): { records: { line: number; cells: string[] }[]; total: number } {
   const text = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
   const records: { line: number; cells: string[] }[] = [];
+  let total = 0;
   let cells: string[] = [];
   let field = "";
+  // Whether `field` is empty or only white space, the same as `field.trim() === ""`. Kept as a flag
+  // because trimming the field at every quote made a long field of quotes take minutes.
+  let blank = true;
   let quoted = false;
   let line = 1;
   let startLine = 1;
   let i = 0;
   const endRecord = () => {
     cells.push(field);
-    records.push({ line: startLine, cells });
+    total++;
+    if (records.length < max) records.push({ line: startLine, cells });
     cells = [];
     field = "";
+    blank = true;
   };
+  // Text is added to a field a run at a time, not a character at a time: one long field built
+  // character by character holds millions of small string pieces until it is read.
   while (i < text.length) {
-    const ch = text[i];
+    const ch = text[i]!;
     if (quoted) {
       if (ch === '"') {
         if (text[i + 1] === '"') {
-          field += '"';
-          i += 2;
+          let j = i;
+          while (text[j] === '"' && text[j + 1] === '"') j += 2;
+          field += '"'.repeat((j - i) / 2);
+          blank = false;
+          i = j;
           continue;
         }
         quoted = false;
         i++;
         continue;
       }
-      if (ch === "\n") line++;
-      field += ch;
-      i++;
+      let j = i;
+      while (j < text.length && text[j] !== '"') {
+        const c = text[j]!;
+        if (c === "\n") line++;
+        if (blank && c.trim() !== "") blank = false;
+        j++;
+      }
+      field += text.slice(i, j);
+      i = j;
       continue;
     }
-    if (ch === '"' && field.trim() === "") {
+    if (ch === '"' && blank) {
       // A quote opens a quoted field only at its start (spaces before it are dropped).
       field = "";
       quoted = true;
@@ -75,6 +100,7 @@ export function readRecords(input: string, delimiter: CsvDelimiter): { line: num
     if (ch === delimiter) {
       cells.push(field);
       field = "";
+      blank = true;
       i++;
       continue;
     }
@@ -86,11 +112,19 @@ export function readRecords(input: string, delimiter: CsvDelimiter): { line: num
       startLine = line;
       continue;
     }
-    field += ch;
-    i++;
+    // Plain text up to the next separator or line break. A quote after text is kept as text.
+    let j = i;
+    while (j < text.length) {
+      const c = text[j]!;
+      if (c === delimiter || c === "\r" || c === "\n" || (c === '"' && blank)) break;
+      if (blank && c.trim() !== "") blank = false;
+      j++;
+    }
+    field += text.slice(i, j);
+    i = j;
   }
   if (field !== "" || cells.length > 0) endRecord();
-  return records;
+  return { records, total };
 }
 
 const isBlank = (cells: string[]) => cells.every((c) => c.trim() === "");

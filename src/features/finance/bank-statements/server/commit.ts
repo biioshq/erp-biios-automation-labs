@@ -205,6 +205,30 @@ function assertSameAmount(recordAmount: number, l: AddLineValues) {
 
 const alreadyLinked = () => new AppError("That record is already tied to another statement line. Pick another match or add the line as new.", "conflict");
 
+/**
+ * The guarded link write matched nothing: another line tied the record between the read and the
+ * write (two tabs, two uploads). Only a retry of this same line may go on; otherwise the line fails
+ * before its own link is set, so its claim is released and it is never stored as matched.
+ */
+async function assertWon(res: { matchedCount: number }, holder: () => Promise<unknown>, txn: Types.ObjectId) {
+  if (res.matchedCount > 0) return;
+  const held = await holder();
+  if (!held || String(held) !== String(txn)) throw alreadyLinked();
+}
+
+/**
+ * Adds the line to a transfer, unless another line of this account joined it at the same moment:
+ * then this line is taken back out (before the error, so its claim is released) and fails.
+ */
+async function joinTransfer(transferId: Types.ObjectId, txn: Types.ObjectId, accountId: string): Promise<boolean> {
+  await AccountTransfer.updateOne({ _id: transferId }, { $addToSet: { bankTransactions: txn } });
+  const t = await AccountTransfer.findById(transferId, { bankTransactions: 1 }).lean();
+  const others = (t?.bankTransactions ?? []).filter((x) => String(x) !== String(txn));
+  if (!others.length || !(await BankTransaction.exists({ _id: { $in: others }, account: oid(accountId) }))) return true;
+  await AccountTransfer.updateOne({ _id: transferId }, { $pull: { bankTransactions: txn } });
+  return false;
+}
+
 /** The record moves money the other way than the line. */
 function assertSide(l: AddLineValues, recordOut: boolean) {
   if (isOut(l) === recordOut) return;
@@ -251,7 +275,8 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       await assertInAccount(ctx, e.paymentMethod, e.account);
       assertSameAmount(e.amount, l);
       if (e.bankTransaction && String(e.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Expense.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      const res = await Expense.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      await assertWon(res, async () => (await Expense.findById(_id, { bankTransaction: 1 }).lean())?.bankTransaction, txn);
       return { kind, id };
     }
     case "expensePayment": {
@@ -264,7 +289,8 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       await assertInAccount(ctx, p.paymentMethod, p.account);
       assertSameAmount(p.amount, l);
       if (p.bankTransaction && String(p.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Expense.updateOne({ _id: e._id, payments: { $elemMatch: { _id, bankTransaction: { $exists: false } } } }, { $set: { "payments.$.bankTransaction": txn } });
+      const res = await Expense.updateOne({ _id: e._id, payments: { $elemMatch: { _id, bankTransaction: { $exists: false } } } }, { $set: { "payments.$.bankTransaction": txn } });
+      await assertWon(res, async () => (await Expense.findById(e._id, { payments: 1 }).lean())?.payments?.find((x) => String(x._id) === id)?.bankTransaction, txn);
       return { kind, id };
     }
     case "bill":
@@ -276,7 +302,8 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       await assertInAccount(ctx, i.paymentMethod, i.account);
       assertSameAmount(i.amount, l);
       if (i.bankTransaction && String(i.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Income.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      const res = await Income.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      await assertWon(res, async () => (await Income.findById(_id, { bankTransaction: 1 }).lean())?.bankTransaction, txn);
       return { kind, id };
     }
     case "capitalEntry": {
@@ -288,7 +315,8 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       await assertInAccount(ctx, c.paymentMethod ?? "bank_transfer", c.account);
       assertSameAmount(c.amount, l);
       if (c.bankTransaction && String(c.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await CapitalEntry.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      const res = await CapitalEntry.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      await assertWon(res, async () => (await CapitalEntry.findById(_id, { bankTransaction: 1 }).lean())?.bankTransaction, txn);
       return { kind, id };
     }
     case "liability": {
@@ -299,7 +327,8 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       await assertInAccount(ctx, loan.source.paymentMethod ?? "bank_transfer", loan.source.account);
       assertSameAmount(loan.originalAmount, l);
       if (loan.bankTransaction && String(loan.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Liability.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      const res = await Liability.updateOne({ _id, bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
+      await assertWon(res, async () => (await Liability.findById(_id, { bankTransaction: 1 }).lean())?.bankTransaction, txn);
       return { kind, id };
     }
     case "liabilityPayment": {
@@ -310,8 +339,9 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       await assertInAccount(ctx, p.paymentMethod ?? "bank_transfer", p.account);
       assertSameAmount((p.principal ?? 0) + (p.interest ?? 0), l);
       if (p.bankTransaction && String(p.bankTransaction) !== String(txn)) throw alreadyLinked();
-      await Liability.updateOne({ _id: loan._id, payments: { $elemMatch: { _id, bankTransaction: { $exists: false } } } }, { $set: { "payments.$.bankTransaction": txn } });
-      // The repayment's interest expense points at the line too, as when the line itself made the repayment.
+      const res = await Liability.updateOne({ _id: loan._id, payments: { $elemMatch: { _id, bankTransaction: { $exists: false } } } }, { $set: { "payments.$.bankTransaction": txn } });
+      await assertWon(res, async () => (await Liability.findById(loan._id, { payments: 1 }).lean())?.payments?.find((x) => String(x._id) === id)?.bankTransaction, txn);
+      // Only once the repayment is this line's: its interest expense points at the line too, as when the line itself made the repayment.
       if (p.expense) await Expense.updateOne({ _id: p.expense, source: "liability_interest", bankTransaction: { $exists: false } }, { $set: { bankTransaction: txn } });
       return { kind, id };
     }
@@ -320,7 +350,7 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       if (!t) throw notFound("The transfer");
       assertSameAmount(t.amount, l);
       if (String(isOut(l) ? t.from : t.to) !== ctx.accountId) throw new AppError("That transfer does not move money this way for this account. Pick another match.", "invalid");
-      await AccountTransfer.updateOne({ _id }, { $addToSet: { bankTransactions: txn } });
+      if (!(await joinTransfer(_id, txn, ctx.accountId))) throw alreadyLinked();
       return { kind, id };
     }
     default:
@@ -518,7 +548,9 @@ async function createRecord(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
       // The other account's statement may have recorded this transfer already: this line is its other side.
       const existing = await otherSideTransfer(l, fromId, toId);
       if (existing) {
-        await AccountTransfer.updateOne({ _id: existing }, { $addToSet: { bankTransactions: txn } });
+        if (!(await joinTransfer(existing, txn, ctx.accountId))) {
+          throw new AppError("Another line of this account joined that transfer at the same moment. Upload the statement again to check this line.", "conflict");
+        }
         return { kind: "accountTransfer", id: String(existing) };
       }
       const created = await createAccountTransfer({ fromAccountId: fromId, toAccountId: toId, amount, date, reference: l.reference, notes: statementNote(l).slice(0, 1000), bankTransactionIds: [String(txn)] }, ctx.userId);

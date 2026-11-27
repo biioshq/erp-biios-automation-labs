@@ -64,8 +64,10 @@ const alnum = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 /** A payment recorded by hand on another of the company's bank accounts: a line may be that payment. */
 type ElsewherePayment = { label: string; party: string; amount: number; date: string; account: string };
 
-async function loadCandidates(accountId: string, book: AccountBook, from: Date, to: Date, elsewhere: ElsewherePayment[] = []): Promise<Candidate[]> {
+/** `salaries`: the person may see salaries; without it salary expenses are not offered (their vendors are the people paid). */
+async function loadCandidates(accountId: string, book: AccountBook, from: Date, to: Date, elsewhere: ElsewherePayment[], salaries: boolean): Promise<Candidate[]> {
   const target = `cash:${accountId}`;
+  const salaryScope = salaries ? {} : { category: { $ne: "salaries" } };
   const range = { $gte: from, $lte: to };
   // `from` and `to` already reach MATCH_DAYS past the lines; payments recorded by hand reach HAND_PAYMENT_DAYS.
   const payFrom = addDays(from, MATCH_DAYS - HAND_PAYMENT_DAYS);
@@ -77,6 +79,7 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
   const [expenses, bills, incomes, loans, entries, transfers, holders, accounts] = await Promise.all([
     Expense.find(
       {
+        ...salaryScope,
         countedAtPurchase: { $ne: true },
         // Loan interest is part of its repayment, which is offered as one line.
         source: { $nin: UNMATCHED_EXPENSE_SOURCES },
@@ -87,6 +90,7 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
     Expense.find(
       {
         ...maybeUnpaidFilter(),
+        ...salaryScope,
         countedAtPurchase: { $ne: true },
         source: { $nin: ["inventory_assignment", "inventory_wastage"] },
         date: { $lte: to },
@@ -278,10 +282,13 @@ type Context = {
   invoices: { id: string; number: string; client: string; project: string | null; total: number; outstanding: number }[];
   /** Hand payments on the company's other bank accounts, filled with the match candidates. */
   elsewhere: ElsewherePayment[];
+  /** The person may see and add salaries (data.salaries). */
+  salaries: boolean;
 };
 
+/** A category the line may be suggested: one of the pickers, and Salaries only for people who may add salary expenses. */
 const allowedCategory = (ctx: Context, value: string | null | undefined) =>
-  value && ctx.pickers.categories.some((c) => c.value === value) ? value : null;
+  value && (ctx.salaries || value !== "salaries") && ctx.pickers.categories.some((c) => c.value === value) ? value : null;
 
 /**
  * The remembered party of a line, looked up once per line. A rule found only by its name inside
@@ -479,6 +486,10 @@ function suggest(
     const history = party ? ctx.vendorByKey.get(vendorKey(party)) : undefined;
     const column = columnCategory(ctx, line);
     if (column && "unknown" in column) notes.push(`The file's category "${column.unknown}" is not one of your expense categories, so the suggestion is kept. Change it if needed.`);
+    if (column && "value" in column && column.value === "salaries" && !ctx.salaries) {
+      notes.push("The file's category is Salaries, which your role cannot add, so another category is suggested. Ask someone who may record salaries to add this line if it is pay.");
+      attention = true;
+    }
     // Remembered parties first, then the vendor's earlier expenses, then the narration's words.
     const fromColumn = column && "value" in column ? allowedCategory(ctx, column.value) : null;
     // Other is where a line nothing recognised goes: a remembered or earlier Other is not a category anyone picked.
@@ -487,7 +498,7 @@ function suggest(
     const fromSalary = info.kind === "salary" ? allowedCategory(ctx, "salaries") : null;
     const fromHistory = allowedCategory(ctx, picked(history?.category));
     const fromWords = allowedCategory(ctx, categoryFromWords(line.narration));
-    const category = fromColumn ?? fromRule ?? fromSalary ?? fromHistory ?? fromWords ?? allowedCategory(ctx, "other") ?? ctx.pickers.categories[0]?.value;
+    const category = fromColumn ?? fromRule ?? fromSalary ?? fromHistory ?? fromWords ?? allowedCategory(ctx, "other") ?? ctx.pickers.categories.find((c) => allowedCategory(ctx, c.value))?.value;
     if (rule) notes.push(`Remembered from your earlier choice: ${rule.party}${fromRule && !fromColumn ? `, ${ctx.pickers.categories.find((c) => c.value === fromRule)?.label ?? fromRule}` : ""}.`);
     if (fromColumn) notes.push("Category from the file's category column.");
     else if (!fromRule && !fromSalary && fromHistory && history) notes.push(`Category from ${history.count === 1 ? "an earlier expense" : `${history.count} earlier expenses`} with ${history.name}.`);
@@ -608,19 +619,19 @@ function suggest(
   };
 }
 
-async function loadContext(accountId: string): Promise<{ ctx: Context; book: AccountBook }> {
+async function loadContext(accountId: string, salaries: boolean): Promise<{ ctx: Context; book: AccountBook }> {
   const account = await BankAccount.findById(accountId, { name: 1, bankName: 1, openingDate: 1 }).lean();
   if (!account) throw notFound("The bank account");
   const [book, own, history, clients, pickers, holders, loans, rules, projectHistory, receivables] = await Promise.all([
     loadAccountBook(),
     loadOwnAccounts(),
-    loadVendorHistory(),
+    loadVendorHistory(salaries),
     loadClientNames(),
     loadPickers(),
     EquityHolder.find({ archivedAt: null }, { name: 1, kind: 1 }).lean(),
     Liability.find({ archivedAt: null }, { name: 1, lender: 1, installment: 1 }).lean(),
-    loadRules(),
-    loadProjectHistory(),
+    loadRules(salaries),
+    loadProjectHistory(salaries),
     invoiceBalances(),
   ]);
   return {
@@ -645,6 +656,7 @@ async function loadContext(accountId: string): Promise<{ ctx: Context; book: Acc
         .filter((r) => r.outstanding > 0)
         .map((r) => ({ id: r.id, number: r.number, client: r.client, project: r.project, total: r.total, outstanding: r.outstanding })),
       elsewhere: [],
+      salaries,
     },
   };
 }
@@ -708,13 +720,16 @@ async function importedLookalikes(accountId: string, lines: StatementLine[], fre
  */
 /**
  * `matchKinds`: the kinds of "Already recorded" the person may add (match-access.ts); other records
- * are not offered. The review actions always pass it; an internal caller that leaves it out gets every kind.
+ * are not offered. `salaries`: the person may see salaries (data.salaries); without it, salary expenses,
+ * remembered salary payees and the salary category are left out of the suggestions, as the
+ * Remembered parties and Expenses pages leave them out. The review actions always pass both; an
+ * internal caller that leaves them out gets everything.
  */
-export type ReviewOptions = { occurrences?: number[]; stored?: boolean; matchKinds?: ReadonlySet<MatchKind> };
+export type ReviewOptions = { occurrences?: number[]; stored?: boolean; matchKinds?: ReadonlySet<MatchKind>; salaries?: boolean };
 
 /** The review of every line of a statement for one account. Reads only. */
 export async function reviewLines(accountId: string, lines: StatementLine[], options: ReviewOptions = {}): Promise<{ lines: ReviewLine[]; pickers: StatementPickers }> {
-  const { ctx, book } = await loadContext(accountId);
+  const { ctx, book } = await loadContext(accountId, options.salaries ?? true);
   const occ = options.occurrences && options.occurrences.length === lines.length ? options.occurrences : occurrences(accountId, lines);
   const hashes = lines.map((l, i) => lineHash(accountId, l, occ[i]));
 
@@ -740,7 +755,7 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
   const dates = fresh.map((i) => lines[i]!.date).sort();
   let candidates: Candidate[] = [];
   if (dates.length) {
-    candidates = await loadCandidates(accountId, book, addDays(fromDateInput(dates[0]!), -MATCH_DAYS), new Date(addDays(fromDateInput(dates[dates.length - 1]!), MATCH_DAYS + 1).getTime() - 1), ctx.elsewhere);
+    candidates = await loadCandidates(accountId, book, addDays(fromDateInput(dates[0]!), -MATCH_DAYS), new Date(addDays(fromDateInput(dates[dates.length - 1]!), MATCH_DAYS + 1).getTime() - 1), ctx.elsewhere, ctx.salaries);
     // Records already tied to one of this account's lines.
     const linked = await BankTransaction.find(
       { account: new Types.ObjectId(accountId), "link.id": { $in: candidates.map((c) => new Types.ObjectId(c.id)) } },

@@ -54,10 +54,10 @@ function assertMayAddLines(user: SessionUser, lines: AddLineValues[]) {
   }
 }
 
-/** What the review may offer this person: only matches they could add (see assertMayAddLines). */
-function reviewAccess(user: SessionUser): { matchKinds: Set<MatchKind> } {
+/** What the review may offer this person: only matches they could add (see assertMayAddLines), and salaries only with data.salaries. */
+function reviewAccess(user: SessionUser): { matchKinds: Set<MatchKind>; salaries: boolean } {
   const kinds = Object.keys(MATCH_PERMISSIONS) as MatchKind[];
-  return { matchKinds: new Set(kinds.filter((k) => can(user, MATCH_PERMISSIONS[k].permission))) };
+  return { matchKinds: new Set(kinds.filter((k) => can(user, MATCH_PERMISSIONS[k].permission))), salaries: can(user, "data.salaries") };
 }
 
 export const reviewStatement = defineAction(reviewStatementSchema, async ({ accountId, lines }, user) => reviewLines(accountId, lines, reviewAccess(user)), {

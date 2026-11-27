@@ -10,7 +10,7 @@ import { createCapitalEntry } from "@/features/finance/equity/server";
 import { addLiabilityPayment, createLiability } from "@/features/finance/liabilities/server";
 import { createAccountTransfer } from "@/features/finance/assets/accounts/server";
 import { paymentState } from "@/lib/payments";
-import { addDays, fromDateInput } from "@/lib/dates";
+import { addDays, endOfDayIST, fromDateInput } from "@/lib/dates";
 import { round2 } from "@/lib/format";
 import type { AddLineResult, AddBatchResult } from "../types";
 import type { AddLineValues, AddLinesValues } from "../schemas";
@@ -23,6 +23,8 @@ import { analyseNarration } from "../parse/narration";
 import { lineKindOf, type BankLineKind } from "../kinds";
 import { COMPANY } from "@/config/company";
 import { auditStatementLines } from "@/features/finance/audit/bank";
+import { assertTakesPayments } from "@/features/finance/expenses/payment-core";
+import { salaryRefused } from "@/features/finance/expenses/server";
 
 /**
  * Adds reviewed statement lines to the books, one line at a time so one bad line never stops the
@@ -48,8 +50,11 @@ type Prior = {
   unmatchedBy?: Types.ObjectId | null;
 };
 type Claim = { id: Types.ObjectId; fresh: true } | { id: Types.ObjectId; fresh: false; prior: Prior };
-/** `notes`: a follow-up for the results screen per claimed line (such as the invoice a receipt was linked to). */
-type Ctx = { accountId: string; statementId: () => Promise<Types.ObjectId>; userId: string; salaries: boolean; notes: Map<string, string> };
+/**
+ * `notes`: a follow-up for the results screen per claimed line (such as the invoice a receipt was linked to).
+ * `salaryRecords`: the person may pay salary bills and tie lines to salary expenses (data.salaries).
+ */
+type Ctx = { accountId: string; statementId: () => Promise<Types.ObjectId>; userId: string; salaries: boolean; salaryRecords: boolean; notes: Map<string, string> };
 
 const amountOf = (l: AddLineValues) => (l.withdrawal > 0 ? l.withdrawal : l.deposit);
 const isOut = (l: AddLineValues) => l.withdrawal > 0;
@@ -264,11 +269,18 @@ async function linkExisting(l: AddLineValues, txn: Types.ObjectId, ctx: Ctx): Pr
   }
 }
 
-/** Pays an unpaid bill from this line: a payment on the expense, dated and paid like the line. */
+/**
+ * Pays an unpaid bill from this line: a payment on the expense, dated and paid like the line. It
+ * refuses what Record payment refuses (applyExpensePayment in expenses/payment-core.ts): an expense
+ * that takes no payments, a salary bill without the salaries permission, and a date after today.
+ */
 async function payBill(l: AddLineValues, _id: Types.ObjectId, txn: Types.ObjectId, ctx: Ctx): Promise<LinkRef> {
-  const e = await Expense.findById(_id, { amount: 1, date: 1, paymentMethod: 1, account: 1, dueDate: 1, payments: 1, source: 1 }).lean();
+  const e = await Expense.findById(_id, { amount: 1, date: 1, paymentMethod: 1, account: 1, dueDate: 1, payments: 1, source: 1, category: 1, countedAtPurchase: 1 }).lean();
   if (!e) throw notFound("The bill");
   if (!isOut(l)) throw new AppError("A deposit cannot pay a bill.", "invalid");
+  assertTakesPayments(e);
+  if (e.category === "salaries" && !ctx.salaryRecords) throw salaryRefused();
+  if (fromDateInput(l.date).getTime() > endOfDayIST().getTime()) throw new AppError("A payment can't be dated in the future.", "invalid");
   const state = paymentState(e);
   if (l.withdrawal > state.outstanding + 0.005) throw new AppError(`Only ${state.outstanding.toFixed(2)} is still owed on that bill.`, "invalid");
   const paymentId = new Types.ObjectId();
@@ -531,9 +543,17 @@ async function addOne(l: AddLineValues, ctx: Ctx): Promise<{ result: Omit<AddLin
   }
 }
 
-/** Adds a batch of reviewed lines for one account. Safe to repeat: lines already added are reported, not added again. */
-/** `options.salaries`: the person may see salaries, so a salary payee's remembered party may change. */
-export async function addStatementLines(input: AddLinesValues, userId: string, options: { salaries?: boolean } = {}): Promise<AddBatchResult> {
+/**
+ * Adds a batch of reviewed lines for one account. Safe to repeat: lines already added are reported, not added again.
+ * `options.salaries`: the person may see salaries, so a salary payee's remembered party may change.
+ * `options.salaryRecords`: the person may pay salary bills and tie lines to salary expenses. The add
+ * action always sets it from data.salaries; an internal caller that leaves it out is not limited.
+ */
+export async function addStatementLines(
+  input: AddLinesValues,
+  userId: string,
+  options: { salaries?: boolean; salaryRecords?: boolean } = {},
+): Promise<AddBatchResult> {
   await requireIndexes(BankTransaction);
   const account = await BankAccount.findById(input.accountId, { kind: 1, archivedAt: 1, name: 1 }).lean();
   if (!account) throw notFound("The bank account");
@@ -546,6 +566,7 @@ export async function addStatementLines(input: AddLinesValues, userId: string, o
     accountId: input.accountId,
     userId,
     salaries: options.salaries ?? false,
+    salaryRecords: options.salaryRecords ?? true,
     notes: new Map(),
     statementId: async () => {
       if (!statementId) {

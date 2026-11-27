@@ -12,10 +12,11 @@ import { can, type SessionUser } from "@/server/auth/session";
  * expense nor turn one into something else.
  */
 export function assertMaySalary(user: SessionUser, ...categories: (string | undefined)[]) {
-  if (!can(user, "data.salaries") && categories.includes("salaries")) {
-    throw new AppError("You do not have permission to add or change salary payments.", "forbidden");
-  }
+  if (!can(user, "data.salaries") && categories.includes("salaries")) throw salaryRefused();
 }
+
+/** The refusal assertMaySalary gives, for paths that hold the permission as a flag (bank statement lines). */
+export const salaryRefused = () => new AppError("You do not have permission to add or change salary payments.", "forbidden");
 
 /**
  * A "Paid from" account must exist and be open. The one a record already uses always stays

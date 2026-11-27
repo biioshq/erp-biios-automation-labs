@@ -29,6 +29,7 @@ import {
   type VendorProjects,
 } from "./context";
 import { findRuleHit, loadRules, type PartyRule, type RuleBook } from "./rules";
+import { UNMATCHED_EXPENSE_SOURCES, placement } from "./placement";
 
 /**
  * The review of a statement before anything is saved: which lines were imported before, which
@@ -60,14 +61,6 @@ const sideOf = (l: StatementLine): Side => (l.withdrawal > 0 ? "dr" : "cr");
 const amountOf = (l: StatementLine) => (l.withdrawal > 0 ? l.withdrawal : l.deposit);
 const alnum = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-/** Where a record's money is in the books: this account, another one (when it named none), or nowhere near. */
-function placement(book: AccountBook, target: string, method: string | null | undefined, account: unknown): { ok: boolean; other?: string } {
-  const code = book.resolve(method ?? "bank_transfer", account);
-  if (code === target) return { ok: true };
-  if (account || !code?.startsWith("cash:") || method === "cash" || method === "credit" || method === "stock" || method === "biios_startup_llp") return { ok: false };
-  return { ok: true, other: book.byCode.get(code)?.name ?? "another account" };
-}
-
 /** A payment recorded by hand on another of the company's bank accounts: a line may be that payment. */
 type ElsewherePayment = { label: string; party: string; amount: number; date: string; account: string };
 
@@ -86,7 +79,7 @@ async function loadCandidates(accountId: string, book: AccountBook, from: Date, 
       {
         countedAtPurchase: { $ne: true },
         // Loan interest is part of its repayment, which is offered as one line.
-        source: { $nin: ["inventory_assignment", "inventory_wastage", "liability_interest"] },
+        source: { $nin: UNMATCHED_EXPENSE_SOURCES },
         $or: [{ date: range, payments: { $exists: false } }, { "payments.date": payRange }],
       },
       { number: 1, vendor: 1, amount: 1, date: 1, paymentMethod: 1, account: 1, payments: 1, bankTransaction: 1, gst: 1 },
@@ -713,7 +706,11 @@ async function importedLookalikes(accountId: string, lines: StatementLine[], fre
  * How a stored line is reviewed again from its statement's page: with the occurrence its hash was
  * made with, and without looking for look-alike lines of other downloads (the line is its own).
  */
-export type ReviewOptions = { occurrences?: number[]; stored?: boolean };
+/**
+ * `matchKinds`: the kinds of "Already recorded" the person may add (match-access.ts); other records
+ * are not offered. The review actions always pass it; an internal caller that leaves it out gets every kind.
+ */
+export type ReviewOptions = { occurrences?: number[]; stored?: boolean; matchKinds?: ReadonlySet<MatchKind> };
 
 /** The review of every line of a statement for one account. Reads only. */
 export async function reviewLines(accountId: string, lines: StatementLine[], options: ReviewOptions = {}): Promise<{ lines: ReviewLine[]; pickers: StatementPickers }> {
@@ -750,7 +747,8 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
       { link: 1 },
     ).lean();
     const taken = new Set(linked.map((t) => `${t.link!.kind}:${t.link!.id}`));
-    candidates = candidates.filter((c) => !taken.has(c.kind === "bill" ? `expense:${c.id}` : c.key));
+    const allowed = options.matchKinds;
+    candidates = candidates.filter((c) => !taken.has(c.kind === "bill" ? `expense:${c.id}` : c.key) && (!allowed || allowed.has(c.kind)));
   }
 
   // What each line's narration says, and who else is known to be its party (the file's vendor column, a remembered party).

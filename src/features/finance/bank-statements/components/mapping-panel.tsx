@@ -54,10 +54,11 @@ export function MappingPanel({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-1.5 sm:max-w-xl">
+      {/* minmax(0, 1fr): the picked row's long text is cut short instead of widening the page on a phone. */}
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5 sm:max-w-xl">
         <Label htmlFor="header-row">Row with the column names</Label>
         <Select value={headerIndex >= 0 ? String(headerIndex) : undefined} onValueChange={(v) => onHeaderChange(Number(v))} disabled={disabled}>
-          <SelectTrigger id="header-row" className="w-full">
+          <SelectTrigger id="header-row" className="w-full min-w-0 [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
             <SelectValue placeholder="Pick the row" />
           </SelectTrigger>
           <SelectContent>

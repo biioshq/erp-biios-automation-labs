@@ -84,10 +84,24 @@ const tooLong = (n: number) =>
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
+/** `s` without its tags: what `s.replace(/<[^>]*>/g, "")` gives, without rescanning the rest of `s` for every unclosed "<". */
+function stripTags(s: string): string {
+  let out = "";
+  let pos = 0;
+  for (;;) {
+    const lt = s.indexOf("<", pos);
+    if (lt < 0) break;
+    const gt = s.indexOf(">", lt + 1);
+    // No ">" after this "<", so none after a later "<" either: the rest is text.
+    if (gt < 0) break;
+    out += s.slice(pos, lt);
+    pos = gt + 1;
+  }
+  return out + s.slice(pos);
+}
+
 function htmlText(s: string): string {
-  return s
-    .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<[^>]*>/g, "")
+  return stripTags(s.replace(/<br\s*\/?>/gi, " "))
     .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
       if (e[0] === "#") {
         const code = e[1]?.toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
@@ -99,15 +113,63 @@ function htmlText(s: string): string {
     .trim();
 }
 
-/** An HTML table saved with an .xls name (what several banks' "Excel" download is). */
+/**
+ * `s` with A to Z lowered and nothing else changed, so an index in it is the same index in `s`
+ * (toLowerCase can change the length, "İ" becomes two characters). Case-insensitive regexes
+ * match ASCII letters only in the same way.
+ */
+const asciiLower = (s: string) => s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+
+/**
+ * The cells of one row: the text of what `/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi` matches, at most
+ * MAX_COLUMNS of them, found in one pass. `lower` is asciiLower(row).
+ */
+function htmlCells(row: string, lower: string): string[] {
+  const cells: string[] = [];
+  let pos = 0;
+  while (cells.length < MAX_COLUMNS) {
+    const open = lower.indexOf("<t", pos);
+    if (open < 0) break;
+    const kind = lower[open + 2];
+    if (kind !== "d" && kind !== "h") {
+      pos = open + 1;
+      continue;
+    }
+    const gt = lower.indexOf(">", open + 3);
+    // Without a ">" (or, below, a closing tag) after this cell's start, no later cell can match either.
+    if (gt < 0) break;
+    let close = lower.indexOf("</t", gt + 1);
+    while (close >= 0 && !((lower[close + 3] === "d" || lower[close + 3] === "h") && lower[close + 4] === ">")) close = lower.indexOf("</t", close + 1);
+    if (close < 0) break;
+    cells.push(htmlText(row.slice(gt + 1, close)));
+    pos = close + 5;
+  }
+  return cells;
+}
+
+/**
+ * An HTML table saved with an .xls name (what several banks' "Excel" download is). The rows are
+ * what `/<tr[\s>][\s\S]*?<\/tr>/gi` matches, found with indexOf so the work grows with the file's
+ * size (the regex scanned to the end of the file again for every unclosed "<tr").
+ */
 function readHtmlTable(html: string): GridRow[] {
+  const lower = asciiLower(html);
   const rows: GridRow[] = [];
-  const rowRe = /<tr[\s>][\s\S]*?<\/tr>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = rowRe.exec(html))) {
-    const cells = [...m[0].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((c) => htmlText(c[1] ?? "")).slice(0, MAX_COLUMNS);
-    rows.push({ line: rows.length + 1, cells });
+  let pos = 0;
+  for (;;) {
+    const start = lower.indexOf("<tr", pos);
+    if (start < 0) break;
+    const next = lower[start + 3];
+    if (next === undefined || (next !== ">" && !/\s/.test(next))) {
+      pos = start + 1;
+      continue;
+    }
+    const end = lower.indexOf("</tr>", start + 4);
+    // No "</tr>" after this row's start, so no later row is closed either.
+    if (end < 0) break;
+    rows.push({ line: rows.length + 1, cells: htmlCells(html.slice(start, end + 5), lower.slice(start, end + 5)) });
     if (rows.length > MAX_ROWS) throw tooLong(rows.length);
+    pos = end + 5;
   }
   return nonEmpty(rows);
 }

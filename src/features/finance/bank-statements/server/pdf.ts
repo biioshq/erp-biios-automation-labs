@@ -623,10 +623,17 @@ const cellText = (texts: string[]) => texts.join(" ").replace(/\s+/g, " ").trim(
 
 /** Reads a text PDF into rows of cells, the column names first. `password` opens a locked PDF; it is only passed to the PDF reader. */
 export async function readPdfStatement(bytes: Buffer, password?: string): Promise<{ grid: GridRow[]; headerIndex: number }> {
-  const { getDocumentProxy, extractTextItems } = await import("unpdf");
+  const { getResolvedPDFJS, extractTextItems } = await import("unpdf");
   let pages: TextItem[][];
+  // The loading task is kept so it can be destroyed on every path below. A PDF that fails to open
+  // (a wrong password, a broken file) otherwise stays in memory with its bytes, and unpdf only
+  // closes documents it opened itself. The options are the ones unpdf's getDocumentProxy passes
+  // when pdfjs-dist is not installed: system fonts on, pdf.js defaults for the rest.
+  let task: ReturnType<Awaited<ReturnType<typeof getResolvedPDFJS>>["getDocument"]> | undefined;
   try {
-    const pdf = await getDocumentProxy(new Uint8Array(bytes), password ? { password: password.slice(0, MAX_PDF_PASSWORD) } : undefined);
+    const { getDocument } = await getResolvedPDFJS();
+    task = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true, ...(password ? { password: password.slice(0, MAX_PDF_PASSWORD) } : {}) });
+    const pdf = await task.promise;
     if (pdf.numPages > MAX_PAGES) {
       throw new StatementReadError(`This PDF has ${pdf.numPages} pages. Upload at most ${MAX_PAGES} pages at a time, or download the statement as CSV or Excel.`);
     }
@@ -640,6 +647,9 @@ export async function readPdfStatement(bytes: Buffer, password?: string): Promis
       throw new PdfPasswordError(password && code === 2 ? "wrong" : "missing");
     }
     throw new StatementReadError("This PDF could not be opened. Download the statement again, or as CSV or Excel, and upload that file.");
+  } finally {
+    // The text items are plain objects, so the document is not needed past this point.
+    await task?.destroy().catch(() => {});
   }
 
   const text = pages.flat().map((t) => t.str).join("");

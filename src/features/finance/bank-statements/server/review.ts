@@ -10,7 +10,7 @@ import { OUTSTANDING_EXPR } from "@/features/finance/expenses/payment-status";
 import { addDays, fromDateInput, toDateInput } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
 import { invoiceBalances } from "@/server/finance/summaries";
-import { INCOME_CATEGORIES, type BankLineAction, type IncomeCategory, type ProjectStage } from "@/lib/constants";
+import { INCOME_CATEGORIES, PAYMENT_METHODS, type BankLineAction, type IncomeCategory, type ProjectStage } from "@/lib/constants";
 import type { LineDecision, MatchKind, MatchOption, ReviewLine, StatementLine, StatementPickers } from "../types";
 import { STATEMENT_METHODS } from "../schemas";
 import { analyseNarration, categoryFromWords, containsName, nameKey, nameSimilarity, namesVendor, type NarrationInfo } from "../parse/narration";
@@ -420,8 +420,15 @@ function ownAccountIn(ctx: Context, narration: string): OwnAccount | null {
 
 const cleanNarration = (n: string) => n.replace(/\s+/g, " ").trim().slice(0, 80);
 
+/** The group companies money passes through (the "Biios Startup LLP" payment method): related, not customers or vendors. */
+const GROUP_COMPANIES: string[] = PAYMENT_METHODS.filter((m) => m.value === "biios_startup_llp").map((m) => m.label);
+const groupCompanyIn = (party: string | null | undefined, narration: string) => GROUP_COMPANIES.find((g) => namesVendor(g, `${party ?? ""} ${narration}`)) ?? null;
+
 /** What an unmatched line most likely is, with notes for what the admin should check. */
-function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; notes: string[]; attention: boolean; invoice?: ReviewLine["invoice"]; holdBack?: string } {
+function suggest(
+  line: StatementLine,
+  ctx: Context,
+): { decision: LineDecision; notes: string[]; attention: boolean; invoice?: ReviewLine["invoice"]; holdBack?: string; group?: string | null } {
   const side = sideOf(line);
   const amount = amountOf(line);
   const info = analyseNarration(line.narration, side, { exclude: [COMPANY.name] });
@@ -481,24 +488,35 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
     if (column && "unknown" in column) notes.push(`The file's category "${column.unknown}" is not one of your expense categories, so the suggestion is kept. Change it if needed.`);
     // Remembered parties first, then the vendor's earlier expenses, then the narration's words.
     const fromColumn = column && "value" in column ? allowedCategory(ctx, column.value) : null;
-    const fromRule = allowedCategory(ctx, rule?.category);
+    // Other is where a line nothing recognised goes: a remembered or earlier Other is not a category anyone picked.
+    const picked = (v: string | null | undefined) => (v === "other" ? null : v);
+    const fromRule = allowedCategory(ctx, picked(rule?.category));
     const fromSalary = info.kind === "salary" ? allowedCategory(ctx, "salaries") : null;
-    const fromHistory = allowedCategory(ctx, history?.category);
+    const fromHistory = allowedCategory(ctx, picked(history?.category));
     const fromWords = allowedCategory(ctx, categoryFromWords(line.narration));
     const category = fromColumn ?? fromRule ?? fromSalary ?? fromHistory ?? fromWords ?? allowedCategory(ctx, "other") ?? ctx.pickers.categories[0]?.value;
     if (rule) notes.push(`Remembered from your earlier choice: ${rule.party}${fromRule && !fromColumn ? `, ${ctx.pickers.categories.find((c) => c.value === fromRule)?.label ?? fromRule}` : ""}.`);
     if (fromColumn) notes.push("Category from the file's category column.");
     else if (!fromRule && !fromSalary && fromHistory && history) notes.push(`Category from ${history.count === 1 ? "an earlier expense" : `${history.count} earlier expenses`} with ${history.name}.`);
     else if (!fromRule && !fromSalary && !fromHistory && !fromWords) {
-      notes.push("No remembered party, earlier expense or keyword gives this payment a category, so it is set to Other. Pick the right category.");
+      notes.push(
+        rule || history
+          ? "No category has been picked for this payee yet (only Other), so it is set to Other. Pick the right category."
+          : "No remembered party, earlier expense or keyword gives this payment a category, so it is set to Other. Pick the right category.",
+      );
       attention = true;
     }
     if (!party) {
-      notes.push("The narration has no payee name. Check the vendor.");
+      notes.push(info.handle ? `The narration shows only the UPI handle ${info.handle}, not a name. Check the vendor.` : "The narration has no payee name. Check the vendor.");
       attention = true;
     }
     const owner = party ? ctx.holders.find((h) => h.kind === "owner" && containsName(h.name, line.narration)) : undefined;
     if (owner) notes.push(`Paid to ${owner.name}, an owner. If it was a drawing, choose Owner drawing.`);
+    const group = groupCompanyIn(party, line.narration);
+    if (group) {
+      notes.unshift(`Paid to ${group}, your group company. If it was a loan to them, a repayment or a transfer rather than a cost of this company, choose that instead.`);
+      attention = true;
+    }
     const project = suggestProject(ctx, line, party, rule);
     if (project) notes.push(project.note);
     if (category === "equipment" || ASSET_RE.test(line.narration)) {
@@ -518,10 +536,11 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
       attention = true;
     }
     return {
-      decision: decide("expense", { party: party ?? cleanNarration(line.narration), category, holderId: owner?.id, projectId: project?.projectId, stage: project?.stage }),
+      decision: decide("expense", { party: party ?? info.handle ?? cleanNarration(line.narration), category, holderId: owner?.id, projectId: project?.projectId, stage: project?.stage }),
       notes,
       attention,
       holdBack: recordedElsewhere ? "It may already be recorded as a payment from another account." : undefined,
+      group,
     };
   }
 
@@ -535,7 +554,7 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
     return { decision: decide("capital", { holderId: holder.id, party: holder.name }), notes, attention: true };
   }
   if (info.kind === "loan" && /disb|sanction/i.test(line.narration)) {
-    const lender = info.payee ?? cleanNarration(line.narration);
+    const lender = info.payee ?? info.handle ?? cleanNarration(line.narration);
     notes.push("Looks like a loan paid out to you. Pick the group it belongs to.");
     return { decision: decide("loan_received", { party: lender, loanName: `Loan from ${lender}`.slice(0, 160) }), notes, attention: true };
   }
@@ -553,17 +572,24 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
   const isIncomeCategory = (v: string | null | undefined): v is IncomeCategory => Boolean(v && INCOME_CATEGORIES.some((c) => c.value === v));
   const fromColumn = column && "value" in column && isIncomeCategory(column.value) ? column.value : null;
   const fromRule = isIncomeCategory(rule?.category) ? rule.category : null;
-  const incomeCategory: IncomeCategory = fromColumn ?? fromRule ?? "project_payment";
+  // A payer remembered only under Other was the default for an unknown payer, not a customer someone picked.
+  const unknownPayer = !known && !invoice && (!rule || rule.category === "other");
+  // A payer that is not a known customer is not assumed to pay for a project: its income goes under Other.
+  const incomeCategory: IncomeCategory = fromColumn ?? fromRule ?? (unknownPayer ? "other" : "project_payment");
   if (rule) notes.push(`Remembered from your earlier choice: ${rule.party}.`);
   if (fromColumn) notes.push("Category from the file's category column.");
-  if (!rule && !known && !invoice) {
+  const group = groupCompanyIn(party, line.narration);
+  if (group) {
+    notes.unshift(`From ${group}, your group company. Money between group companies is often a loan, a repayment or a transfer rather than income: if so, choose Loan received or Capital introduced instead.`);
+    attention = true;
+  } else if (unknownPayer) {
     notes.push(
-      "The payer is not a known customer. Choose New income only if this pays for a sale or a service; otherwise choose Capital introduced, Loan received or Transfer between own accounts.",
+      `The payer is not a known customer, so this is income under ${fromColumn || fromRule ? "the category shown" : "Other"}. If it pays for a sale or a service, pick the category; if it is capital, a loan or a transfer from your own account, choose that instead.`,
     );
     attention = true;
   }
   if (!party) {
-    notes.push("The narration has no payer name. Check the client.");
+    notes.push(info.handle ? `The narration shows only the UPI handle ${info.handle}, not a name. Check the client.` : "The narration has no payer name. Check the client.");
     attention = true;
   }
   const projectId = openProject(ctx, rule?.projectId)?.id ?? openProject(ctx, invoice?.project)?.id;
@@ -581,10 +607,11 @@ function suggest(line: StatementLine, ctx: Context): { decision: LineDecision; n
     if (!linkable) attention = true;
   }
   return {
-    decision: decide("income", { party: party ?? cleanNarration(line.narration), incomeCategory, projectId, invoiceId: linkable ? invoice!.id : undefined }),
+    decision: decide("income", { party: party ?? info.handle ?? cleanNarration(line.narration), incomeCategory, projectId, invoiceId: linkable ? invoice!.id : undefined }),
     notes,
     attention,
     invoice: invoice ? { id: invoice.id, number: invoice.number, client: invoice.client, outstanding: invoice.outstanding } : null,
+    group,
   };
 }
 
@@ -866,6 +893,7 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
         notes: [...again, ...notes],
         attention: lineIssues || Boolean(match.otherAccount) || partBill || farPayment || again.length > 0,
         holdBack: line.check === "mismatch" ? "Its amount does not agree with the running balance." : null,
+        group: s.group ?? null,
       };
     }
     // An unpaid bill for the same amount whose vendor the narration does not name: offered, not picked.
@@ -880,10 +908,11 @@ export async function reviewLines(accountId: string, lines: StatementLine[], opt
       suggestion: s.decision,
       notes: [...again, ...early, ...billNote, ...s.notes],
       attention: lineIssues || s.attention || again.length > 0 || early.length > 0 || billNote.length > 0,
-      // "Add all lines" leaves these for a person: adding them as new could record the same money twice.
+      // These start unticked, for a person to check: adding them as new could record the same money twice.
       holdBack: billNote.length
         ? "An unpaid bill has the same amount."
         : (s.holdBack ?? (line.check === "mismatch" ? "Its amount does not agree with the running balance." : null)),
+      group: s.group ?? null,
     };
   });
   return { lines: out, pickers: ctx.pickers };

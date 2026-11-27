@@ -22,6 +22,11 @@ export type NarrationInfo = {
   kind: LineKind;
   /** The UPI handle (name@bank), when there is one: it helps match the payee to a known name. */
   vpa: string | null;
+  /**
+   * When a UPI narration names no one: what it shows in the payee's place instead, as printed (a UPI
+   * handle such as "ombk.aahh47175" or "MH12VW5243"). A short, stable label for the vendor, never a guess.
+   */
+  handle: string | null;
 };
 
 const CHANNEL_RES: [RegExp, Channel][] = [
@@ -60,9 +65,12 @@ const NOISE = new Set(
   ).split(" "),
 );
 
-/** Bank short codes that appear in narrations as the payee's bank. */
+/** Bank short codes (the first four letters of an IFSC) that appear in narrations as the payee's bank. */
 const BANK_CODES = new Set(
-  "sbin hdfc icic utib kkbk yesb idfb punb barb cnrb ubin ioba bkid indb fdrl mahb psib ucba cbin idib kvbl tmbl sibl rbl rbln ausf esfb jsfb pytm airp fino".split(" "),
+  (
+    "sbin hdfc icic utib kkbk yesb idfb punb barb cnrb ubin ioba bkid indb fdrl mahb psib ucba cbin idib kvbl tmbl sibl rbl rbln ausf esfb jsfb pytm airp fino " +
+    "ppiw srcb jaka dlxb csbk kari aubl ujvn nsdl ipos jiop cosb svcb abhy ntbl hsbc scbl dbss deut citi andb synb vijb orbc lavb dcbl bdbl nkgs tjsb utbi"
+  ).split(" "),
 );
 
 const CHARGES_RE =
@@ -136,7 +144,11 @@ export function analyseNarration(narration: string, side: "dr" | "cr", options: 
     .split(/[\/|:*]+|\s-\s?|-(?=[A-Za-z0-9])|(?<=[A-Za-z0-9])-|\s{2,}|,/)
     .map((p) => p.trim())
     .filter(Boolean);
-  const names = parts.map(nameLike).filter((p): p is string => Boolean(p));
+  // Kotak and others print the payee's bank right before the 12-digit UPI reference
+  // ("UPI/Siddh Sagar Bh/PPIW/632516679288/enjoy"): four capitals there are a bank code, not a name.
+  // (After the reference comes the payee in SBI's order, "UPI/DR/412345678901/AMIT/SBIN", so only before.)
+  const bankSlot = (i: number) => channel === "upi" && /^[A-Z]{4}$/.test(parts[i]!) && /^\d{12}$/.test(parts[i + 1] ?? "");
+  const names = parts.map((p, i) => (bankSlot(i) ? null : nameLike(p))).filter((p): p is string => Boolean(p));
 
   let payee: string | null = null;
   // Cash withdrawals, bank charges and interest have no payee: the bank is the other side.
@@ -160,7 +172,25 @@ export function analyseNarration(narration: string, side: "dr" | "cr", options: 
   }
   if (payee && payee.length > 120) payee = payee.slice(0, 120);
 
-  return { channel, method: METHOD_OF[channel], payee: payee ? titleCase(payee) : null, kind, vpa };
+  // No name: a UPI line still shows who was paid, as a handle ("ombk.aahh47175", "MH12VW5243").
+  let handle: string | null = null;
+  if (!payee && channel === "upi" && kind !== "atm" && kind !== "charges" && kind !== "interest") {
+    handle =
+      vpa ??
+      parts.find(
+        (p, i) =>
+          !bankSlot(i) &&
+          /^[a-z0-9][a-z0-9._-]{3,39}$/i.test(p) &&
+          /[a-z]/i.test(p) &&
+          /\d/.test(p) &&
+          !/^[a-z]{4}0[a-z0-9]{6}$/i.test(p) &&
+          !/x{3,}|\*{3,}/i.test(p) &&
+          !NOISE.has(p.toLowerCase()),
+      ) ??
+      null;
+  }
+
+  return { channel, method: METHOD_OF[channel], payee: payee ? titleCase(payee) : null, kind, vpa, handle };
 }
 
 /** Lower-case letters and digits only, for comparing names. */

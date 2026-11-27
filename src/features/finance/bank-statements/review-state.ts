@@ -89,7 +89,7 @@ export const REVIEW_FILTERS: { value: ReviewFilter; label: string }[] = [
   { value: "all", label: "All lines" },
   { value: "new", label: "New" },
   { value: "matched", label: "Already recorded" },
-  { value: "attention", label: "Needs your choice" },
+  { value: "attention", label: "To check" },
 ];
 
 /** Where a line's amount goes when it is added, in plain words, for the preview and the confirm. */

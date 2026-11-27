@@ -118,9 +118,12 @@ function Row({
           {line.category ? <span className="text-xs text-muted-foreground [overflow-wrap:anywhere]">Category column: {line.category}</span> : null}
           {line.check !== "ok" ? <CheckBadge check={line.check} /> : null}
           {warn ? (
-            <span className="inline-flex items-center gap-1 text-xs text-warning">
-              <AlertTriangle className="size-3" aria-hidden />
-              {problem ?? line.notes[0] ?? line.issues[0] ?? "Check this line"}
+            // A full-width row of its own that wraps, so a long note never runs under the amount columns.
+            <span className="flex min-w-0 basis-full items-start gap-1 text-xs text-warning">
+              <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />
+              <span className="line-clamp-3 min-w-0 [overflow-wrap:anywhere]" title={problem ?? line.notes[0] ?? line.issues[0] ?? undefined}>
+                {problem ?? line.notes[0] ?? line.issues[0] ?? "Check this line"}
+              </span>
             </span>
           ) : null}
         </div>

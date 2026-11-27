@@ -9,6 +9,7 @@ export function StatementPreview({ lines, total, mapping }: { lines: StatementLi
     return <p className="text-sm text-warning">No transactions are read with these columns yet. Check the row with the column names and what each column holds.</p>;
   }
   const vendor = mapping.includes("vendor");
+  const reference = mapping.includes("reference");
   const category = mapping.includes("category");
   return (
     <div className="space-y-1.5">
@@ -22,6 +23,7 @@ export function StatementPreview({ lines, total, mapping }: { lines: StatementLi
               <TableHead className="w-16">Row</TableHead>
               <TableHead className="w-24">Date</TableHead>
               <TableHead>Narration</TableHead>
+              {reference ? <TableHead className="w-36">Ref no</TableHead> : null}
               {vendor ? <TableHead className="w-40">Vendor</TableHead> : null}
               {category ? <TableHead className="w-32">Category</TableHead> : null}
               <TableHead className="w-28 text-right">Withdrawal</TableHead>
@@ -39,6 +41,9 @@ export function StatementPreview({ lines, total, mapping }: { lines: StatementLi
                     {l.narration || "No narration"}
                   </p>
                 </TableCell>
+                {reference ? (
+                  <TableCell className="font-mono text-xs [overflow-wrap:anywhere]">{l.reference || <span className="text-muted-foreground">-</span>}</TableCell>
+                ) : null}
                 {vendor ? <TableCell className="[overflow-wrap:anywhere]">{l.vendor ?? <span className="text-muted-foreground">-</span>}</TableCell> : null}
                 {category ? <TableCell className="[overflow-wrap:anywhere]">{l.category ?? <span className="text-muted-foreground">-</span>}</TableCell> : null}
                 <TableCell className="text-right">{l.withdrawal ? <Money value={l.withdrawal} exact className="text-danger" /> : null}</TableCell>
